@@ -640,33 +640,277 @@ function App() {
 
   // --- Social Sharing Logic ---
 
+
+  // --- CENTRALIZED TAG GENERATOR HELPER ---
+  const getSpecificTags = (place) => {
+    const tags = new Set();
+    const cat = (place.category || "").toLowerCase();
+    const story = (place.ai_article?.story || place.ai_article?.description || "").toLowerCase();
+
+    // Check Scenery & Category
+    if (cat === "waterfall") tags.add("#WaterfallHunting").add("#NaturePhotography");
+    if (cat === "mountain" || cat === "trail" || cat === "viewpoint") tags.add("#LandscapePhotography").add("#Adventure");
+    if (cat === "beach") tags.add("#Beach").add("#Coastal");
+    if (cat === "reserved forest" || cat === "park") tags.add("#NatureSeekers").add("#Wildlife");
+
+    // Check Content, Gear, & Vibe
+    if (story.includes("drone") || story.includes("aerial")) tags.add("#DronePhotography").add("#AerialPhotography");
+    if (story.includes("iphone") || story.includes("mobile")) tags.add("#ShotOniPhone").add("#MobilePhotography");
+    if (story.includes("ride") || story.includes("road trip") || story.includes("motorcycle")) tags.add("#RoadTrip").add("#MotorcycleDiaries");
+    if (story.includes("camp") || story.includes("tent") || story.includes("trek")) tags.add("#Camping").add("#Outdoors");
+
+    // Safety fallback if no specific tags were triggered
+    if (tags.size === 0) {
+      tags.add("#LandscapePhotography").add("#Explore");
+    }
+
+    return Array.from(tags).join(" ");
+  };
+
+
+  // --- REVISED FUNCTIONS ---
+
+  const handleMetaShare = async (p, platform, accessToken) => {
+    if (!p) return;
+
+    // 1. Build context-aware metadata targets
+    const locationName = p.place_name || "Island Vignette";
+    const shareLink = `https://my-journal-viewer.vercel.app/?place=${encodeURIComponent(locationName)}`;
+
+    // Dynamic Hashtags Conversion
+    const coreTags = "#MyJournal #SriLanka #TravelSriLanka #TravelPhotography";
+    const dynamicHashtags = `${coreTags} ${getSpecificTags(p)}`.trim();
+
+    // 2. Extract and clean the primary text snippet from the journal story
+    const storyText = p.ai_article?.story || p.ai_article?.description || "";
+    const cleanText = storyText.replace(/[#*]/g, '').trim();
+    let shortDesc = cleanText;
+
+    // 3. Smart grammatical truncation specifically for Threads (500-character ceiling)
+    if (platform === 'threads') {
+      const fixedCost = locationName.length + 4 + 25 + shareLink.length + 2 + dynamicHashtags.length;
+      const maxDescBudget = 500 - fixedCost - 5; // Safe buffer
+
+      const sentences = cleanText.match(/[^.!?]+[.!?]+/g) || [cleanText];
+      let tempDesc = "";
+
+      for (let sentence of sentences) {
+        const candidate = (tempDesc + " " + sentence.trim()).trim();
+        if (candidate.length <= maxDescBudget) {
+          tempDesc = candidate;
+        } else {
+          break;
+        }
+      }
+
+      if (!tempDesc && cleanText) {
+        tempDesc = cleanText.substring(0, maxDescBudget).trim();
+        const lastSpace = tempDesc.lastIndexOf(" ");
+        if (lastSpace > 0) tempDesc = tempDesc.substring(0, lastSpace);
+        tempDesc += "...";
+      }
+      shortDesc = tempDesc;
+    }
+
+    // 4. Structure the clean, scannable final copy
+    const socialText = `📍 ${locationName}\n\n${shortDesc}\n\n🔗 Explore more entries:\n${shareLink}\n\n${dynamicHashtags}`;
+
+    // Notify user that the publishing sync has started
+    if (typeof setToast === 'function') {
+      const platformName = platform.charAt(0).toUpperCase() + platform.slice(1);
+      setToast({ show: true, msg: `Publishing to ${platformName}` });
+    }
+
+    try {
+      // 5. Dispatch the payload bundle to your backend api endpoint route
+      const response = await fetch('/api/share-meta', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          platform: platform,
+          text: socialText,
+          imageUrl: p.cover_photo_url,
+          link: shareLink,
+          ...(platform === 'threads'
+            ? { threadsAccessToken: accessToken }
+            : { fbAccessToken: accessToken }
+          )
+        }),
+      });
+
+      if (response.ok) {
+        const platformName = platform.charAt(0).toUpperCase() + platform.slice(1);
+        setToast?.({ show: true, msg: `Live on ${platformName}!` });
+        setTimeout(() => setToast?.({ show: false, msg: "" }), 3000);
+      } else {
+        const errData = await response.json();
+        throw new Error(errData.error || `Failed to post to ${platform}`);
+      }
+    } catch (err) {
+      console.error(`${platform} Integration Error:`, err);
+
+      const rawError = err.message || "";
+      let cleanMessage = `Error: ${rawError}`;
+
+      if (
+        rawError.includes("access token") ||
+        rawError.includes("session") ||
+        rawError.includes("logged out") ||
+        rawError.includes("190")
+      ) {
+        cleanMessage = "Session expired! Please re-authenticate your 60-day Instagram/Threads token.";
+      }
+
+      setToast?.({ show: true, msg: cleanMessage });
+      setTimeout(() => setToast?.({ show: false, msg: "" }), 6000);
+    }
+  };
+
+
+  const handleTwitterPush = async (p) => {
+    if (!p) return;
+
+    // 1. CONTENT SETUP
+    const locationName = p.place_name || "Island Vignette";
+    const shareLink = `https://my-journal-viewer.vercel.app/?place=${encodeURIComponent(locationName)}`;
+
+    // Dynamic Hashtags Conversion
+    const coreTags = "#MyJournal #SriLanka #TravelSriLanka #TravelPhotography";
+    const dynamicHashtags = `${coreTags} ${getSpecificTags(p)}`.trim();
+
+    const storyText = p.ai_article?.story || p.ai_article?.description || "";
+    const cleanText = storyText.replace(/[#*]/g, '').trim();
+
+    // --- X (TWITTER) CHARACTER LIMIT HANDLING ---
+    // X treats links natively as 23 characters
+    const fixedCost = locationName.length + 4 + 11 + 23 + 4 + dynamicHashtags.length;
+    const maxDescBudget = 280 - fixedCost - 5; // Standard strict ceiling limits
+
+    const sentences = cleanText.match(/[^.!?]+[.!?]+/g) || [cleanText];
+    let shortDesc = "";
+
+    for (let sentence of sentences) {
+      const candidate = (shortDesc + " " + sentence.trim()).trim();
+      if (candidate.length <= maxDescBudget) {
+        shortDesc = candidate;
+      } else {
+        break;
+      }
+    }
+
+    if (!shortDesc && cleanText) {
+      shortDesc = cleanText.substring(0, maxDescBudget).trim();
+      const lastSpace = shortDesc.lastIndexOf(" ");
+      if (lastSpace > 0) shortDesc = shortDesc.substring(0, lastSpace);
+      shortDesc += "...";
+    }
+
+    const tweetText = `${locationName}\n\n${shortDesc}\n\n📍Location: ${shareLink}\n\n${dynamicHashtags}`;
+
+    // 2. COPY TO CLIPBOARD & UI FEEDBACK
+    try {
+      await navigator.clipboard.writeText(tweetText);
+      if (typeof setToast === 'function') {
+        setToast({ show: true, msg: "Caption copied! Opening X..." });
+        setTimeout(() => setToast?.({ show: false, msg: "" }), 3000);
+      }
+    } catch (err) {
+      console.error("Clipboard Error:", err);
+      if (typeof setToast === 'function') {
+        setToast({ show: true, msg: "Opening X composer..." });
+        setTimeout(() => setToast?.({ show: false, msg: "" }), 3000);
+      }
+    }
+
+    // 3. LAUNCH X COMPOSER
+    const twitterIntentUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(tweetText)}`;
+    window.open(twitterIntentUrl, '_blank', 'noopener,noreferrer');
+  };
+
+
+  const pinIndividualImage = (imageUrl, index, p) => {
+    if (!p) return;
+
+    const locationName = p.place_name || "Island Vignette";
+    const baseUrl = "https://my-journal-view.vercel.app";
+    const shareUrl = `${baseUrl}/?place=${encodeURIComponent(locationName)}&utm_source=pinterest`;
+
+    // Dynamic Hashtags Conversion
+    const coreTags = "#MyJournal #SriLanka #TravelSriLanka #TravelPhotography";
+    const dynamicHashtags = `${coreTags} ${getSpecificTags(p)}`.trim();
+
+    // --- SMART TEXT PARSING DESCRIPTION LOGIC ---
+    let shortDesc = "";
+    const fullStory = p.ai_article?.story || p.ai_article?.description;
+
+    if (fullStory) {
+      const cleanText = fullStory.replace(/[#*]/g, '').trim();
+      const sentences = cleanText.match(/[^.!?]+[.!?]+/g) || [cleanText];
+
+      // Take the first clean sentence, capped intelligently around 150 chars max
+      shortDesc = sentences[0].trim();
+      if (shortDesc.length > 150) {
+        shortDesc = shortDesc.substring(0, 147).trim();
+        const lastSpace = shortDesc.lastIndexOf(" ");
+        if (lastSpace > 0) shortDesc = shortDesc.substring(0, lastSpace);
+        shortDesc += "...";
+      }
+    } else {
+      const fallbacks = [
+        `Breathtaking views at ${locationName}. A stunning escape in Sri Lanka.`,
+        `Capturing the raw beauty of ${locationName}. Island secrets revealed.`,
+        `Serene vibes and hidden landscapes. Discovering ${locationName}.`,
+        `The unique soul of ${locationName}, Sri Lanka. A visual journal.`
+      ];
+      shortDesc = fallbacks[index % fallbacks.length];
+    }
+
+    const finalDescription = `${shortDesc}\n\n📍Location: ${locationName}\n© Hasitha Gunasekera\n\n${dynamicHashtags}`;
+
+    const pinterestUrl = `https://www.pinterest.com/pin/create/button/?url=${encodeURIComponent(shareUrl)}&media=${encodeURIComponent(imageUrl)}&description=${encodeURIComponent(finalDescription)}`;
+
+    window.open(pinterestUrl, '_blank', 'width=750,height=600');
+    if (typeof setActivePinHubId === 'function') setActivePinHubId(null);
+  };
+
+
   const handleFlipboardShare = async (p) => {
     if (!p) return;
 
     const locationName = p.place_name || "Island Vignette";
     const shareLink = `https://my-journal-view.vercel.app/?place=${encodeURIComponent(locationName)}`;
 
-    // --- 1. FIRST PARAGRAPH EXTRACTION ---
+    // Dynamic Hashtags Conversion
+    const coreTags = "#MyJournal #SriLanka #TravelSriLanka #TravelPhotography";
+    const dynamicHashtags = `${coreTags} ${getSpecificTags(p)}`.trim();
+
+    // --- SMART SENTENCE SENTINEL PARSING ---
     let shortDesc = "";
     const storyText = p.ai_article?.story || p.ai_article?.description || "";
 
     if (storyText) {
-      // Split the text by double newlines to isolate the first paragraph, then clean markdown
-      shortDesc = storyText.split(/\n\s*\n/)[0].replace(/[#*]/g, '').trim();
+      const cleanText = storyText.replace(/[#*]/g, '').trim();
+      const sentences = cleanText.match(/[^.!?]+[.!?]+/g) || [cleanText];
+
+      // Assemble smart short description to feed Flipboard framework rules gracefully
+      for (let sentence of sentences) {
+        const candidate = (shortDesc + " " + sentence.trim()).trim();
+        if (candidate.length <= 300) { // Standard safe text blurb cap for Flipboard preview card layouts
+          shortDesc = candidate;
+        } else {
+          break;
+        }
+      }
     } else {
-      // Fallback if AI article hasn't been generated yet
       shortDesc = `Exploring the raw beauty of ${locationName}, Sri Lanka.`;
     }
 
-    // --- 2. THE TEXT PACKAGE (FOR CLIPBOARD) ---
-    const hashtags = "#MyJournal #SriLanka #VisitSriLanka #TravelSriLanka #SriLankaDiaries #TravelPhotography #NatureSeekers #DronePhotography #ShotOniPhone";
-    // Formatted cleanly with line breaks
-    const fullTextToCopy = `${locationName}\n\n${shortDesc}\n\n📍Location: ${shareLink}\n\n${hashtags}`;
+    // --- THE TEXT PACKAGE (FOR CLIPBOARD) ---
+    const fullTextToCopy = `${locationName}\n\n${shortDesc}\n\n📍Location: ${shareLink}\n\n${dynamicHashtags}`;
 
-    // --- 3. EXECUTE COPY TO CLIPBOARD ---
+    // --- EXECUTE COPY TO CLIPBOARD ---
     try {
       await navigator.clipboard.writeText(fullTextToCopy);
-      // Visual feedback using your app's toast system
       if (typeof setToast === 'function') {
         setToast({ show: true, msg: "First paragraph copied! Paste in Flipboard box." });
         setTimeout(() => setToast({ show: false, msg: "" }), 3000);
@@ -677,7 +921,7 @@ function App() {
       setTimeout(() => setToast({ show: false, msg: "" }), 3000);
     }
 
-    // --- 4. OPEN FLIPBOARD ---
+    // --- OPEN FLIPBOARD ---
     const targetUrl = p.cover_photo_url || shareLink;
 
     const flipboardUrl = `https://share.flipboard.com/bookmarklet/popout?v=2` +
@@ -690,342 +934,6 @@ function App() {
       'width=700,height=680,scrollbars=yes,resizable=yes'
     );
   };
-
-  const pinIndividualImage = (imageUrl, index, p) => {
-    if (!p) return;
-
-    const locationName = p.place_name || "Island Vignette";
-    const baseUrl = "https://my-journal-view.vercel.app";
-    const shareUrl = `${baseUrl}/?place=${encodeURIComponent(locationName)}&utm_source=pinterest`;
-
-    // --- TIDY DESCRIPTION LOGIC (Targeting ~20-30 words) ---
-    let shortDesc = "";
-    const fullStory = p.ai_article?.story || p.ai_article?.description;
-
-    if (fullStory) {
-      // Take ONLY the first sentence for maximum tidiness
-      shortDesc = fullStory.split('.')[0].trim() + '.';
-      // Safety cap to prevent long run-on sentences from exceeding 25 words
-      if (shortDesc.length > 150) shortDesc = shortDesc.substring(0, 147) + "...";
-    } else {
-      // Punchy Fallbacks
-      const fallbacks = [
-        `Breathtaking views at ${locationName}. A stunning escape in Sri Lanka.`,
-        `Capturing the raw beauty of ${locationName}. Island secrets revealed.`,
-        `Serene vibes and hidden landscapes. Discovering ${locationName}.`,
-        `The unique soul of ${locationName}, Sri Lanka. A visual journal.`
-      ];
-      shortDesc = fallbacks[index % fallbacks.length];
-    }
-
-    const hashtagString = "#MyJournal #SriLanka #VisitSriLanka #TravelSriLanka #SriLankaDiaries #TravelPhotography #NatureSeekers #DronePhotography #ShotOniPhone";
-
-    const finalDescription = `${shortDesc}\n\n📍Location: ${locationName}\n© Hasitha Gunasekera\n\n${hashtagString}`;
-
-    const pinterestUrl = `https://www.pinterest.com/pin/create/button/?url=${encodeURIComponent(shareUrl)}&media=${encodeURIComponent(imageUrl)}&description=${encodeURIComponent(finalDescription)}`;
-
-    window.open(pinterestUrl, '_blank', 'width=750,height=600');
-    if (typeof setActivePinHubId === 'function') setActivePinHubId(null);
-  };
-
-  const handleMastodonShare = async (p) => {
-    if (!p) return;
-
-    // 1. BASE CONTENT SETUP
-    const locationName = p.place_name || "Island Vignette";
-    const shareLink = `https://my-journal-view.vercel.app/?place=${encodeURIComponent(locationName)}`;
-
-    // --- 2. SMART DYNAMIC HASHTAG LOGIC ---
-    // High-traffic core tags used on every post
-    const coreTags = "#MyJournal #SriLanka #TravelSriLanka #TravelPhotography";
-    
-    // Function to dynamically build contextual tags
-    const getSpecificTags = (place) => {
-        const tags = new Set();
-        const cat = (place.category || "").toLowerCase();
-        const story = (place.ai_article?.story || place.ai_article?.description || "").toLowerCase();
-
-        // Check Scenery & Category
-        if (cat === "waterfall") tags.add("#WaterfallHunting").add("#NaturePhotography");
-        if (cat === "mountain" || cat === "trail" || cat === "viewpoint") tags.add("#LandscapePhotography").add("#Adventure");
-        if (cat === "beach") tags.add("#Beach").add("#Coastal");
-        if (cat === "reserved forest" || cat === "park") tags.add("#NatureSeekers").add("#Wildlife");
-
-        // Check Content, Gear, & Vibe
-        if (story.includes("drone") || story.includes("aerial")) tags.add("#DronePhotography").add("#AerialPhotography");
-        if (story.includes("iphone") || story.includes("mobile")) tags.add("#ShotOniPhone").add("#MobilePhotography");
-        if (story.includes("ride") || story.includes("road trip") || story.includes("motorcycle")) tags.add("#RoadTrip").add("#MotorcycleDiaries");
-        if (story.includes("camp") || story.includes("tent") || story.includes("trek")) tags.add("#Camping").add("#Outdoors");
-
-        // Safety fallback if no specific tags were triggered
-        if (tags.size === 0) {
-            tags.add("#LandscapePhotography").add("#Explore");
-        }
-
-        return Array.from(tags).join(" ");
-    };
-
-    // Combine and format the final hashtag payload
-    const dynamicHashtags = `${coreTags} ${getSpecificTags(p)}`.trim();
-
-    // Clean up text by removing markdown artifacts
-    const storyText = p.ai_article?.story || p.ai_article?.description || "";
-    const cleanText = storyText.replace(/[#*]/g, '').trim();
-
-    // 3. DYNAMIC CHARACTER BUDGETING (Mastodon counts URLs as exactly 23 characters)
-    // Budgeting now calculates against the length of the dynamicHashtags string
-    const fixedCost = locationName.length + 4 + 7 + 23 + 4 + dynamicHashtags.length; 
-    const maxDescBudget = 500 - fixedCost - 5; // Strict limit with a 5-character safety buffer
-
-    // 4. SMART TEXT PARSING (Ensures grammatically complete sentences)
-    const sentences = cleanText.match(/[^.!?]+[.!?]+/g) || [cleanText];
-    let shortDesc = "";
-
-    for (let sentence of sentences) {
-      const candidate = (shortDesc + " " + sentence.trim()).trim();
-      if (candidate.length <= maxDescBudget) {
-        shortDesc = candidate;
-      } else {
-        break; // Stop adding text before it cuts off grammatically
-      }
-    }
-
-    // Fallback protection in case a single starting sentence is longer than the budget
-    if (!shortDesc && cleanText) {
-      shortDesc = cleanText.substring(0, maxDescBudget).trim();
-      const lastSpace = shortDesc.lastIndexOf(" ");
-      if (lastSpace > 0) shortDesc = shortDesc.substring(0, lastSpace);
-      shortDesc += "...";
-    }
-
-    // 5. CONSTRUCT THE COMPLIANT TOOT
-    const tootText = `${locationName}\n\n${shortDesc}\n\n 📍Location: ${shareLink}\n\n${dynamicHashtags}`;
-
-    // 6. CALL PROXY API
-    try {
-      const response = await fetch('/api/share-mastodon', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tootText,
-          coverImageUrl: p.cover_photo_url,
-          locationName
-        }),
-      });
-
-      if (response.ok) {
-        setToast?.({ show: true, msg: "Shared to Mastodon!" });
-        setTimeout(() => setToast?.({ show: false, msg: "" }), 3000);
-      }
-    } catch (err) {
-      console.error("Mastodon Error:", err);
-      setToast?.({ show: true, msg: "Mastodon Error" });
-      setTimeout(() => setToast?.({ show: false, msg: "" }), 3000);
-    }
-};
-
-const handleMetaShare = async (p, platform, accessToken) => {
-  if (!p) return;
-
-  // 1. Build context-aware metadata targets
-  const locationName = p.place_name || "Island Vignette";
-  const shareLink = `https://my-journal-viewer.vercel.app/?place=${encodeURIComponent(locationName)}`;
-  const hashtags = "#MyJournal #SriLanka #VisitSriLanka #TravelSriLanka #SriLankaDiaries #WaterfallHunting #Camping #DronePhotography #ShotOniPhone #TravelPhotography #NatureSeekers";
-
-  // 2. Extract and clean the primary text snippet from the journal story
-  const storyText = p.ai_article?.story || p.ai_article?.description || "";
-  let shortDesc = storyText ? storyText.split(/\n\s*\n/)[0].replace(/[#*]/g, '').trim() : "";
-
-  // 3. Smart grammatical truncation specifically for Threads (500-character ceiling)
-  if (platform === 'threads') {
-    const baseTemplate = `📍 ${locationName}\n\n\n\n🔗 Explore more entries:\n${shareLink}\n\n${hashtags}`;
-    const maxDescLength = 500 - baseTemplate.length;
-
-    if (shortDesc.length > maxDescLength) {
-      const candidateZone = shortDesc.substring(0, maxDescLength);
-      
-      // Find the absolute last complete sentence marker (. ! ?) within the safe ceiling limits
-      const lastSentenceEnd = Math.max(
-        candidateZone.lastIndexOf('.'),
-        candidateZone.lastIndexOf('!'),
-        candidateZone.lastIndexOf('?')
-      );
-
-      // If a full sentence ends within the zone, trim cleanly right there
-      if (lastSentenceEnd > 30) { 
-        shortDesc = candidateZone.substring(0, lastSentenceEnd + 1);
-      } else {
-        // Fallback: If no sentence end is found, break at the last full word instead of mid-word
-        const lastSpace = candidateZone.lastIndexOf(' ');
-        shortDesc = lastSpace > 0 
-          ? candidateZone.substring(0, lastSpace).replace(/[,;:]$/, '') + "..." 
-          : candidateZone.substring(0, maxDescLength - 3) + "...";
-      }
-    }
-  }
-
-  // 4. Structure the clean, scannable final copy
-  const socialText = `📍 ${locationName}\n\n${shortDesc}\n\n🔗 Explore more entries:\n${shareLink}\n\n${hashtags}`;
-
-  // Notify user that the publishing sync has started
-  if (typeof setToast === 'function') {
-    const platformName = platform.charAt(0).toUpperCase() + platform.slice(1);
-    setToast({ show: true, msg: `Publishing to ${platformName}` });
-  }
-
-  try {
-    // 5. Dispatch the payload bundle to your backend api endpoint route
-    const response = await fetch('/api/share-meta', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        platform: platform,
-        text: socialText,
-        imageUrl: p.cover_photo_url,
-        link: shareLink,
-        // 💡 FIXED: Dynamically pipes your 194-character Instagram user token 
-        // to fbAccessToken to exactly match what the serverless file looks for.
-        ...(platform === 'threads'
-          ? { threadsAccessToken: accessToken }
-          : { fbAccessToken: accessToken }
-        )
-      }),
-    });
-
-    if (response.ok) {
-      const platformName = platform.charAt(0).toUpperCase() + platform.slice(1);
-      setToast?.({ show: true, msg: `Live on ${platformName}!` });
-      setTimeout(() => setToast?.({ show: false, msg: "" }), 3000);
-    } else {
-      const errData = await response.json();
-      throw new Error(errData.error || `Failed to post to ${platform}`);
-    }
-  } catch (err) {
-    console.error(`${platform} Integration Error:`, err);
-    
-    // 💡 COGNIZANT SYSTEM FIX: Catch expired or unauthenticated session drops elegantly
-    const rawError = err.message || "";
-    let cleanMessage = `Error: ${rawError}`;
-
-    if (
-      rawError.includes("access token") || 
-      rawError.includes("session") || 
-      rawError.includes("logged out") ||
-      rawError.includes("190")
-    ) {
-      cleanMessage = "Session expired! Please re-authenticate your 60-day Instagram/Threads token.";
-    }
-
-    setToast?.({ show: true, msg: cleanMessage });
-    setTimeout(() => setToast?.({ show: false, msg: "" }), 6000);
-  }
-};
-
-
-  {/*
-
-  *** Automated Twitter sharing is currently disabled due to API access issues. 
-  The function below is a placeholder for when you have API access sorted out. 
-  For now, the app uses the standard Twitter Web Intent which opens a pre-filled 
-  tweet in the user's browser, allowing them to share manually without needing API 
-  credentials.
-
-  const handleTwitterPush = async (p) => {
-    if (!p) return;
-
-    const locationName = p.place_name || "Island Vignette";
-    const shareLink = `https://my-journal-view.vercel.app/?place=${encodeURIComponent(locationName)}`;
-
-    // 1. Extract first paragraph for the tweet body
-    const storyText = p.ai_article?.story || p.ai_article?.description || "";
-    let shortDesc = storyText ? storyText.split(/\n\s*\n/)[0].replace(/[#*]/g, '').trim() : "";
-
-    // 2. Safety truncation for X's 280-character limit
-    // We leave room for the title, link, and hashtags.
-    if (shortDesc.length > 180) {
-      shortDesc = shortDesc.substring(0, 177) + "...";
-    }
-
-    // 3. UI Feedback
-    if (typeof setToast === 'function') {
-      setToast({ show: true, msg: "Pushing to X..." });
-    }
-
-    try {
-      // 4. Execute Backend Proxy Call
-      const response = await fetch('/api/share-twitter', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          text: `${locationName}\n\n${shortDesc}`,
-          link: shareLink
-        }),
-      });
-
-      const result = await response.json();
-
-      if (response.ok) {
-        setToast?.({ show: true, msg: "Live on X!" });
-      } else {
-        throw new Error(result.error || "Twitter API Failure");
-      }
-    } catch (err) {
-      console.error("X Push Error:", err);
-      setToast?.({ show: true, msg: `X Push Failed: ${err.message}` });
-    } finally {
-      // Auto-clear toast after 3 seconds
-      setTimeout(() => setToast?.({ show: false, msg: "" }), 3000);
-    }
-  };
-  
-*/}
-
-  const handleTwitterPush = async (p) => {
-    if (!p) return;
-
-    // 1. CONTENT SETUP
-    const locationName = p.place_name || "Island Vignette";
-    const shareLink = `https://my-journal-viewer.vercel.app/?place=${encodeURIComponent(locationName)}`;
-    const hashtags = "#MyJournal #SriLanka #Travel";
-
-    // --- EXTRACT FIRST PARAGRAPH (Consistent with Mastodon/Flipboard logic) ---
-    const storyText = p.ai_article?.story || p.ai_article?.description || "";
-    let shortDesc = storyText ? storyText.split(/\n\s*\n/)[0].replace(/[#*]/g, '').trim() : "";
-
-    // --- X (TWITTER) CHARACTER LIMIT HANDLING ---
-    // We target ~160 chars for description to leave room for Title, Link, and Hashtags
-    const targetLimit = 160;
-    if (shortDesc.length > targetLimit) {
-      let tempDesc = shortDesc.substring(0, targetLimit);
-      const lastPeriod = tempDesc.lastIndexOf(".");
-      // Ensure we don't cut in the middle of a short sentence
-      shortDesc = (lastPeriod > 60) ? tempDesc.substring(0, lastPeriod + 1) : tempDesc + "...";
-    }
-
-    const tweetText = `${locationName}\n\n${shortDesc}\n\n📍Location: ${shareLink}\n\n${hashtags}`;
-
-    // 2. COPY TO CLIPBOARD & UI FEEDBACK
-    try {
-      await navigator.clipboard.writeText(tweetText);
-      if (typeof setToast === 'function') {
-        setToast({ show: true, msg: "Caption copied! Opening X..." });
-        setTimeout(() => setToast?.({ show: false, msg: "" }), 3000);
-      }
-    } catch (err) {
-      console.error("Clipboard Error:", err);
-      // Fallback toast if clipboard permissions fail
-      if (typeof setToast === 'function') {
-        setToast({ show: true, msg: "Opening X composer..." });
-        setTimeout(() => setToast?.({ show: false, msg: "" }), 3000);
-      }
-    }
-
-    // 3. LAUNCH X COMPOSER (INTENT MODE)
-    // Opens a new tab with the text pre-loaded. The user can then paste their image manually.
-    const twitterIntentUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(tweetText)}`;
-    window.open(twitterIntentUrl, '_blank', 'noopener,noreferrer');
-  };
-
 
   const triggerToast = (msg) => {
     setToast({ show: true, msg });
