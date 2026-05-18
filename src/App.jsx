@@ -735,18 +735,49 @@ function App() {
     const locationName = p.place_name || "Island Vignette";
     const shareLink = `https://my-journal-view.vercel.app/?place=${encodeURIComponent(locationName)}`;
 
-    // FIXED: Swapped low-traffic tags for high-engagement Mastodon tags with proper spacing and CamelCase
-    const hashtags = "#MyJournal #SriLanka #TravelSriLanka #TravelPhotography #LandscapePhotography #DronePhotography #ShotOniPhone";
+    // --- 2. SMART DYNAMIC HASHTAG LOGIC ---
+    // High-traffic core tags used on every post
+    const coreTags = "#MyJournal #SriLanka #TravelSriLanka #TravelPhotography";
+    
+    // Function to dynamically build contextual tags
+    const getSpecificTags = (place) => {
+        const tags = new Set();
+        const cat = (place.category || "").toLowerCase();
+        const story = (place.ai_article?.story || place.ai_article?.description || "").toLowerCase();
+
+        // Check Scenery & Category
+        if (cat === "waterfall") tags.add("#WaterfallHunting").add("#NaturePhotography");
+        if (cat === "mountain" || cat === "trail" || cat === "viewpoint") tags.add("#LandscapePhotography").add("#Adventure");
+        if (cat === "beach") tags.add("#Beach").add("#Coastal");
+        if (cat === "reserved forest" || cat === "park") tags.add("#NatureSeekers").add("#Wildlife");
+
+        // Check Content, Gear, & Vibe
+        if (story.includes("drone") || story.includes("aerial")) tags.add("#DronePhotography").add("#AerialPhotography");
+        if (story.includes("iphone") || story.includes("mobile")) tags.add("#ShotOniPhone").add("#MobilePhotography");
+        if (story.includes("ride") || story.includes("road trip") || story.includes("motorcycle")) tags.add("#RoadTrip").add("#MotorcycleDiaries");
+        if (story.includes("camp") || story.includes("tent") || story.includes("trek")) tags.add("#Camping").add("#Outdoors");
+
+        // Safety fallback if no specific tags were triggered
+        if (tags.size === 0) {
+            tags.add("#LandscapePhotography").add("#Explore");
+        }
+
+        return Array.from(tags).join(" ");
+    };
+
+    // Combine and format the final hashtag payload
+    const dynamicHashtags = `${coreTags} ${getSpecificTags(p)}`.trim();
 
     // Clean up text by removing markdown artifacts
     const storyText = p.ai_article?.story || p.ai_article?.description || "";
     const cleanText = storyText.replace(/[#*]/g, '').trim();
 
-    // 2. DYNAMIC CHARACTER BUDGETING (Mastodon counts URLs as exactly 23 characters)
-    const fixedCost = locationName.length + 4 + 7 + 23 + 4 + hashtags.length; // Text template formatting costs
+    // 3. DYNAMIC CHARACTER BUDGETING (Mastodon counts URLs as exactly 23 characters)
+    // Budgeting now calculates against the length of the dynamicHashtags string
+    const fixedCost = locationName.length + 4 + 7 + 23 + 4 + dynamicHashtags.length; 
     const maxDescBudget = 500 - fixedCost - 5; // Strict limit with a 5-character safety buffer
 
-    // 3. SMART TEXT PARSING (Ensures grammatically complete sentences)
+    // 4. SMART TEXT PARSING (Ensures grammatically complete sentences)
     const sentences = cleanText.match(/[^.!?]+[.!?]+/g) || [cleanText];
     let shortDesc = "";
 
@@ -767,10 +798,10 @@ function App() {
       shortDesc += "...";
     }
 
-    // 4. CONSTRUCT THE COMPLIANT TOOT
-    const tootText = `${locationName}\n\n${shortDesc}\n\n 📍Location: ${shareLink}\n\n${hashtags}`;
+    // 5. CONSTRUCT THE COMPLIANT TOOT
+    const tootText = `${locationName}\n\n${shortDesc}\n\n 📍Location: ${shareLink}\n\n${dynamicHashtags}`;
 
-    // 5. CALL PROXY API
+    // 6. CALL PROXY API
     try {
       const response = await fetch('/api/share-mastodon', {
         method: 'POST',
@@ -791,7 +822,7 @@ function App() {
       setToast?.({ show: true, msg: "Mastodon Error" });
       setTimeout(() => setToast?.({ show: false, msg: "" }), 3000);
     }
-  };
+};
 
 const handleMetaShare = async (p, platform, accessToken) => {
   if (!p) return;
