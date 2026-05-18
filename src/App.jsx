@@ -735,8 +735,8 @@ function App() {
     const locationName = p.place_name || "Island Vignette";
     const shareLink = `https://my-journal-view.vercel.app/?place=${encodeURIComponent(locationName)}`;
 
-    // Curated high-impact hashtags that best describe your site, travel niche, and gear
-    const hashtags = "#MyJournal #SriLanka #VisitSriLanka #TravelSriLanka #SriLankaDiaries #TravelPhotography #NatureSeekers #DronePhotography #ShotOniPhone";
+    // FIXED: Swapped low-traffic tags for high-engagement Mastodon tags with proper spacing and CamelCase
+    const hashtags = "#MyJournal #SriLanka #TravelSriLanka #TravelPhotography #LandscapePhotography #DronePhotography #ShotOniPhone";
 
     // Clean up text by removing markdown artifacts
     const storyText = p.ai_article?.story || p.ai_article?.description || "";
