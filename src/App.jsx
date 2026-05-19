@@ -673,100 +673,88 @@ function App() {
   // ==========================================
 
   const handleMetaShare = async (p, platform, accessToken) => {
-    if (!p) return;
+  if (!p) return;
 
-    // 1. Build context-aware metadata targets
-    const locationName = p.place_name || "Island Vignette";
-    const shareLink = `https://my-journal-viewer.vercel.app/?place=${encodeURIComponent(locationName)}`;
+  // 1. Build context-aware metadata targets
+  const locationName = p.place_name || "Island Vignette";
+  const shareLink = `https://my-journal-viewer.vercel.app/?place=${encodeURIComponent(locationName)}`;
 
-    // Dynamic Hashtags Conversion
-    const coreTags = "#MyJournal #SriLanka #TravelSriLanka #TravelPhotography";
-    const dynamicHashtags = `${coreTags} ${getSpecificTags(p)}`.trim();
+  // Dynamic Hashtags Conversion
+  const coreTags = "#MyJournal #SriLanka #TravelSriLanka #TravelPhotography";
+  const dynamicHashtags = `${coreTags} ${getSpecificTags(p)}`.trim();
 
-    // 2. Extract and clean the primary text snippet from the journal story
-    const storyText = p.ai_article?.story || p.ai_article?.description || "";
-    const cleanText = storyText.replace(/[#*]/g, '').trim();
-    let shortDesc = cleanText;
+  // 2. Extract and clean the primary text snippet
+  const storyText = p.ai_article?.story || p.ai_article?.description || "";
+  const cleanText = storyText.replace(/[#*]/g, '').trim();
 
-    // 3. Smart grammatical truncation specifically for Threads (500-character ceiling)
-    if (platform === 'threads') {
-      const fixedCost = locationName.length + 4 + 25 + shareLink.length + 2 + dynamicHashtags.length;
-      const maxDescBudget = 500 - fixedCost - 5; // Safe buffer
+  // 3. Unified Smart Truncation
+  const platformLimit = platform === 'threads' ? 500 : 2200;
+  const fixedCost = locationName.length + shareLink.length + dynamicHashtags.length + 40; // 40 = buffer for icons/newlines
+  const maxDescBudget = Math.max(0, platformLimit - fixedCost - 5);
 
-      const sentences = cleanText.match(/[^.!?]+[.!?]+/g) || [cleanText];
-      let tempDesc = "";
+  let shortDesc = cleanText;
+  const sentences = cleanText.match(/[^.!?]+[.!?]+/g) || [cleanText];
+  let tempDesc = "";
 
-      for (let sentence of sentences) {
-        const candidate = (tempDesc + " " + sentence.trim()).trim();
-        if (candidate.length <= maxDescBudget) {
-          tempDesc = candidate;
-        } else {
-          break;
-        }
-      }
-
-      if (!tempDesc && cleanText) {
-        tempDesc = cleanText.substring(0, maxDescBudget).trim();
-        const lastSpace = tempDesc.lastIndexOf(" ");
-        if (lastSpace > 0) tempDesc = tempDesc.substring(0, lastSpace);
-        tempDesc += "...";
-      }
-      shortDesc = tempDesc;
+  for (let sentence of sentences) {
+    const candidate = (tempDesc + " " + sentence.trim()).trim();
+    if (candidate.length <= maxDescBudget) {
+      tempDesc = candidate;
+    } else {
+      break;
     }
+  }
 
-    // 4. Structure the clean, scannable final copy
-    const socialText = `📍 ${locationName}\n\n${shortDesc}\n\n🔗 Explore more entries:\n${shareLink}\n\n${dynamicHashtags}`;
+  // Fallback if no full sentences fit
+  if (!tempDesc && cleanText) {
+    tempDesc = cleanText.substring(0, maxDescBudget).trim();
+    const lastSpace = tempDesc.lastIndexOf(" ");
+    if (lastSpace > 0) tempDesc = tempDesc.substring(0, lastSpace);
+    tempDesc += "...";
+  }
+  shortDesc = tempDesc;
 
-    // Notify user that the publishing sync has started
-    if (typeof setToast === 'function') {
+  // 4. Structure the final copy
+  const socialText = `📍 ${locationName}\n\n${shortDesc}\n\n🔗 Explore more entries:\n${shareLink}\n\n${dynamicHashtags}`;
+
+  if (typeof setToast === 'function') {
+    const platformName = platform.charAt(0).toUpperCase() + platform.slice(1);
+    setToast({ show: true, msg: `Publishing to ${platformName}` });
+  }
+
+  try {
+    const response = await fetch('/api/share-meta', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        platform: platform,
+        text: socialText,
+        imageUrl: p.cover_photo_url,
+        link: shareLink,
+        ...(platform === 'threads' ? { threadsAccessToken: accessToken } : { fbAccessToken: accessToken })
+      }),
+    });
+
+    if (response.ok) {
       const platformName = platform.charAt(0).toUpperCase() + platform.slice(1);
-      setToast({ show: true, msg: `Publishing to ${platformName}` });
+      setToast?.({ show: true, msg: `Live on ${platformName}!` });
+      setTimeout(() => setToast?.({ show: false, msg: "" }), 3000);
+    } else {
+      const errData = await response.json();
+      throw new Error(errData.error || `Failed to post to ${platform}`);
+    }
+  } catch (err) {
+    console.error(`${platform} Integration Error:`, err);
+    let cleanMessage = err.message || "Unknown error occurred.";
+    
+    if (/access token|session|logged out|190/i.test(err.message)) {
+      cleanMessage = "Session expired! Please re-authenticate your 60-day token.";
     }
 
-    try {
-      // 5. Dispatch the payload bundle to your backend api endpoint route
-      const response = await fetch('/api/share-meta', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          platform: platform,
-          text: socialText,
-          imageUrl: p.cover_photo_url,
-          link: shareLink,
-          ...(platform === 'threads'
-            ? { threadsAccessToken: accessToken }
-            : { fbAccessToken: accessToken }
-          )
-        }),
-      });
-
-      if (response.ok) {
-        const platformName = platform.charAt(0).toUpperCase() + platform.slice(1);
-        setToast?.({ show: true, msg: `Live on ${platformName}!` });
-        setTimeout(() => setToast?.({ show: false, msg: "" }), 3000);
-      } else {
-        const errData = await response.json();
-        throw new Error(errData.error || `Failed to post to ${platform}`);
-      }
-    } catch (err) {
-      console.error(`${platform} Integration Error:`, err);
-
-      const rawError = err.message || "";
-      let cleanMessage = `Error: ${rawError}`;
-
-      if (
-        rawError.includes("access token") ||
-        rawError.includes("session") ||
-        rawError.includes("logged out") ||
-        rawError.includes("190")
-      ) {
-        cleanMessage = "Session expired! Please re-authenticate your 60-day Instagram/Threads token.";
-      }
-
-      setToast?.({ show: true, msg: cleanMessage });
-      setTimeout(() => setToast?.({ show: false, msg: "" }), 6000);
-    }
-  };
+    setToast?.({ show: true, msg: cleanMessage });
+    setTimeout(() => setToast?.({ show: false, msg: "" }), 6000);
+  }
+};
 
 
   const handleTwitterPush = async (p) => {
