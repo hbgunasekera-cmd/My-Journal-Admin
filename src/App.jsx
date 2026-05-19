@@ -1770,104 +1770,74 @@ Return ONLY a JSON object with exactly this structure:
     const knownUsers = new Set();
 
     const parseUA = (v) => {
-      const fullUA = v.user_agent || "";
+  const fullUA = v.user_agent || "";
 
-      // 1. ROBUST TAGGED SOURCE EXTRACTION
-      const lastHyphenIndex = fullUA.lastIndexOf('-');
-      let taggedSource = "Direct";
-      let ua = fullUA;
+  // 1. ROBUST TAGGED SOURCE EXTRACTION
+  const lastHyphenIndex = fullUA.lastIndexOf('-');
+  let taggedSource = lastHyphenIndex !== -1 ? fullUA.substring(lastHyphenIndex + 1) : null;
+  let ua = lastHyphenIndex !== -1 ? fullUA.substring(0, lastHyphenIndex) : fullUA;
 
-      if (lastHyphenIndex !== -1) {
-        ua = fullUA.substring(0, lastHyphenIndex);
-        taggedSource = fullUA.substring(lastHyphenIndex + 1);
-      }
+  const lowerUA = ua.toLowerCase();
+  const fingerprint = `${v.ip_address}_${ua}`;
 
-      const lowerUA = ua.toLowerCase();
-      const fingerprint = `${v.ip_address}_${ua}`;
+  // 2. Loyalty Check
+  let loyaltyStatus = "Returning User";
+  if (!knownUsers.has(fingerprint)) {
+    knownUsers.add(fingerprint);
+    loyaltyStatus = "Unique Visit";
+  }
 
-      // 2. Loyalty Check
-      let loyaltyStatus = "Returning User";
-      if (!knownUsers.has(fingerprint)) {
-        knownUsers.add(fingerprint);
-        loyaltyStatus = "Unique Visit";
-      }
+  // 3. Synchronized Bot Detection
+  const botPatterns = [
+    'bot', 'spider', 'crawl', 'lighthouse', 'slurp',
+    'facebookexternalhit', 'twitterbot', 'google-safety',
+    'headless', 'inspect', 'preview', 'pinterestbot',
+    'clarity', 'bingbot', 'msnbot', 'duckduckbot'
+  ];
+  const isBot = botPatterns.some(pattern => lowerUA.includes(pattern)) || lowerUA.includes('headlesschrome');
 
-      // 3. Synchronized Bot Detection
-      // REMOVED: /\.0\.0\.0/ regex which was misidentifying Elakiri users
-      const botPatterns = [
-        'bot', 'spider', 'crawl', 'lighthouse', 'slurp',
-        'facebookexternalhit', 'twitterbot', 'google-safety',
-        'headless', 'inspect', 'preview', 'pinterestbot',
-        'clarity', 'bingbot', 'msnbot', 'duckduckbot'
-      ];
+  // 4. Device & OS Detection
+  let type = 'Desktop';
+  if (lowerUA.includes('tablet') || lowerUA.includes('ipad')) type = 'Tablet';
+  else if (lowerUA.includes('mobile') || lowerUA.includes('android') || lowerUA.includes('iphone')) type = 'Mobile';
 
-      const isBot = botPatterns.some(pattern => lowerUA.includes(pattern)) ||
-        lowerUA.includes('headlesschrome');
+  let os = 'Other';
+  if (ua.includes('Windows')) os = 'Windows';
+  else if (ua.includes('Android')) os = 'Android';
+  else if (ua.includes('iPhone') || ua.includes('iPad')) os = 'iOS';
+  else if (ua.includes('Mac OS')) os = 'macOS';
+  else if (ua.includes('Linux')) os = 'Linux';
 
-      // 4. Device Type
-      let type = 'Desktop';
-      if (lowerUA.includes('tablet') || lowerUA.includes('ipad')) type = 'Tablet';
-      else if (lowerUA.includes('mobile') || lowerUA.includes('android') || lowerUA.includes('iphone')) type = 'Mobile';
+  // 5. EXCLUSIVE SOURCE DETECTION
+  let finalSource = taggedSource || "Direct/Unknown";
 
-      // 5. Operating System
-      let os = 'Other';
-      if (ua.includes('Windows')) os = 'Windows';
-      else if (ua.includes('Android')) os = 'Android';
-      else if (ua.includes('iPhone') || ua.includes('iPad')) os = 'iOS';
-      else if (ua.includes('Mac OS')) os = 'macOS';
-      else if (ua.includes('Linux')) os = 'Linux';
+  if (finalSource === "Direct/Unknown") {
+    // Search Engine Catch-all (Added Priority)
+    if (lowerUA.includes('google') || lowerUA.includes('bing') || lowerUA.includes('yahoo') || lowerUA.includes('duckduckgo') || lowerUA.includes('ecosia')) {
+       finalSource = 'Search Engine';
+    } 
+    // Meta Ecosystem
+    else if (lowerUA.includes('messenger') || lowerUA.includes('fb_iab')) finalSource = 'Messenger';
+    else if (lowerUA.includes('instagram')) finalSource = 'Instagram';
+    else if (lowerUA.includes('threads') || lowerUA.includes('barcelona')) finalSource = 'Threads';
+    else if (lowerUA.includes('fban') || lowerUA.includes('fbav')) finalSource = 'Facebook';
+    // Social Platforms
+    else if (lowerUA.includes('tiktok') || lowerUA.includes('musical')) finalSource = 'TikTok';
+    else if (lowerUA.includes('whatsapp')) finalSource = 'WhatsApp';
+    else if (lowerUA.includes('surf.social')) finalSource = 'Surf.Social';
+    else if (lowerUA.includes('reddit')) finalSource = 'Reddit';
+    else if (lowerUA.includes('youtube') || lowerUA.includes('com.google.android.youtube')) finalSource = 'YouTube';
+    else if (lowerUA.includes('pinterest')) finalSource = 'Pinterest';
+    else if (lowerUA.includes('elakiri')) finalSource = 'Elakiri';
+    else if (lowerUA.includes('twitter') || lowerUA.includes('x.com')) finalSource = 'Twitter(X)';
+    else if (lowerUA.includes('flipboard')) finalSource = 'Flipboard';
+    else if (lowerUA.includes('mastodon') || lowerUA.includes('ivory') || lowerUA.includes('tusky')) finalSource = 'Mastodon';
+    // Final fallback
+    else finalSource = "Direct/Unknown";
+  }
 
-      // 6. MULTI-LAYER SOURCE DETECTION
-      let finalSource = taggedSource;
-
-      if (finalSource === "Direct") {
-        // 1. Meta Ecosystem (Priority: Specific Apps > General Facebook)
-        if (lowerUA.includes('messenger') || lowerUA.includes('fb_iab')) {
-          finalSource = 'Messenger';
-        }
-        else if (lowerUA.includes('instagram')) {
-          finalSource = 'Instagram';
-        }
-        // Meta uses the internal codename 'barcelona' for Threads in-app browser user agents
-        else if (lowerUA.includes('threads') || lowerUA.includes('barcelona')) {
-          finalSource = 'Threads';
-        }
-        else if (lowerUA.includes('fban') || lowerUA.includes('fbav')) {
-          finalSource = 'Facebook';
-        }
-        // 2. Other Apps
-        else if (lowerUA.includes('tiktok') || lowerUA.includes('musical')) {
-          finalSource = 'TikTok';
-        }
-        else if (lowerUA.includes('whatsapp')) {
-          finalSource = 'WhatsApp';
-        }
-        else if (lowerUA.includes('reddit')) {
-          finalSource = 'Reddit';
-        }
-        else if (lowerUA.includes('youtube') || lowerUA.includes('com.google.android.youtube')) {
-          finalSource = 'YouTube';
-        }
-        else if (lowerUA.includes('pinterest')) {
-          finalSource = 'Pinterest';
-        }
-        else if (lowerUA.includes('elakiri')) {
-          finalSource = 'Elakiri';
-        }
-        else if (lowerUA.includes('twitter') || lowerUA.includes('x.com')) {
-          finalSource = 'Twitter(X)';
-        }
-        else if (lowerUA.includes('flipboard')) {
-          finalSource = 'Flipboard';
-        }
-        // 3. Fediverse / Mastodon Detection
-        else if (lowerUA.includes('mastodon') || lowerUA.includes('ivory') || lowerUA.includes('tusky')) {
-          finalSource = 'Mastodon';
-        }
-      }
-
-      return { type, source: finalSource, os, isBot, loyaltyStatus };
-    };
+  return { type, source: finalSource, os, isBot, loyaltyStatus };
+};
 
     const parsedData = [...safeAnalytics]
       .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
