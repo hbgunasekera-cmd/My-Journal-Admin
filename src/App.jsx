@@ -1408,58 +1408,19 @@ Return ONLY a JSON object with exactly this structure:
     }
   };
 
+
   const bulkGenerateArticles = async () => {
-    // 1. Confirm choice to clear existing articles or just generate pending entries
-    const shouldWipe = window.confirm(
-      "🔄 REFRESH DATABASE WITH NEW FORMATTED ARTICLES?\n\n" +
-      "Click OK to completely WIPE all existing 'ai_article' data in the database and start fresh.\n" +
-      "Click Cancel to skip the wipe and only process missing/pending items."
-    );
-
-    let targets = [];
-
-    if (shouldWipe) {
-      triggerToast("Wiping all articles from database...");
-
-      // 2. Clear the ai_article jsonb column table-wide
-      // Use .not('id', 'is', null) to cleanly bypass standard Supabase client global safety check limits
-      const { error: clearError } = await supabaseClient
-        .from('travel_bucket_list')
-        .update({ ai_article: null })
-        .not('id', 'is', null);
-
-      if (clearError) {
-        triggerToast(`Database Wipe Failed: ${clearError.message}`);
-        return;
-      }
-
-      triggerToast("Wipe complete. Fetching fresh records...");
-
-      // 3. Directly pull database records to completely bypass React's asynchronous state batching lag
-      const { data: freshPlaces, error: fetchError } = await supabaseClient
-        .from('travel_bucket_list')
-        .select('*');
-
-      if (fetchError || !freshPlaces) {
-        triggerToast("Failed to fetch fresh records for processing.");
-        return;
-      }
-
-      // Filter target locations that are marked as visited
-      targets = freshPlaces.filter(p => p.status === 'done');
-    } else {
-      // Standard approach: Process only the items currently missing their story narrative
-      targets = places.filter(p => p.status === 'done' && !p.ai_article?.story);
-    }
+    // 1. Identify items currently missing their story narrative
+    const targets = places.filter(p => p.status === 'done' && !p.ai_article?.story);
 
     if (targets.length === 0) {
-      triggerToast("No articles found to process.");
+      triggerToast("No pending articles found to process.");
       return;
     }
 
     triggerToast(`Processing ${targets.length} items...`);
 
-    // 4. Sequential generation with automated safety cooldowns
+    // 2. Sequential generation with automated safety cooldowns
     for (const place of targets) {
       let success = false;
       while (!success) { // Keep trying until this specific place is done
@@ -1470,8 +1431,8 @@ Return ONLY a JSON object with exactly this structure:
         } catch (err) {
           if (err.message.includes("quota") || err.message.includes("429")) {
             triggerToast("Quota Full. Pausing for 65s...");
-            await new Promise(r => setTimeout(r, 65000)); // Wait for reset
-            // success remains false, so the 'while' loop will try this 'place' again
+            await new Promise(r => setTimeout(r, 65000)); // Wait for API reset window
+            // success remains false, so the 'while' loop will retry this 'place' again
           } else {
             triggerToast("Skipping due to non-quota error.");
             success = true; // Skip to avoid infinite loop on bad data
@@ -1482,7 +1443,7 @@ Return ONLY a JSON object with exactly this structure:
 
     triggerToast("Bulk generation finished!");
 
-    // 5. Global state sync to fetch the new articles cleanly into your layout lists
+    // 3. Global state sync to display newly built stories
     if (typeof refreshAllData === 'function') {
       refreshAllData();
     }
@@ -2278,14 +2239,14 @@ Return ONLY a JSON object with exactly this structure:
               </button>
 
               <div className="flex gap-2">
-                {/* ⚡ UNIFIED ARTICLE GENERATOR: Triggers prompt for either a database wipe-and-refresh or processing pending items */}
+                {/* ⚡ PENDING ARTICLE GENERATOR: Sequences through visited items missing a story map layer */}
                 <button
                   onClick={bulkGenerateArticles}
                   className="flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all border bg-violet-50 border-violet-200 text-violet-600 hover:bg-violet-100 active:scale-95 shadow-sm"
-                  title="Click to trigger full database refresh or generate missing articles via confirmation wizard"
+                  title="Scan for visited locations missing AI stories and batch generate narratives"
                 >
                   <Icon name="sparkles" className="w-3.5 h-3.5 text-violet-500" />
-                  <span>Generate Articles</span>
+                  <span>Articles</span>
                 </button>
 
                 {/* METADATA AUDIT TOOL */}
@@ -2297,6 +2258,7 @@ Return ONLY a JSON object with exactly this structure:
                   <span>Audit Meta</span>
                 </button>
               </div>
+
             </div>
 
             {/* Places Grid */}
