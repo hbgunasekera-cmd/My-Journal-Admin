@@ -673,88 +673,88 @@ function App() {
   // ==========================================
 
   const handleMetaShare = async (p, platform, accessToken) => {
-  if (!p) return;
+    if (!p) return;
 
-  // 1. Build context-aware metadata targets
-  const locationName = p.place_name || "Island Vignette";
-  const shareLink = `https://my-journal-viewer.vercel.app/?place=${encodeURIComponent(locationName)}`;
+    // 1. Build context-aware metadata targets
+    const locationName = p.place_name || "Island Vignette";
+    const shareLink = `https://my-journal-viewer.vercel.app/?place=${encodeURIComponent(locationName)}`;
 
-  // Dynamic Hashtags Conversion
-  const coreTags = "#MyJournal #SriLanka #TravelSriLanka #TravelPhotography";
-  const dynamicHashtags = `${coreTags} ${getSpecificTags(p)}`.trim();
+    // Dynamic Hashtags Conversion
+    const coreTags = "#MyJournal #SriLanka #TravelSriLanka #TravelPhotography";
+    const dynamicHashtags = `${coreTags} ${getSpecificTags(p)}`.trim();
 
-  // 2. Extract and clean the primary text snippet
-  const storyText = p.ai_article?.story || p.ai_article?.description || "";
-  const cleanText = storyText.replace(/[#*]/g, '').trim();
+    // 2. Extract and clean the primary text snippet
+    const storyText = p.ai_article?.story || p.ai_article?.description || "";
+    const cleanText = storyText.replace(/[#*]/g, '').trim();
 
-  // 3. Unified Smart Truncation
-  const platformLimit = platform === 'threads' ? 500 : 2200;
-  const fixedCost = locationName.length + shareLink.length + dynamicHashtags.length + 40; // 40 = buffer for icons/newlines
-  const maxDescBudget = Math.max(0, platformLimit - fixedCost - 5);
+    // 3. Unified Smart Truncation
+    const platformLimit = platform === 'threads' ? 500 : 2200;
+    const fixedCost = locationName.length + shareLink.length + dynamicHashtags.length + 40; // 40 = buffer for icons/newlines
+    const maxDescBudget = Math.max(0, platformLimit - fixedCost - 5);
 
-  let shortDesc = cleanText;
-  const sentences = cleanText.match(/[^.!?]+[.!?]+/g) || [cleanText];
-  let tempDesc = "";
+    let shortDesc = cleanText;
+    const sentences = cleanText.match(/[^.!?]+[.!?]+/g) || [cleanText];
+    let tempDesc = "";
 
-  for (let sentence of sentences) {
-    const candidate = (tempDesc + " " + sentence.trim()).trim();
-    if (candidate.length <= maxDescBudget) {
-      tempDesc = candidate;
-    } else {
-      break;
+    for (let sentence of sentences) {
+      const candidate = (tempDesc + " " + sentence.trim()).trim();
+      if (candidate.length <= maxDescBudget) {
+        tempDesc = candidate;
+      } else {
+        break;
+      }
     }
-  }
 
-  // Fallback if no full sentences fit
-  if (!tempDesc && cleanText) {
-    tempDesc = cleanText.substring(0, maxDescBudget).trim();
-    const lastSpace = tempDesc.lastIndexOf(" ");
-    if (lastSpace > 0) tempDesc = tempDesc.substring(0, lastSpace);
-    tempDesc += "...";
-  }
-  shortDesc = tempDesc;
+    // Fallback if no full sentences fit
+    if (!tempDesc && cleanText) {
+      tempDesc = cleanText.substring(0, maxDescBudget).trim();
+      const lastSpace = tempDesc.lastIndexOf(" ");
+      if (lastSpace > 0) tempDesc = tempDesc.substring(0, lastSpace);
+      tempDesc += "...";
+    }
+    shortDesc = tempDesc;
 
-  // 4. Structure the final copy
-  const socialText = `📍 ${locationName}\n\n${shortDesc}\n\n🔗 Explore more entries:\n${shareLink}\n\n${dynamicHashtags}`;
+    // 4. Structure the final copy
+    const socialText = `📍 ${locationName}\n\n${shortDesc}\n\n🔗 Explore more entries:\n${shareLink}\n\n${dynamicHashtags}`;
 
-  if (typeof setToast === 'function') {
-    const platformName = platform.charAt(0).toUpperCase() + platform.slice(1);
-    setToast({ show: true, msg: `Publishing to ${platformName}` });
-  }
-
-  try {
-    const response = await fetch('/api/share-meta', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        platform: platform,
-        text: socialText,
-        imageUrl: p.cover_photo_url,
-        link: shareLink,
-        ...(platform === 'threads' ? { threadsAccessToken: accessToken } : { fbAccessToken: accessToken })
-      }),
-    });
-
-    if (response.ok) {
+    if (typeof setToast === 'function') {
       const platformName = platform.charAt(0).toUpperCase() + platform.slice(1);
-      setToast?.({ show: true, msg: `Live on ${platformName}!` });
-      setTimeout(() => setToast?.({ show: false, msg: "" }), 3000);
-    } else {
-      const errData = await response.json();
-      throw new Error(errData.error || `Failed to post to ${platform}`);
-    }
-  } catch (err) {
-    console.error(`${platform} Integration Error:`, err);
-    let cleanMessage = err.message || "Unknown error occurred.";
-    
-    if (/access token|session|logged out|190/i.test(err.message)) {
-      cleanMessage = "Session expired! Please re-authenticate your 60-day token.";
+      setToast({ show: true, msg: `Publishing to ${platformName}` });
     }
 
-    setToast?.({ show: true, msg: cleanMessage });
-    setTimeout(() => setToast?.({ show: false, msg: "" }), 6000);
-  }
-};
+    try {
+      const response = await fetch('/api/share-meta', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          platform: platform,
+          text: socialText,
+          imageUrl: p.cover_photo_url,
+          link: shareLink,
+          ...(platform === 'threads' ? { threadsAccessToken: accessToken } : { fbAccessToken: accessToken })
+        }),
+      });
+
+      if (response.ok) {
+        const platformName = platform.charAt(0).toUpperCase() + platform.slice(1);
+        setToast?.({ show: true, msg: `Live on ${platformName}!` });
+        setTimeout(() => setToast?.({ show: false, msg: "" }), 3000);
+      } else {
+        const errData = await response.json();
+        throw new Error(errData.error || `Failed to post to ${platform}`);
+      }
+    } catch (err) {
+      console.error(`${platform} Integration Error:`, err);
+      let cleanMessage = err.message || "Unknown error occurred.";
+
+      if (/access token|session|logged out|190/i.test(err.message)) {
+        cleanMessage = "Session expired! Please re-authenticate your 60-day token.";
+      }
+
+      setToast?.({ show: true, msg: cleanMessage });
+      setTimeout(() => setToast?.({ show: false, msg: "" }), 6000);
+    }
+  };
 
 
   const handleTwitterPush = async (p) => {
@@ -1121,7 +1121,25 @@ function App() {
 
   const promptForValue = (id, field, currentVal, title) => {
     const val = prompt(`Enter ${title}:`, currentVal || '');
-    if (val !== null) updatePlaceField(id, field, val);
+
+    if (val !== null) {
+      let processedVal = val.trim();
+
+      // Automatically fix Google Photos internal session URLs to public CDN URLs
+      if (processedVal.includes("photos.fife.usercontent.google.com")) {
+        processedVal = processedVal.replace(
+          "photos.fife.usercontent.google.com",
+          "lh3.googleusercontent.com"
+        );
+
+        // Also ensure it forces secure HTTPS protocol for Vercel compliance
+        if (processedVal.startsWith("http://")) {
+          processedVal = processedVal.replace("http://", "https://");
+        }
+      }
+
+      updatePlaceField(id, field, processedVal);
+    }
   };
 
   useEffect(() => {
@@ -1619,7 +1637,7 @@ Return ONLY a JSON object with exactly this structure:
   const generateGoogleMapsUrl = (points) => {
     if (!points || points.length === 0) return null;
 
-    // Use official Google Maps Directions deep-link format
+    // Use the official, secure Google Maps Directions deep-link format
     const baseUrl = "https://www.google.com/maps/dir/";
 
     const stops = points.map(p => {
