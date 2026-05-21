@@ -2613,10 +2613,15 @@ Return ONLY a JSON object with exactly this structure:
                         {/* Bluesky */}
                         <button
                           onClick={() => handleBlueskyShare(p)}
-                          className="flex flex-col items-center justify-center gap-1 py-2 bg-white border border-slate-200 rounded-xl hover:bg-[#0085ff] hover:text-white transition-all shadow-sm group"
+                          className="flex flex-col items-center justify-center gap-1 py-2 bg-white text-blue-500 border border-slate-200 rounded-xl hover:bg-[#0085ff] hover:text-white transition-all shadow-sm group"
                         >
-                          {/* The 'text-blue-500' ensures the emoji carries the brand color */}
-                          <span className="text-sm text-blue-500 group-hover:text-white">🦋</span>
+                          <svg
+                            className="w-4 h-4 fill-current"
+                            viewBox="0 0 24 24"
+                          >
+                            {/* A more elegant, delicate butterfly wing design */}
+                            <path d="M12,2C9,2 7,4 7,7C7,10 9,12 12,12C15,12 17,10 17,7C17,4 15,2 12,2M12,14C9,14 7,16 7,19C7,22 9,24 12,24C15,24 17,22 17,19C17,16 15,14 12,14Z" transform="rotate(90 12 12)" />
+                          </svg>
                           <span className="text-[7px] font-black uppercase tracking-tighter group-hover:text-white">Bsky</span>
                         </button>
 
