@@ -1062,6 +1062,45 @@ function App() {
     }
   };
 
+  const handleMediumCopy = async (p) => {
+    if (!p) return;
+
+    // 1. DATA PREP
+    const locationName = p.place_name || "Island Vignette";
+    const shareLink = `https://my-journal-view.vercel.app/?place=${encodeURIComponent(locationName)}`;
+    const storyText = p.ai_article?.story || p.ai_article?.description || "";
+
+    // Use the URL from your proxy pattern to ensure it's accessible by Medium's crawlers
+    // If you have a permanent CDN URL for the cover, use that instead.
+    const coverUrl = p.cover_photo_url;
+
+    // 2. CONSTRUCT MARKDOWN (Medium-friendly)
+    const mediumMarkdown = `
+# ${locationName}
+
+![${locationName}](${coverUrl})
+
+${storyText}
+
+***
+
+📍 **Read the full journal entry and view coordinates here:** [My Journal](${shareLink})
+
+#MyJournal #SriLanka #Travel #Photography
+    `.trim();
+
+    // 3. COPY TO CLIPBOARD
+    try {
+      await navigator.clipboard.writeText(mediumMarkdown);
+      setToast?.({ show: true, msg: "Copied to clipboard! Paste into Medium." });
+      setTimeout(() => setToast?.({ show: false, msg: "" }), 3000);
+    } catch (err) {
+      console.error("Clipboard Error:", err);
+      setToast?.({ show: true, msg: "Failed to copy." });
+      setTimeout(() => setToast?.({ show: false, msg: "" }), 3000);
+    }
+  };
+
 
   // 6. UTILITY & DATA SYNC FUNCTIONS ---
 
@@ -2642,6 +2681,15 @@ Return ONLY a JSON object with exactly this structure:
                         <button onClick={() => handleFlipboardShare(p)} className="flex flex-col items-center justify-center gap-1 py-2 bg-white border border-slate-200 rounded-xl hover:bg-slate-900 hover:text-white transition-all shadow-sm">
                           <Icon name="refresh-cw" className="w-3.5 h-3.5" />
                           <span className="text-[7px] font-black uppercase tracking-tighter">Flip</span>
+                        </button>
+
+                        {/* Medium */}
+                        <button
+                          onClick={() => handleMediumCopy(p)}
+                          className="flex flex-col items-center justify-center gap-1 py-2 bg-white text-black border border-slate-200 rounded-xl hover:bg-slate-800 hover:text-white transition-all shadow-sm group"
+                        >
+                          <span className="text-sm">📝</span>
+                          <span className="text-[7px] font-black uppercase tracking-tighter">Medium</span>
                         </button>
 
 
