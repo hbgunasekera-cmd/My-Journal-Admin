@@ -998,49 +998,44 @@ function App() {
     // 1. BASE CONTENT SETUP
     const locationName = p.place_name || "Island Vignette";
     const shareLink = `https://my-journal-view.vercel.app/?place=${encodeURIComponent(locationName)}`;
+
+    // --- 2. DYNAMIC HASHTAG PAYLOAD (Trimmed for Bluesky's 300 limit) ---
     const coreTags = "#MyJournal #SriLanka";
+    // We limit specific tags to 2 max so they don't eat the description budget
+    const specificTags = getSpecificTags(p).split(' ').slice(0, 2).join(' ');
+    const dynamicHashtags = `${coreTags} ${specificTags}`.trim();
 
+    // Clean up text by removing markdown artifacts
     const storyText = p.ai_article?.story || p.ai_article?.description || "";
-    // Clean markdown and collapse any weird spacing/newlines into a single clean string
-    const cleanText = storyText.replace(/[#*]/g, '').replace(/\s+/g, ' ').trim();
+    const cleanText = storyText.replace(/[#*]/g, '').trim();
 
-    // 2. MATHEMATICAL BUDGETING (Bluesky strict limit: 300)
-    // Calculate exact fixed characters used by layout, newlines, and links
-    const fixedLayoutLength = locationName.length + shareLink.length + coreTags.length + 20; 
-    
-    // We want a nice paragraph hook. We allocate ~150 chars, but ensure we don't breach limits
-    const maxDescLength = 295 - fixedLayoutLength;
-    const targetDescLength = Math.min(150, maxDescLength - 30); // 30 chars saved for extra tags
+    // 3. DYNAMIC CHARACTER BUDGETING (Bluesky absolute limit is 300)
+    const fixedCost = locationName.length + 4 + 7 + shareLink.length + 4 + dynamicHashtags.length;
+    const maxDescBudget = 300 - fixedCost - 5; // Strict limit with a 5-character safety buffer
 
-    let shortDesc = cleanText;
+    // 4. SMART TEXT PARSING (Ensures grammatically complete sentences)
+    const sentences = cleanText.match(/[^.!?]+[.!?]+/g) || [cleanText];
+    let shortDesc = "";
 
-    // 3. CLEAN TRUNCATION (Ignores punctuation, cuts at the last safe word)
-    if (shortDesc.length > targetDescLength) {
-      shortDesc = shortDesc.substring(0, targetDescLength);
-      const lastSpace = shortDesc.lastIndexOf(" ");
-      if (lastSpace > 0) {
-        shortDesc = shortDesc.substring(0, lastSpace);
+    for (let sentence of sentences) {
+      const candidate = (shortDesc + " " + sentence.trim()).trim();
+      if (candidate.length <= maxDescBudget) {
+        shortDesc = candidate;
+      } else {
+        break; // Stop adding text before it cuts off grammatically
       }
+    }
+
+    // Fallback protection in case a single starting sentence is longer than the budget
+    if (!shortDesc && cleanText) {
+      shortDesc = cleanText.substring(0, maxDescBudget).trim();
+      const lastSpace = shortDesc.lastIndexOf(" ");
+      if (lastSpace > 0) shortDesc = shortDesc.substring(0, lastSpace);
       shortDesc += "...";
     }
 
-    // 4. BUILD CORE TEXT
-    const baseText = `${locationName}\n\n${shortDesc}\n\n📍Location: ${shareLink}\n\n${coreTags}`;
-
-    // 5. FILL REMAINING SPACE WITH EXTRA HASHTAGS
-    const extraTags = getSpecificTags(p).split(" ");
-    let finalTags = "";
-
-    for (let tag of extraTags) {
-      if (!tag || coreTags.includes(tag)) continue;
-      
-      // Only add the tag if it keeps us safely under the 295 character mark
-      if ((baseText.length + finalTags.length + tag.length + 1) <= 295) {
-        finalTags += " " + tag;
-      }
-    }
-
-    const bskyText = baseText + finalTags;
+    // 5. CONSTRUCT THE COMPLIANT POST
+    const bskyText = `${locationName}\n\n${shortDesc}\n\n 📍Location: ${shareLink}\n\n${dynamicHashtags}`;
 
     // 6. CALL PROXY API
     try {
@@ -2607,16 +2602,16 @@ Return ONLY a JSON object with exactly this structure:
                           <span className="text-[7px] font-black uppercase tracking-tighter">Threads</span>
                         </button>
 
-                        {/* Twitter (X) - NEW */}
-                        <button onClick={() => handleTwitterPush(p)} className="flex flex-col items-center justify-center gap-1 py-2 bg-white text-slate-900 border border-slate-200 rounded-xl hover:bg-slate-900 hover:text-white transition-all shadow-sm">
-                          <Icon name="twitter" className="w-3.5 h-3.5" />
-                          <span className="text-[7px] font-black uppercase tracking-tighter">X / Twt</span>
+                        {/* Pinterest */}
+                        <button onClick={() => setActivePinHubId(p.id)} className="flex flex-col items-center justify-center gap-1 py-2 bg-rose-50 text-rose-600 border border-rose-100 rounded-xl hover:bg-rose-600 hover:text-white transition-all shadow-sm">
+                          <Icon name="heart" className="w-3.5 h-3.5" />
+                          <span className="text-[7px] font-black uppercase tracking-tighter">Pin</span>
                         </button>
 
                         {/* Mastodon */}
                         <button
                           onClick={() => handleMastodonShare(p)}
-                          className="flex flex-col items-center justify-center gap-1 py-2 bg-white border border-slate-200 rounded-xl hover:bg-[#2b90d9] hover:text-white transition-all shadow-sm group"
+                          className="flex flex-col items-center justify-center gap-1 py-2 bg-white text-black border border-slate-200 rounded-xl hover:bg-black hover:text-white transition-all shadow-sm"
                         >
                           {/* Added text-slate-800 to ensure black start state */}
                           <span className="text-sm">🐘</span>
@@ -2625,9 +2620,8 @@ Return ONLY a JSON object with exactly this structure:
 
                         {/* Bluesky */}
                         <button
-                          onClick={() => handleBlueskyShare(p)}
-                          
-                          className="flex flex-col items-center justify-center gap-1 py-2 bg-white border border-slate-200 rounded-xl hover:bg-[#0085ff] hover:text-white transition-all shadow-sm group"
+                          onClick={() => handleBlueskyShare(p)}                         
+                          className="flex flex-col items-center justify-center gap-1 py-2 bg-white text-black border border-slate-200 rounded-xl hover:bg-black hover:text-white transition-all shadow-sm"
                         >
                           <svg
                             className="w-4 h-4 fill-current text-blue-500 group-hover:text-white"
@@ -2645,11 +2639,15 @@ Return ONLY a JSON object with exactly this structure:
                           <span className="text-[7px] font-black uppercase tracking-tighter">Flip</span>
                         </button>
 
-                        {/* Pinterest */}
-                        <button onClick={() => setActivePinHubId(p.id)} className="flex flex-col items-center justify-center gap-1 py-2 bg-rose-50 text-rose-600 border border-rose-100 rounded-xl hover:bg-rose-600 hover:text-white transition-all shadow-sm">
-                          <Icon name="heart" className="w-3.5 h-3.5" />
-                          <span className="text-[7px] font-black uppercase tracking-tighter">Pin</span>
+                        
+
+{/* Twitter (X) - NEW */}
+                        <button onClick={() => handleTwitterPush(p)} className="flex flex-col items-center justify-center gap-1 py-2 bg-white text-slate-900 border border-slate-200 rounded-xl hover:bg-slate-900 hover:text-white transition-all shadow-sm">
+                          <Icon name="twitter" className="w-3.5 h-3.5" />
+                          <span className="text-[7px] font-black uppercase tracking-tighter">X / Twt</span>
                         </button>
+
+
                       </div>
 
 
