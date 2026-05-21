@@ -1911,6 +1911,7 @@ Return ONLY a JSON object with exactly this structure:
         else if (lowerUA.includes('twitter') || lowerUA.includes('x.com')) finalSource = 'Twitter(X)';
         else if (lowerUA.includes('flipboard')) finalSource = 'Flipboard';
         else if (lowerUA.includes('mastodon') || lowerUA.includes('ivory') || lowerUA.includes('tusky')) finalSource = 'Mastodon';
+        else if (lowerUA.includes('bsky') || lowerUA.includes('bluesky')) finalSource = 'Bluesky';
         // Final fallback stays "Direct"
         else finalSource = "Direct";
       }
