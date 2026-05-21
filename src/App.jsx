@@ -998,42 +998,51 @@ function App() {
     // 1. BASE CONTENT SETUP
     const locationName = p.place_name || "Island Vignette";
     const shareLink = `https://my-journal-view.vercel.app/?place=${encodeURIComponent(locationName)}`;
-
-    // 2. DYNAMIC HASHTAG PAYLOAD
-    const coreTags = "#MyJournal #SriLanka #TravelSriLanka";
-    const dynamicHashtags = `${coreTags} ${getSpecificTags(p)}`.trim();
+    const coreTags = "#MyJournal #SriLanka";
 
     const storyText = p.ai_article?.story || p.ai_article?.description || "";
-    const cleanText = storyText.replace(/[#*]/g, '').trim();
+    // Clean markdown and collapse any weird spacing/newlines into a single clean string
+    const cleanText = storyText.replace(/[#*]/g, '').replace(/\s+/g, ' ').trim();
 
-    // 3. BLUESKY CHARACTER BUDGETING (Limit: 300)
-    // Bluesky parses links directly, so the link length counts against the 300 limit
-    const fixedCost = locationName.length + 4 + 7 + shareLink.length + 4 + dynamicHashtags.length;
-    const maxDescBudget = 300 - fixedCost - 5;
+    // 2. MATHEMATICAL BUDGETING (Bluesky strict limit: 300)
+    // Calculate exact fixed characters used by layout, newlines, and links
+    const fixedLayoutLength = locationName.length + shareLink.length + coreTags.length + 20; 
+    
+    // We want a nice paragraph hook. We allocate ~150 chars, but ensure we don't breach limits
+    const maxDescLength = 295 - fixedLayoutLength;
+    const targetDescLength = Math.min(150, maxDescLength - 30); // 30 chars saved for extra tags
 
-    // 4. SMART TEXT PARSING
-    const sentences = cleanText.match(/[^.!?]+[.!?]+/g) || [cleanText];
-    let shortDesc = "";
+    let shortDesc = cleanText;
 
-    for (let sentence of sentences) {
-      const candidate = (shortDesc + " " + sentence.trim()).trim();
-      if (candidate.length <= maxDescBudget) {
-        shortDesc = candidate;
-      } else {
-        break;
-      }
-    }
-
-    if (!shortDesc && cleanText) {
-      shortDesc = cleanText.substring(0, maxDescBudget).trim();
+    // 3. CLEAN TRUNCATION (Ignores punctuation, cuts at the last safe word)
+    if (shortDesc.length > targetDescLength) {
+      shortDesc = shortDesc.substring(0, targetDescLength);
       const lastSpace = shortDesc.lastIndexOf(" ");
-      if (lastSpace > 0) shortDesc = shortDesc.substring(0, lastSpace);
+      if (lastSpace > 0) {
+        shortDesc = shortDesc.substring(0, lastSpace);
+      }
       shortDesc += "...";
     }
 
-    const bskyText = `${locationName}\n\n${shortDesc}\n\n 📍Location: ${shareLink}\n\n${dynamicHashtags}`;
+    // 4. BUILD CORE TEXT
+    const baseText = `${locationName}\n\n${shortDesc}\n\n📍Location: ${shareLink}\n\n${coreTags}`;
 
-    // 5. CALL PROXY API
+    // 5. FILL REMAINING SPACE WITH EXTRA HASHTAGS
+    const extraTags = getSpecificTags(p).split(" ");
+    let finalTags = "";
+
+    for (let tag of extraTags) {
+      if (!tag || coreTags.includes(tag)) continue;
+      
+      // Only add the tag if it keeps us safely under the 295 character mark
+      if ((baseText.length + finalTags.length + tag.length + 1) <= 295) {
+        finalTags += " " + tag;
+      }
+    }
+
+    const bskyText = baseText + finalTags;
+
+    // 6. CALL PROXY API
     try {
       const response = await fetch('/api/share-bluesky', {
         method: 'POST',
@@ -1057,6 +1066,9 @@ function App() {
       setTimeout(() => setToast?.({ show: false, msg: "" }), 3000);
     }
   };
+
+
+  // 6. UTILITY & DATA SYNC FUNCTIONS ---
 
   const triggerToast = (msg) => {
     setToast({ show: true, msg });
@@ -2614,7 +2626,7 @@ Return ONLY a JSON object with exactly this structure:
                         {/* Bluesky */}
                         <button
                           onClick={() => handleBlueskyShare(p)}
-                          // Removed 'text-blue-500' from container so it doesn't force the label color
+                          
                           className="flex flex-col items-center justify-center gap-1 py-2 bg-white border border-slate-200 rounded-xl hover:bg-[#0085ff] hover:text-white transition-all shadow-sm group"
                         >
                           <svg
