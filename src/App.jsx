@@ -992,6 +992,72 @@ function App() {
     }
   };
 
+  const handleBlueskyShare = async (p) => {
+    if (!p) return;
+
+    // 1. BASE CONTENT SETUP
+    const locationName = p.place_name || "Island Vignette";
+    const shareLink = `https://my-journal-view.vercel.app/?place=${encodeURIComponent(locationName)}`;
+
+    // 2. DYNAMIC HASHTAG PAYLOAD
+    const coreTags = "#MyJournal #SriLanka #TravelSriLanka";
+    const dynamicHashtags = `${coreTags} ${getSpecificTags(p)}`.trim();
+
+    const storyText = p.ai_article?.story || p.ai_article?.description || "";
+    const cleanText = storyText.replace(/[#*]/g, '').trim();
+
+    // 3. BLUESKY CHARACTER BUDGETING (Limit: 300)
+    // Bluesky parses links directly, so the link length counts against the 300 limit
+    const fixedCost = locationName.length + 4 + 7 + shareLink.length + 4 + dynamicHashtags.length;
+    const maxDescBudget = 300 - fixedCost - 5;
+
+    // 4. SMART TEXT PARSING
+    const sentences = cleanText.match(/[^.!?]+[.!?]+/g) || [cleanText];
+    let shortDesc = "";
+
+    for (let sentence of sentences) {
+      const candidate = (shortDesc + " " + sentence.trim()).trim();
+      if (candidate.length <= maxDescBudget) {
+        shortDesc = candidate;
+      } else {
+        break;
+      }
+    }
+
+    if (!shortDesc && cleanText) {
+      shortDesc = cleanText.substring(0, maxDescBudget).trim();
+      const lastSpace = shortDesc.lastIndexOf(" ");
+      if (lastSpace > 0) shortDesc = shortDesc.substring(0, lastSpace);
+      shortDesc += "...";
+    }
+
+    const bskyText = `${locationName}\n\n${shortDesc}\n\n 📍Location: ${shareLink}\n\n${dynamicHashtags}`;
+
+    // 5. CALL PROXY API
+    try {
+      const response = await fetch('/api/share-bluesky', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: bskyText,
+          coverImageUrl: p.cover_photo_url,
+          locationName
+        }),
+      });
+
+      if (response.ok) {
+        setToast?.({ show: true, msg: "Shared to Bluesky!" });
+        setTimeout(() => setToast?.({ show: false, msg: "" }), 3000);
+      } else {
+        throw new Error("Failed");
+      }
+    } catch (err) {
+      console.error("Bluesky Error:", err);
+      setToast?.({ show: true, msg: "Bluesky Error" });
+      setTimeout(() => setToast?.({ show: false, msg: "" }), 3000);
+    }
+  };
+
   const triggerToast = (msg) => {
     setToast({ show: true, msg });
     setTimeout(() => setToast({ show: false, msg: '' }), 2500);
@@ -2536,9 +2602,21 @@ Return ONLY a JSON object with exactly this structure:
                         </button>
 
                         {/* Mastodon */}
-                        <button onClick={() => handleMastodonShare(p)} className="flex flex-col items-center justify-center gap-1 py-2 bg-white border border-slate-200 rounded-xl hover:bg-[#2b90d9] hover:text-white transition-all shadow-sm">
-                          <Icon name="share-2" className="w-3.5 h-3.5 text-[#2b90d9] hover:text-white" />
-                          <span className="text-[7px] font-black uppercase tracking-tighter">Masto</span>
+                        <button
+                          onClick={() => handleMastodonShare(p)}
+                          className="flex flex-col items-center justify-center gap-1 py-2 bg-white border border-slate-200 rounded-xl hover:bg-[#2b90d9] hover:text-white transition-all shadow-sm group"
+                        >
+                          <span className="text-sm">🐘</span>
+                          <span className="text-[7px] font-black uppercase tracking-tighter group-hover:text-white">Masto</span>
+                        </button>
+
+                        {/* Bluesky */}
+                        <button
+                          onClick={() => handleBlueskyShare(p)}
+                          className="flex flex-col items-center justify-center gap-1 py-2 bg-white border border-slate-200 rounded-xl hover:bg-[#0085ff] hover:text-white transition-all shadow-sm group"
+                        >
+                          <span className="text-sm">🦋</span>
+                          <span className="text-[7px] font-black uppercase tracking-tighter group-hover:text-white">Bsky</span>
                         </button>
 
                         {/* Flipboard */}
