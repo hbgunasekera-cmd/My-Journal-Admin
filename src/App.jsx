@@ -2615,12 +2615,12 @@ Return ONLY a JSON object with exactly this structure:
                         >
                           {/* Added text-slate-800 to ensure black start state */}
                           <span className="text-sm">🐘</span>
-                          <span className="text-[7px] font-black uppercase tracking-tighter text-slate-800 group-hover:text-white">Masto</span>
+                          <span className="flex flex-col items-center justify-center gap-1 py-2 bg-white text-black border border-slate-200 rounded-xl hover:bg-black hover:text-white transition-all shadow-sm">Masto</span>
                         </button>
 
                         {/* Bluesky */}
                         <button
-                          onClick={() => handleBlueskyShare(p)}                         
+                          onClick={() => handleBlueskyShare(p)}
                           className="flex flex-col items-center justify-center gap-1 py-2 bg-white text-black border border-slate-200 rounded-xl hover:bg-black hover:text-white transition-all shadow-sm"
                         >
                           <svg
@@ -2630,7 +2630,7 @@ Return ONLY a JSON object with exactly this structure:
                             <path d="M12,2C9,2 7,4 7,7C7,10 9,12 12,12C15,12 17,10 17,7C17,4 15,2 12,2M12,14C9,14 7,16 7,19C7,22 9,24 12,24C15,24 17,22 17,19C17,16 15,14 12,14Z" transform="rotate(90 12 12)" />
                           </svg>
                           {/* Added text-slate-800 to ensure black start state */}
-                          <span className="text-[7px] font-black uppercase tracking-tighter text-slate-800 group-hover:text-white">Bsky</span>
+                          <span className="flex flex-col items-center justify-center gap-1 py-2 bg-white text-black border border-slate-200 rounded-xl hover:bg-black hover:text-white transition-all shadow-sm">Bsky</span>
                         </button>
 
                         {/* Flipboard */}
@@ -2639,9 +2639,9 @@ Return ONLY a JSON object with exactly this structure:
                           <span className="text-[7px] font-black uppercase tracking-tighter">Flip</span>
                         </button>
 
-                        
 
-{/* Twitter (X) - NEW */}
+
+                        {/* Twitter (X) - NEW */}
                         <button onClick={() => handleTwitterPush(p)} className="flex flex-col items-center justify-center gap-1 py-2 bg-white text-slate-900 border border-slate-200 rounded-xl hover:bg-slate-900 hover:text-white transition-all shadow-sm">
                           <Icon name="twitter" className="w-3.5 h-3.5" />
                           <span className="text-[7px] font-black uppercase tracking-tighter">X / Twt</span>
