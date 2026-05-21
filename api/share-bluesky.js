@@ -5,20 +5,26 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   const { text, coverImageUrl, locationName } = req.body;
-  const handle = process.env.BLUESKY_HANDLE; // e.g., yourname.bsky.social
-  const password = process.env.BLUESKY_APP_PASSWORD; // Generate an App Password in Bluesky settings
+  
+  // Credentials from Vercel Environment Variables
+  const handle = process.env.BLUESKY_HANDLE; 
+  const password = process.env.BLUESKY_APP_PASSWORD;
 
+  // 0. DEBUG: Validate Presence
   if (!handle || !password) {
+    console.error("Bluesky Error: Missing credentials in ENV.");
     return res.status(500).json({ error: "Bluesky credentials missing in ENV." });
   }
 
   try {
     const agent = new BskyAgent({ service: 'https://bsky.social' });
+    
+    // 1. AUTHENTICATE
     await agent.login({ identifier: handle, password: password });
 
     let imageBlob = null;
 
-    // 1. UPLOAD IMAGE BLOB
+    // 2. UPLOAD IMAGE BLOB
     if (coverImageUrl) {
       try {
         const imageResp = await fetch(coverImageUrl, {
@@ -37,37 +43,39 @@ export default async function handler(req, res) {
           if (uploadResponse.success) {
             imageBlob = uploadResponse.data.blob;
           }
+        } else {
+            console.warn("Bluesky Image Fetch failed, proceeding with text only.");
         }
       } catch (e) {
         console.error("Bluesky Image Processing Exception:", e.message);
       }
     }
 
-    // 2. PARSE RICH TEXT (Detects #tags and URLs automatically)
+    // 3. PARSE RICH TEXT
     const rt = new RichText({ text: text });
     await rt.detectFacets(agent); 
 
-    // 3. BUILD POST RECORD
+    // 4. BUILD POST RECORD
     const postRecord = {
       text: rt.text,
       facets: rt.facets,
       createdAt: new Date().toISOString(),
     };
 
-    // Attach image if successful
     if (imageBlob) {
       postRecord.embed = {
         $type: 'app.bsky.embed.images',
         images: [{
-          alt: `Scenic view of ${locationName}`,
+          alt: `Scenic view of ${locationName || 'my journal entry'}`,
           image: imageBlob
         }]
       };
     }
 
-    // 4. PUBLISH TO BLUESKY
+    // 5. PUBLISH
     const response = await agent.post(postRecord);
     
+    // 206 status indicates text was posted but image was skipped/failed
     const finalStatus = (coverImageUrl && !imageBlob) ? 206 : 200;
     return res.status(finalStatus).json({ 
         success: true, 
