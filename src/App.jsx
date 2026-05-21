@@ -2627,12 +2627,12 @@ Return ONLY a JSON object with exactly this structure:
                       </div>
 
                       {/* Action Footer: Social Share Buttons */}
-                      <div className="p-3 border-t border-slate-50 bg-slate-50/50 grid grid-cols-3 sm:grid-cols-6 gap-1.5">
+                      <div className="p-3 border-t border-slate-50 bg-slate-50/50 grid grid-cols-4 sm:grid-cols-8 gap-1.5">
 
                         {/* Instagram */}
                         <button
                           onClick={() => handleMetaShare(p, 'instagram', fbToken)}
-                          className="flex flex-col items-center justify-center gap-1 py-2 bg-white text-pink-600 border border-slate-200 rounded-xl hover:bg-gradient-to-tr hover:from-amber-400 hover:via-rose-500 hover:to-fuchsia-600 hover:text-white transition-all shadow-sm"
+                          className="flex flex-col items-center justify-center gap-1 py-2 bg-white text-black border border-slate-200 rounded-xl hover:bg-gradient-to-tr hover:from-amber-400 hover:via-rose-500 hover:to-fuchsia-600 hover:text-white transition-all shadow-sm"
                         >
                           <Icon name="instagram" className="w-3.5 h-3.5" />
                           <span className="text-[7px] font-black uppercase tracking-tighter">Insta</span>
@@ -2643,13 +2643,15 @@ Return ONLY a JSON object with exactly this structure:
                           onClick={() => handleMetaShare(p, 'threads', threadsToken)}
                           className="flex flex-col items-center justify-center gap-1 py-2 bg-white text-black border border-slate-200 rounded-xl hover:bg-black hover:text-white transition-all shadow-sm"
                         >
-                          {/* Utilizing the registry lookup mapping to match the clean layout configuration of Instagram */}
                           <Icon name="threads" className="w-3.5 h-3.5" />
                           <span className="text-[7px] font-black uppercase tracking-tighter">Threads</span>
                         </button>
 
                         {/* Pinterest */}
-                        <button onClick={() => setActivePinHubId(p.id)} className="flex flex-col items-center justify-center gap-1 py-2 bg-rose-50 text-rose-600 border border-rose-100 rounded-xl hover:bg-rose-600 hover:text-white transition-all shadow-sm">
+                        <button
+                          onClick={() => setActivePinHubId(p.id)}
+                          className="flex flex-col items-center justify-center gap-1 py-2 bg-white text-black border border-slate-200 rounded-xl hover:bg-rose-600 hover:text-white transition-all shadow-sm"
+                        >
                           <Icon name="heart" className="w-3.5 h-3.5" />
                           <span className="text-[7px] font-black uppercase tracking-tighter">Pin</span>
                         </button>
@@ -2678,7 +2680,10 @@ Return ONLY a JSON object with exactly this structure:
                         </button>
 
                         {/* Flipboard */}
-                        <button onClick={() => handleFlipboardShare(p)} className="flex flex-col items-center justify-center gap-1 py-2 bg-white border border-slate-200 rounded-xl hover:bg-slate-900 hover:text-white transition-all shadow-sm">
+                        <button
+                          onClick={() => handleFlipboardShare(p)}
+                          className="flex flex-col items-center justify-center gap-1 py-2 bg-white text-black border border-slate-200 rounded-xl hover:bg-slate-900 hover:text-white transition-all shadow-sm"
+                        >
                           <Icon name="refresh-cw" className="w-3.5 h-3.5" />
                           <span className="text-[7px] font-black uppercase tracking-tighter">Flip</span>
                         </button>
@@ -2686,20 +2691,20 @@ Return ONLY a JSON object with exactly this structure:
                         {/* Medium */}
                         <button
                           onClick={() => handleMediumCopy(p)}
-                          className="flex flex-col items-center justify-center gap-1 py-2 bg-white text-black border border-slate-200 rounded-xl hover:bg-slate-800 hover:text-white transition-all shadow-sm group"
+                          className="flex flex-col items-center justify-center gap-1 py-2 bg-white text-black border border-slate-200 rounded-xl hover:bg-slate-800 hover:text-white transition-all shadow-sm"
                         >
                           <span className="text-sm">📝</span>
                           <span className="text-[7px] font-black uppercase tracking-tighter">Medium</span>
                         </button>
 
-
-
-                        {/* Twitter (X) - NEW */}
-                        <button onClick={() => handleTwitterPush(p)} className="flex flex-col items-center justify-center gap-1 py-2 bg-white text-slate-900 border border-slate-200 rounded-xl hover:bg-slate-900 hover:text-white transition-all shadow-sm">
+                        {/* Twitter (X) */}
+                        <button
+                          onClick={() => handleTwitterPush(p)}
+                          className="flex flex-col items-center justify-center gap-1 py-2 bg-white text-black border border-slate-200 rounded-xl hover:bg-slate-900 hover:text-white transition-all shadow-sm"
+                        >
                           <Icon name="twitter" className="w-3.5 h-3.5" />
                           <span className="text-[7px] font-black uppercase tracking-tighter">X / Twt</span>
                         </button>
-
 
                       </div>
 
