@@ -1929,8 +1929,6 @@ Return ONLY a JSON object with exactly this structure:
       // 5. EXCLUSIVE SOURCE DETECTION (Fallback: Direct)
       let finalSource = taggedSource || "Direct";
 
-      // EXCLUSIVE SOURCE DETECTION (Fallback for legacy records without frontend tags)
-      let finalSource = taggedSource || "Direct";
 
       if (finalSource === "Direct") {
         // Search Engine Catch-all
