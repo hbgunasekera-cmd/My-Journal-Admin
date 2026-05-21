@@ -2615,7 +2615,8 @@ Return ONLY a JSON object with exactly this structure:
                           onClick={() => handleBlueskyShare(p)}
                           className="flex flex-col items-center justify-center gap-1 py-2 bg-white border border-slate-200 rounded-xl hover:bg-[#0085ff] hover:text-white transition-all shadow-sm group"
                         >
-                          <span className="text-sm">🦋</span>
+                          {/* The 'text-blue-500' ensures the emoji carries the brand color */}
+                          <span className="text-sm text-blue-500 group-hover:text-white">🦋</span>
                           <span className="text-[7px] font-black uppercase tracking-tighter group-hover:text-white">Bsky</span>
                         </button>
 
