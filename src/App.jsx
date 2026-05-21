@@ -1890,6 +1890,9 @@ Return ONLY a JSON object with exactly this structure:
       // 5. EXCLUSIVE SOURCE DETECTION (Fallback: Direct)
       let finalSource = taggedSource || "Direct";
 
+      // EXCLUSIVE SOURCE DETECTION (Fallback for legacy records without frontend tags)
+      let finalSource = taggedSource || "Direct";
+
       if (finalSource === "Direct") {
         // Search Engine Catch-all
         if (lowerUA.includes('google') || lowerUA.includes('bing') || lowerUA.includes('yahoo') || lowerUA.includes('duckduckgo') || lowerUA.includes('ecosia')) {
@@ -1904,13 +1907,16 @@ Return ONLY a JSON object with exactly this structure:
         else if (lowerUA.includes('tiktok') || lowerUA.includes('musical')) finalSource = 'TikTok';
         else if (lowerUA.includes('whatsapp')) finalSource = 'WhatsApp';
         else if (lowerUA.includes('surf.social')) finalSource = 'Surf.Social';
-        else if (lowerUA.includes('reddit')) finalSource = 'Reddit';
         else if (lowerUA.includes('youtube') || lowerUA.includes('com.google.android.youtube')) finalSource = 'YouTube';
-        else if (lowerUA.includes('pinterest')) finalSource = 'Pinterest';
+        else if (lowerUA.includes('reddit')) finalSource = 'Reddit';
         else if (lowerUA.includes('elakiri')) finalSource = 'Elakiri';
-        else if (lowerUA.includes('twitter') || lowerUA.includes('x.com')) finalSource = 'Twitter(X)';
+        else if (lowerUA.includes('pinterest')) finalSource = 'Pinterest';
         else if (lowerUA.includes('flipboard')) finalSource = 'Flipboard';
+        // Twitter(X) Detection
+        else if (lowerUA.includes('twitter') || lowerUA.includes(' x/')) finalSource = 'Twitter(X)';
+        // Fediverse / Mastodon Detection
         else if (lowerUA.includes('mastodon') || lowerUA.includes('ivory') || lowerUA.includes('tusky')) finalSource = 'Mastodon';
+        // Bluesky Detection
         else if (lowerUA.includes('bsky') || lowerUA.includes('bluesky')) finalSource = 'Bluesky';
         // Final fallback stays "Direct"
         else finalSource = "Direct";
