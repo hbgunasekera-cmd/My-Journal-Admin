@@ -656,7 +656,7 @@ function App() {
     const targetColumn = columnMap[platform];
 
     // 1. Check if already posted
-    const { data, error } = await supabase
+    const { data, error } = await supabaseClient
       .from('travel_bucket_list')
       .select(targetColumn)
       .eq('id', p.id)
@@ -672,6 +672,7 @@ function App() {
   };
 
   const updateSupabasePostStatus = async (id, platform) => {
+    
     const columnMap = {
       'instagram': 'published_instagram_at',
       'threads': 'published_threads_at',
@@ -679,7 +680,7 @@ function App() {
       'bluesky': 'published_bsky_at'
     };
 
-    await supabase
+    await   supabaseClient
       .from('travel_bucket_list')
       .update({ [columnMap[platform]]: new Date().toISOString() })
       .eq('id', id);
