@@ -888,49 +888,50 @@ function App() {
   };
 
   const pinIndividualImage = (imageUrl, index, p) => {
-    if (!p) return;
+  if (!p) return;
 
-    const locationName = p.place_name || "Island Vignette";
-    const baseUrl = "https://my-journal-view.vercel.app";
-    const shareUrl = `${baseUrl}/?place=${encodeURIComponent(locationName)}&utm_source=pinterest`;
+  const locationName = p.place_name || "Island Vignette";
+  const baseUrl = "https://my-journal-view.vercel.app";
+  const shareUrl = `${baseUrl}/?place=${encodeURIComponent(locationName)}&utm_source=pinterest`;
 
-    // Dynamic Hashtags Conversion
-    const coreTags = "#MyJournal #SriLanka #TravelSriLanka #TravelPhotography";
-    const dynamicHashtags = `${coreTags} ${getSpecificTags(p)}`.trim();
+  // Dynamic Hashtags Conversion
+  const coreTags = "#MyJournal #SriLanka #TravelSriLanka #TravelPhotography";
+  const dynamicHashtags = `${coreTags} ${getSpecificTags(p)}`.trim();
 
-    // --- SMART TEXT PARSING DESCRIPTION LOGIC ---
-    let shortDesc = "";
-    const fullStory = p.ai_article?.story || p.ai_article?.description;
+  // --- SMART TEXT PARSING DESCRIPTION LOGIC ---
+  let shortDesc = "";
+  const fullStory = p.ai_article?.story || p.ai_article?.description;
 
-    if (fullStory) {
-      const cleanText = fullStory.replace(/[#*]/g, '').trim();
-      const sentences = cleanText.match(/[^.!?]+[.!?]+/g) || [cleanText];
+  if (fullStory) {
+    const cleanText = fullStory.replace(/[#*]/g, '').trim();
+    const sentences = cleanText.match(/[^.!?]+[.!?]+/g) || [cleanText];
 
-      // Take the first clean sentence, capped intelligently around 150 chars max
-      shortDesc = sentences[0].trim();
-      if (shortDesc.length > 150) {
-        shortDesc = shortDesc.substring(0, 147).trim();
-        const lastSpace = shortDesc.lastIndexOf(" ");
-        if (lastSpace > 0) shortDesc = shortDesc.substring(0, lastSpace);
-        shortDesc += "...";
-      }
-    } else {
-      const fallbacks = [
-        `Breathtaking views at ${locationName}. A stunning escape in Sri Lanka.`,
-        `Capturing the raw beauty of ${locationName}. Island secrets revealed.`,
-        `Serene vibes and hidden landscapes. Discovering ${locationName}.`,
-        `The unique soul of ${locationName}, Sri Lanka. A visual journal.`
-      ];
-      shortDesc = fallbacks[index % fallbacks.length];
+    // Take the first clean sentence, capped intelligently around 150 chars max
+    shortDesc = sentences[0].trim();
+    if (shortDesc.length > 150) {
+      shortDesc = shortDesc.substring(0, 147).trim();
+      const lastSpace = shortDesc.lastIndexOf(" ");
+      if (lastSpace > 0) shortDesc = shortDesc.substring(0, lastSpace);
+      shortDesc += "...";
     }
+  } else {
+    const fallbacks = [
+      `Breathtaking views at ${locationName}. A stunning escape in Sri Lanka.`,
+      `Capturing the raw beauty of ${locationName}. Island secrets revealed.`,
+      `Serene vibes and hidden landscapes. Discovering ${locationName}.`,
+      `The unique soul of ${locationName}, Sri Lanka. A visual journal.`
+    ];
+    shortDesc = fallbacks[index % fallbacks.length];
+  }
 
-    const finalDescription = `${shortDesc}\n\n📍Location: ${locationName}\n© Hasitha Gunasekera\n\n${dynamicHashtags}`;
+  // --- NEW STRUCTURED DESCRIPTION WITH LOCATION HEADER ---
+  const finalDescription = `${locationName} | Nature & Adventure Travel\n\n${shortDesc}\n\n📍Location: ${locationName}\n© Hasitha Gunasekera\n\n${dynamicHashtags}`;
 
-    const pinterestUrl = `https://www.pinterest.com/pin/create/button/?url=${encodeURIComponent(shareUrl)}&media=${encodeURIComponent(imageUrl)}&description=${encodeURIComponent(finalDescription)}`;
+  const pinterestUrl = `https://www.pinterest.com/pin/create/button/?url=${encodeURIComponent(shareUrl)}&media=${encodeURIComponent(imageUrl)}&description=${encodeURIComponent(finalDescription)}`;
 
-    window.open(pinterestUrl, '_blank', 'width=750,height=600');
-    if (typeof setActivePinHubId === 'function') setActivePinHubId(null);
-  };
+  window.open(pinterestUrl, '_blank', 'width=750,height=600');
+  if (typeof setActivePinHubId === 'function') setActivePinHubId(null);
+};
 
 
   const handleFlipboardShare = async (p) => {
