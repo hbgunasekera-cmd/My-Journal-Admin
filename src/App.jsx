@@ -1062,61 +1062,33 @@ function App() {
     }
   };
 
-  const handleMediumCopy = async (p) => {
+  const handleRedditShare = (p) => {
     if (!p) return;
 
-    // 1. BASE CONTENT SETUP
     const locationName = p.place_name || "Island Vignette";
     const shareLink = `https://my-journal-view.vercel.app/?place=${encodeURIComponent(locationName)}`;
 
-    // 2. DYNAMIC HASHTAG PAYLOAD
-    // Medium handles tags via their internal UI, but including them at the bottom 
-    // of the text is a great practice for SEO/Readability.
-    const coreTags = "#MyJournal #SriLanka #TravelSriLanka #TravelPhotography";
-    const specificTags = getSpecificTags(p).split(' ').map(t => `#${t.replace('#', '')}`).join(' ');
-    const dynamicHashtags = `${coreTags} ${specificTags}`.trim();
-
-    // 3. STORY FORMATTING
-    // Medium doesn't have a strict character limit like Twitter/Mastodon.
-    // We keep the full text for better SEO results.
+    // Clean text for Reddit body
     const storyText = p.ai_article?.story || p.ai_article?.description || "";
-    const cleanText = storyText.trim();
+    const cleanText = storyText.replace(/[#*]/g, '').trim();
 
-    // 4. CONSTRUCT MARKDOWN (Native Medium Format)
-    // Medium editor automatically converts this Markdown syntax to rich text.
-    const mediumContent = `
-# ${locationName}
+    // Reddit is great for long-form, so we can include a bit more content
+    const redditDescription = `${cleanText.substring(0, 500)}...\n\n📍 Read the full journal: ${shareLink}`;
 
-![${locationName}](${p.cover_photo_url})
+    // Construct the Reddit submission URL
+    const redditUrl = `https://www.reddit.com/submit?url=${encodeURIComponent(shareLink)}&title=${encodeURIComponent(locationName)}&text=${encodeURIComponent(redditDescription)}`;
 
-${cleanText}
+    // Open in a new window
+    window.open(redditUrl, '_blank', 'width=800,height=600');
 
----
-📍 **Read the original journal entry and view coordinates here:** [My Journal](${shareLink})
-
-${dynamicHashtags}
-    `.trim();
-
-    // 5. EXECUTE COPY TO CLIPBOARD
-    try {
-      await navigator.clipboard.writeText(mediumContent);
-
-      // Toast Feedback
-      if (typeof setToast === 'function') {
-        setToast({ show: true, msg: "Copied! Paste into Medium (Ctrl+V)." });
-        setTimeout(() => setToast({ show: false, msg: "" }), 3000);
-      }
-    } catch (err) {
-      console.error("Medium Copy Error:", err);
-      if (typeof setToast === 'function') {
-        setToast({ show: true, msg: "Medium Copy Failed" });
-        setTimeout(() => setToast({ show: false, msg: "" }), 3000);
-      }
+    if (typeof setToast === 'function') {
+      setToast({ show: true, msg: "Opening Reddit..." });
+      setTimeout(() => setToast({ show: false, msg: "" }), 3000);
     }
   };
 
 
-  // 6. UTILITY & DATA SYNC FUNCTIONS ---
+  // UTILITY & DATA SYNC FUNCTIONS ---
 
   const triggerToast = (msg) => {
     setToast({ show: true, msg });
@@ -2700,13 +2672,18 @@ Return ONLY a JSON object with exactly this structure:
                           <span className="text-[7px] font-black uppercase tracking-tighter">Flip</span>
                         </button>
 
-                        {/* Medium */}
+                        {/* Reddit */}
                         <button
-                          onClick={() => handleMediumCopy(p)}
-                          className="flex flex-col items-center justify-center gap-1 py-2 bg-white text-black border border-slate-200 rounded-xl hover:bg-slate-800 hover:text-white transition-all shadow-sm"
+                          onClick={() => handleRedditShare(p)}
+                          className="flex flex-col items-center justify-center gap-1 py-2 bg-white text-black border border-slate-200 rounded-xl hover:bg-orange-600 hover:text-white transition-all shadow-sm"
                         >
-                          <span className="text-sm">📝</span>
-                          <span className="text-[7px] font-black uppercase tracking-tighter">Medium</span>
+                          <svg
+                            className="w-3.5 h-3.5 fill-current"
+                            viewBox="0 0 24 24"
+                          >
+                            <path d="M12 0C5.373 0 0 5.373 0 12c0 6.627 5.373 12 12 12s12-5.373 12-12C24 5.373 18.627 0 12 0zm5.347 17.518c-1.424 1.424-5.347 1.424-5.347 1.424s-3.923 0-5.347-1.424c-.29-.29-.29-.76 0-1.05.29-.29.76-.29 1.05 0 .977.977 3.518 1.05 4.297 1.05.779 0 3.32-.073 4.297-1.05.29-.29.76-.29 1.05 0 .29.29.29.76 0 1.05zm-6.84-4.526c0-.853-.692-1.545-1.545-1.545-.853 0-1.545.692-1.545 1.545 0 .853.692 1.545 1.545 1.545.853 0 1.545-.692 1.545-1.545zm6.182 0c0-.853-.692-1.545-1.545-1.545-.853 0-1.545.692-1.545 1.545 0 .853.692 1.545 1.545 1.545.853 0 1.545-.692 1.545-1.545z" />
+                          </svg>
+                          <span className="text-[7px] font-black uppercase tracking-tighter">Reddit</span>
                         </button>
 
                         {/* Twitter (X) */}
