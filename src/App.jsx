@@ -2666,7 +2666,7 @@ Return ONLY a JSON object with exactly this structure:
                         {/* Flipboard */}
                         <button
                           onClick={() => handleFlipboardShare(p)}
-                          className="flex flex-col items-center justify-center gap-1 py-2 bg-white text-black border border-slate-200 rounded-xl hover:bg-slate-900 hover:text-white transition-all shadow-sm"
+                          className="flex flex-col items-center justify-center gap-1 py-2 bg-white text-black border border-slate-200 rounded-xl hover:bg-red-900 hover:text-white transition-all shadow-sm"
                         >
                           <Icon name="refresh-cw" className="w-3.5 h-3.5" />
                           <span className="text-[7px] font-black uppercase tracking-tighter">Flip</span>
