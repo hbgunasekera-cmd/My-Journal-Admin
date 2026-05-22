@@ -1063,29 +1063,29 @@ function App() {
   };
 
   const handleRedditShare = (p) => {
-    if (!p) return;
+  if (!p) return;
 
-    const locationName = p.place_name || "Island Vignette";
-    const shareLink = `https://my-journal-view.vercel.app/?place=${encodeURIComponent(locationName)}`;
+  const locationName = p.place_name || "Island Vignette";
+  
+  // 1. Construct a "Scraper-Friendly" Link
+  // We include the proxied image URL as a query param so your page meta-tags can find it
+  const baseUrl = "https://my-journal-view.vercel.app";
+  const proxiedImage = `https://my-journal-admin.vercel.app/api/ig-image-proxy?url=${encodeURIComponent(p.cover_photo_url)}&ignore=/image.jpg`;
+  
+  const shareLink = `${baseUrl}/?place=${encodeURIComponent(locationName)}&og_image=${encodeURIComponent(proxiedImage)}`;
+  
+  // 2. Prepare Content
+  const storyText = p.ai_article?.story || p.ai_article?.description || "";
+  const cleanText = storyText.replace(/[#*]/g, '').trim();
+  const redditDescription = `${cleanText.substring(0, 400)}...\n\nRead more at: ${shareLink}`;
 
-    // Clean text for Reddit body
-    const storyText = p.ai_article?.story || p.ai_article?.description || "";
-    const cleanText = storyText.replace(/[#*]/g, '').trim();
+  // 3. Open Reddit Submission
+  // Note: Reddit's 'submit' URL does not natively 'attach' images. 
+  // It fetches them via the scraper.
+  const redditUrl = `https://www.reddit.com/submit?url=${encodeURIComponent(shareLink)}&title=${encodeURIComponent(locationName)}&text=${encodeURIComponent(redditDescription)}`;
 
-    // Reddit is great for long-form, so we can include a bit more content
-    const redditDescription = `${cleanText.substring(0, 500)}...\n\n📍 Read the full journal: ${shareLink}`;
-
-    // Construct the Reddit submission URL
-    const redditUrl = `https://www.reddit.com/submit?url=${encodeURIComponent(shareLink)}&title=${encodeURIComponent(locationName)}&text=${encodeURIComponent(redditDescription)}`;
-
-    // Open in a new window
-    window.open(redditUrl, '_blank', 'width=800,height=600');
-
-    if (typeof setToast === 'function') {
-      setToast({ show: true, msg: "Opening Reddit..." });
-      setTimeout(() => setToast({ show: false, msg: "" }), 3000);
-    }
-  };
+  window.open(redditUrl, '_blank', 'width=800,height=600');
+};
 
 
   // UTILITY & DATA SYNC FUNCTIONS ---
@@ -2666,7 +2666,7 @@ Return ONLY a JSON object with exactly this structure:
                         {/* Flipboard */}
                         <button
                           onClick={() => handleFlipboardShare(p)}
-                          className="flex flex-col items-center justify-center gap-1 py-2 bg-white text-black border border-slate-200 rounded-xl hover:bg-red-500 hover:text-white transition-all shadow-sm"
+                          className="flex flex-col items-center justify-center gap-1 py-2 bg-white text-black border border-slate-200 rounded-xl hover:bg-red-300 hover:text-white transition-all shadow-sm"
                         >
                           <Icon name="refresh-cw" className="w-3.5 h-3.5" />
                           <span className="text-[7px] font-black uppercase tracking-tighter">Flip</span>
