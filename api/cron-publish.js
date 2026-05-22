@@ -19,7 +19,7 @@ export default async function handler(req, res) {
     const { data: places, error: fetchError } = await supabase
       .from('travel_bucket_list')
       .select('*')
-      .in('status', ['done', 'completed'])
+      .in('status', ['done'])
       .not('ai_article', 'is', null)
       .or('published_instagram_at.is.null,published_threads_at.is.null,published_masto_at.is.null,published_bsky_at.is.null')
       .order('created_at', { ascending: true })
