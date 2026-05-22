@@ -261,6 +261,13 @@ function App() {
   const [fbToken, setFbToken] = useState("");
   const [threadsToken, setThreadsToken] = useState("");
 
+  const PLATFORM_COLUMNS = {
+    instagram: 'published_instagram_at',
+    threads: 'published_threads_at',
+    mastodon: 'published_masto_at',
+    bluesky: 'published_bsky_at'
+  };
+
   // --- Auth & UI States ---
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [loginLoading, setLoginLoading] = useState(false);
@@ -645,46 +652,40 @@ function App() {
   // ==========================================
 
   const checkAndPost = async (p, platform, shareAction) => {
+    if (!p) return;
+    const targetColumn = PLATFORM_COLUMNS[platform];
 
-    const columnMap = {
-      'instagram': 'published_instagram_at',
-      'threads': 'published_threads_at',
-      'mastodon': 'published_masto_at',
-      'bluesky': 'published_bsky_at'
-    };
-
-    const targetColumn = columnMap[platform];
-
-    // 1. Check if already posted
-    const { data, error } = await supabaseClient
+    const { data } = await supabaseClient
       .from('travel_bucket_list')
       .select(targetColumn)
       .eq('id', p.id)
       .single();
 
     if (data?.[targetColumn]) {
-      setToast?.({ show: true, msg: `Already shared to ${platform.charAt(0).toUpperCase() + platform.slice(1)}!` });
+      const name = platform.charAt(0).toUpperCase() + platform.slice(1);
+
+      // Set the message
+      setToast?.({ show: true, msg: `Already shared to ${name}!` });
+
+      // Automatically hide after 3 seconds
+      setTimeout(() => {
+        setToast?.({ show: false, msg: "" });
+      }, 3000);
+
       return;
     }
 
-    // 2. If not posted, execute the actual share function
     await shareAction();
   };
 
   const updateSupabasePostStatus = async (id, platform) => {
-    
-    const columnMap = {
-      'instagram': 'published_instagram_at',
-      'threads': 'published_threads_at',
-      'mastodon': 'published_masto_at',
-      'bluesky': 'published_bsky_at'
-    };
-
-    await   supabaseClient
+    const targetColumn = PLATFORM_COLUMNS[platform];
+    await supabaseClient
       .from('travel_bucket_list')
-      .update({ [columnMap[platform]]: new Date().toISOString() })
+      .update({ [targetColumn]: new Date().toISOString() })
       .eq('id', id);
   };
+
 
   // ==========================================
   // 1. CENTRALIZED TAG GENERATOR HELPER
@@ -719,35 +720,14 @@ function App() {
   // ==========================================
 
   const handleMetaShare = async (p, platform, accessToken) => {
-    if (!p) return;
-
-    // --- 0. PRE-FLIGHT GUARD: Check Database ---
-    const columnMap = { 'instagram': 'published_instagram_at', 'threads': 'published_threads_at' };
-    const targetColumn = columnMap[platform];
-
-    const { data: statusCheck } = await supabase
-      .from('travel_bucket_list')
-      .select(targetColumn)
-      .eq('id', p.id)
-      .single();
-
-    if (statusCheck?.[targetColumn]) {
-      setToast?.({ show: true, msg: `Already shared to ${platform}!` });
-      return;
-    }
-
-    // 1. Build context-aware metadata targets
     const locationName = p.place_name || "Island Vignette";
     const shareLink = `https://my-journal-viewer.vercel.app/?place=${encodeURIComponent(locationName)}`;
-
     const coreTags = "#MyJournal #SriLanka #TravelSriLanka #TravelPhotography";
     const dynamicHashtags = `${coreTags} ${getSpecificTags(p)}`.trim();
 
-    // 2. Extract and clean the primary text snippet
     const storyText = p.ai_article?.story || p.ai_article?.description || "";
     const cleanText = storyText.replace(/[#*]/g, '').trim();
 
-    // 3. Unified Smart Truncation
     const platformLimit = platform === 'threads' ? 500 : 2200;
     const fixedCost = locationName.length + shareLink.length + dynamicHashtags.length + 40;
     const maxDescBudget = Math.max(0, platformLimit - fixedCost - 5);
@@ -758,11 +738,8 @@ function App() {
 
     for (let sentence of sentences) {
       const candidate = (tempDesc + " " + sentence.trim()).trim();
-      if (candidate.length <= maxDescBudget) {
-        tempDesc = candidate;
-      } else {
-        break;
-      }
+      if (candidate.length <= maxDescBudget) tempDesc = candidate;
+      else break;
     }
 
     if (!tempDesc && cleanText) {
@@ -773,9 +750,7 @@ function App() {
     }
     shortDesc = tempDesc;
 
-    // 4. Structure the final copy
     const socialText = `📍 ${locationName}\n\n${shortDesc}\n\n🔗 Explore more entries:\n${shareLink}\n\n${dynamicHashtags}`;
-
     const platformName = platform.charAt(0).toUpperCase() + platform.slice(1);
     setToast?.({ show: true, msg: `Publishing to ${platformName}...` });
 
@@ -784,7 +759,7 @@ function App() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          platform: platform,
+          platform,
           text: socialText,
           imageUrl: p.cover_photo_url,
           link: shareLink,
@@ -792,19 +767,14 @@ function App() {
         }),
       });
 
-      if (response.ok) {
-        // --- SUCCESS: Update Supabase ---
-        await supabase
-          .from('travel_bucket_list')
-          .update({ [targetColumn]: new Date().toISOString() })
-          .eq('id', p.id);
-
-        setToast?.({ show: true, msg: `Live on ${platformName}!` });
-        setTimeout(() => setToast?.({ show: false, msg: "" }), 3000);
-      } else {
+      if (!response.ok) {
         const errData = await response.json();
         throw new Error(errData.error || `Failed to post to ${platform}`);
       }
+
+      await updateSupabasePostStatus(p.id, platform);
+      setToast?.({ show: true, msg: `Live on ${platformName}!` });
+      setTimeout(() => setToast?.({ show: false, msg: "" }), 3000);
     } catch (err) {
       console.error(`${platform} Integration Error:`, err);
       let cleanMessage = err.message || "Unknown error occurred.";
@@ -817,32 +787,14 @@ function App() {
   };
 
   const handleMastodonShare = async (p) => {
-    if (!p) return;
-
-    // --- 0. PRE-FLIGHT GUARD: Check Database ---
-    const { data: statusCheck } = await supabase
-      .from('travel_bucket_list')
-      .select('published_masto_at')
-      .eq('id', p.id)
-      .single();
-
-    if (statusCheck?.published_masto_at) {
-      setToast?.({ show: true, msg: "Already shared to Mastodon!" });
-      return;
-    }
-
-    // 1. BASE CONTENT SETUP
     const locationName = p.place_name || "Island Vignette";
     const shareLink = `https://my-journal-view.vercel.app/?place=${encodeURIComponent(locationName)}`;
-
-    // --- 2. DYNAMIC HASHTAG PAYLOAD ---
     const coreTags = "#MyJournal #SriLanka #TravelSriLanka #TravelPhotography";
     const dynamicHashtags = `${coreTags} ${getSpecificTags(p)}`.trim();
 
     const storyText = p.ai_article?.story || p.ai_article?.description || "";
     const cleanText = storyText.replace(/[#*]/g, '').trim();
 
-    // 3. DYNAMIC CHARACTER BUDGETING
     const fixedCost = locationName.length + 4 + 7 + 23 + 4 + dynamicHashtags.length;
     const maxDescBudget = 500 - fixedCost - 5;
 
@@ -851,11 +803,8 @@ function App() {
 
     for (let sentence of sentences) {
       const candidate = (shortDesc + " " + sentence.trim()).trim();
-      if (candidate.length <= maxDescBudget) {
-        shortDesc = candidate;
-      } else {
-        break;
-      }
+      if (candidate.length <= maxDescBudget) shortDesc = candidate;
+      else break;
     }
 
     if (!shortDesc && cleanText) {
@@ -866,33 +815,20 @@ function App() {
     }
 
     const tootText = `${locationName}\n\n${shortDesc}\n\n 📍Location: ${shareLink}\n\n${dynamicHashtags}`;
-
     setToast?.({ show: true, msg: "Publishing to Mastodon..." });
 
-    // 4. CALL PROXY API
     try {
       const response = await fetch('/api/share-mastodon', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tootText,
-          coverImageUrl: p.cover_photo_url,
-          locationName
-        }),
+        body: JSON.stringify({ tootText, coverImageUrl: p.cover_photo_url, locationName }),
       });
 
-      if (response.ok) {
-        // --- SUCCESS: Update Supabase ---
-        await supabase
-          .from('travel_bucket_list')
-          .update({ published_masto_at: new Date().toISOString() })
-          .eq('id', p.id);
+      if (!response.ok) throw new Error("Failed to post to Mastodon");
 
-        setToast?.({ show: true, msg: "Shared to Mastodon!" });
-        setTimeout(() => setToast?.({ show: false, msg: "" }), 3000);
-      } else {
-        throw new Error("Failed to post to Mastodon");
-      }
+      await updateSupabasePostStatus(p.id, 'mastodon');
+      setToast?.({ show: true, msg: "Shared to Mastodon!" });
+      setTimeout(() => setToast?.({ show: false, msg: "" }), 3000);
     } catch (err) {
       console.error("Mastodon Error:", err);
       setToast?.({ show: true, msg: "Mastodon Error" });
@@ -901,25 +837,8 @@ function App() {
   };
 
   const handleBlueskyShare = async (p) => {
-    if (!p) return;
-
-    // --- 0. PRE-FLIGHT GUARD: Check Database ---
-    const { data: statusCheck } = await supabase
-      .from('travel_bucket_list')
-      .select('published_bsky_at')
-      .eq('id', p.id)
-      .single();
-
-    if (statusCheck?.published_bsky_at) {
-      setToast?.({ show: true, msg: "Already shared to Bluesky!" });
-      return;
-    }
-
-    // 1. BASE CONTENT SETUP
     const locationName = p.place_name || "Island Vignette";
     const shareLink = `https://my-journal-view.vercel.app/?place=${encodeURIComponent(locationName)}`;
-
-    // --- 2. DYNAMIC HASHTAG PAYLOAD ---
     const coreTags = "#MyJournal #SriLanka";
     const specificTags = getSpecificTags(p).split(' ').slice(0, 2).join(' ');
     const dynamicHashtags = `${coreTags} ${specificTags}`.trim();
@@ -927,21 +846,16 @@ function App() {
     const storyText = p.ai_article?.story || p.ai_article?.description || "";
     const cleanText = storyText.replace(/[#*]/g, '').trim();
 
-    // 3. DYNAMIC CHARACTER BUDGETING
     const fixedCost = locationName.length + 4 + 7 + shareLink.length + 4 + dynamicHashtags.length;
     const maxDescBudget = 300 - fixedCost - 5;
 
-    // 4. SMART TEXT PARSING
     const sentences = cleanText.match(/[^.!?]+[.!?]+/g) || [cleanText];
     let shortDesc = "";
 
     for (let sentence of sentences) {
       const candidate = (shortDesc + " " + sentence.trim()).trim();
-      if (candidate.length <= maxDescBudget) {
-        shortDesc = candidate;
-      } else {
-        break;
-      }
+      if (candidate.length <= maxDescBudget) shortDesc = candidate;
+      else break;
     }
 
     if (!shortDesc && cleanText) {
@@ -952,42 +866,26 @@ function App() {
     }
 
     const bskyText = `${locationName}\n\n${shortDesc}\n\n 📍Location: ${shareLink}\n\n${dynamicHashtags}`;
-
     setToast?.({ show: true, msg: "Publishing to Bluesky..." });
 
-    // 5. CALL PROXY API
     try {
       const response = await fetch('/api/share-bluesky', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          text: bskyText,
-          coverImageUrl: p.cover_photo_url,
-          locationName
-        }),
+        body: JSON.stringify({ text: bskyText, coverImageUrl: p.cover_photo_url, locationName }),
       });
 
-      if (response.ok) {
-        // --- SUCCESS: Update Supabase ---
-        await supabase
-          .from('travel_bucket_list')
-          .update({ published_bsky_at: new Date().toISOString() })
-          .eq('id', p.id);
+      if (!response.ok) throw new Error("Failed to post to Bluesky");
 
-        setToast?.({ show: true, msg: "Shared to Bluesky!" });
-        setTimeout(() => setToast?.({ show: false, msg: "" }), 3000);
-      } else {
-        throw new Error("Failed to post to Bluesky");
-      }
+      await updateSupabasePostStatus(p.id, 'bluesky');
+      setToast?.({ show: true, msg: "Shared to Bluesky!" });
+      setTimeout(() => setToast?.({ show: false, msg: "" }), 3000);
     } catch (err) {
       console.error("Bluesky Error:", err);
       setToast?.({ show: true, msg: "Bluesky Error" });
       setTimeout(() => setToast?.({ show: false, msg: "" }), 3000);
     }
   };
-
-
-
 
   const pinIndividualImage = (imageUrl, index, p) => {
     if (!p) return;
