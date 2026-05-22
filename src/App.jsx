@@ -641,6 +641,47 @@ function App() {
   // --- Social Sharing Logic ---
 
   // ==========================================
+  // 0. POST SHARE VALIDATOR
+  // ==========================================
+
+  const checkAndPost = async (p, platform, shareAction) => {
+    const columnMap = {
+      'instagram': 'published_instagram_at',
+      'threads': 'published_threads_at',
+      'mastodon': 'published_masto_at',
+      'bluesky': 'published_bsky_at'
+    };
+
+    const { data, error } = await supabase
+      .from('travel_bucket_list')
+      .select(columnMap[platform])
+      .eq('id', p.id)
+      .single();
+
+    if (data?.[columnMap[platform]]) {
+      setToast?.({ show: true, msg: `Already shared to ${platform}!` });
+      return;
+    }
+
+    // Proceed with the actual sharing function
+    await shareAction();
+  };
+
+  const updateSupabasePostStatus = async (id, platform) => {
+    const columnMap = {
+      'instagram': 'published_instagram_at',
+      'threads': 'published_threads_at',
+      'mastodon': 'published_masto_at',
+      'bluesky': 'published_bsky_at'
+    };
+
+    await supabase
+      .from('travel_bucket_list')
+      .update({ [columnMap[platform]]: new Date().toISOString() })
+      .eq('id', id);
+  };
+
+  // ==========================================
   // 1. CENTRALIZED TAG GENERATOR HELPER
   // ==========================================
   const getSpecificTags = (place) => {
@@ -675,11 +716,25 @@ function App() {
   const handleMetaShare = async (p, platform, accessToken) => {
     if (!p) return;
 
+    // --- 0. PRE-FLIGHT GUARD: Check Database ---
+    const columnMap = { 'instagram': 'published_instagram_at', 'threads': 'published_threads_at' };
+    const targetColumn = columnMap[platform];
+
+    const { data: statusCheck } = await supabase
+      .from('travel_bucket_list')
+      .select(targetColumn)
+      .eq('id', p.id)
+      .single();
+
+    if (statusCheck?.[targetColumn]) {
+      setToast?.({ show: true, msg: `Already shared to ${platform}!` });
+      return;
+    }
+
     // 1. Build context-aware metadata targets
     const locationName = p.place_name || "Island Vignette";
     const shareLink = `https://my-journal-viewer.vercel.app/?place=${encodeURIComponent(locationName)}`;
 
-    // Dynamic Hashtags Conversion
     const coreTags = "#MyJournal #SriLanka #TravelSriLanka #TravelPhotography";
     const dynamicHashtags = `${coreTags} ${getSpecificTags(p)}`.trim();
 
@@ -689,7 +744,7 @@ function App() {
 
     // 3. Unified Smart Truncation
     const platformLimit = platform === 'threads' ? 500 : 2200;
-    const fixedCost = locationName.length + shareLink.length + dynamicHashtags.length + 40; // 40 = buffer for icons/newlines
+    const fixedCost = locationName.length + shareLink.length + dynamicHashtags.length + 40;
     const maxDescBudget = Math.max(0, platformLimit - fixedCost - 5);
 
     let shortDesc = cleanText;
@@ -705,7 +760,6 @@ function App() {
       }
     }
 
-    // Fallback if no full sentences fit
     if (!tempDesc && cleanText) {
       tempDesc = cleanText.substring(0, maxDescBudget).trim();
       const lastSpace = tempDesc.lastIndexOf(" ");
@@ -717,10 +771,8 @@ function App() {
     // 4. Structure the final copy
     const socialText = `📍 ${locationName}\n\n${shortDesc}\n\n🔗 Explore more entries:\n${shareLink}\n\n${dynamicHashtags}`;
 
-    if (typeof setToast === 'function') {
-      const platformName = platform.charAt(0).toUpperCase() + platform.slice(1);
-      setToast({ show: true, msg: `Publishing to ${platformName}` });
-    }
+    const platformName = platform.charAt(0).toUpperCase() + platform.slice(1);
+    setToast?.({ show: true, msg: `Publishing to ${platformName}...` });
 
     try {
       const response = await fetch('/api/share-meta', {
@@ -736,7 +788,12 @@ function App() {
       });
 
       if (response.ok) {
-        const platformName = platform.charAt(0).toUpperCase() + platform.slice(1);
+        // --- SUCCESS: Update Supabase ---
+        await supabase
+          .from('travel_bucket_list')
+          .update({ [targetColumn]: new Date().toISOString() })
+          .eq('id', p.id);
+
         setToast?.({ show: true, msg: `Live on ${platformName}!` });
         setTimeout(() => setToast?.({ show: false, msg: "" }), 3000);
       } else {
@@ -746,35 +803,43 @@ function App() {
     } catch (err) {
       console.error(`${platform} Integration Error:`, err);
       let cleanMessage = err.message || "Unknown error occurred.";
-
       if (/access token|session|logged out|190/i.test(err.message)) {
         cleanMessage = "Session expired! Please re-authenticate your 60-day token.";
       }
-
       setToast?.({ show: true, msg: cleanMessage });
       setTimeout(() => setToast?.({ show: false, msg: "" }), 6000);
     }
   };
 
-
-  const handleTwitterPush = async (p) => {
+  const handleMastodonShare = async (p) => {
     if (!p) return;
 
-    // 1. CONTENT SETUP
-    const locationName = p.place_name || "Island Vignette";
-    const shareLink = `https://my-journal-viewer.vercel.app/?place=${encodeURIComponent(locationName)}`;
+    // --- 0. PRE-FLIGHT GUARD: Check Database ---
+    const { data: statusCheck } = await supabase
+      .from('travel_bucket_list')
+      .select('published_masto_at')
+      .eq('id', p.id)
+      .single();
 
-    // Dynamic Hashtags Conversion
+    if (statusCheck?.published_masto_at) {
+      setToast?.({ show: true, msg: "Already shared to Mastodon!" });
+      return;
+    }
+
+    // 1. BASE CONTENT SETUP
+    const locationName = p.place_name || "Island Vignette";
+    const shareLink = `https://my-journal-view.vercel.app/?place=${encodeURIComponent(locationName)}`;
+
+    // --- 2. DYNAMIC HASHTAG PAYLOAD ---
     const coreTags = "#MyJournal #SriLanka #TravelSriLanka #TravelPhotography";
     const dynamicHashtags = `${coreTags} ${getSpecificTags(p)}`.trim();
 
     const storyText = p.ai_article?.story || p.ai_article?.description || "";
     const cleanText = storyText.replace(/[#*]/g, '').trim();
 
-    // --- X (TWITTER) CHARACTER LIMIT HANDLING ---
-    // X treats links natively as 23 characters
-    const fixedCost = locationName.length + 4 + 11 + 23 + 4 + dynamicHashtags.length;
-    const maxDescBudget = 280 - fixedCost - 5; // Standard strict ceiling limits
+    // 3. DYNAMIC CHARACTER BUDGETING
+    const fixedCost = locationName.length + 4 + 7 + 23 + 4 + dynamicHashtags.length;
+    const maxDescBudget = 500 - fixedCost - 5;
 
     const sentences = cleanText.match(/[^.!?]+[.!?]+/g) || [cleanText];
     let shortDesc = "";
@@ -795,27 +860,128 @@ function App() {
       shortDesc += "...";
     }
 
-    const tweetText = `${locationName}\n\n${shortDesc}\n\n📍Location: ${shareLink}\n\n${dynamicHashtags}`;
+    const tootText = `${locationName}\n\n${shortDesc}\n\n 📍Location: ${shareLink}\n\n${dynamicHashtags}`;
 
-    // 2. COPY TO CLIPBOARD & UI FEEDBACK
+    setToast?.({ show: true, msg: "Publishing to Mastodon..." });
+
+    // 4. CALL PROXY API
     try {
-      await navigator.clipboard.writeText(tweetText);
-      if (typeof setToast === 'function') {
-        setToast({ show: true, msg: "Caption copied! Opening X..." });
+      const response = await fetch('/api/share-mastodon', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tootText,
+          coverImageUrl: p.cover_photo_url,
+          locationName
+        }),
+      });
+
+      if (response.ok) {
+        // --- SUCCESS: Update Supabase ---
+        await supabase
+          .from('travel_bucket_list')
+          .update({ published_masto_at: new Date().toISOString() })
+          .eq('id', p.id);
+
+        setToast?.({ show: true, msg: "Shared to Mastodon!" });
         setTimeout(() => setToast?.({ show: false, msg: "" }), 3000);
+      } else {
+        throw new Error("Failed to post to Mastodon");
       }
     } catch (err) {
-      console.error("Clipboard Error:", err);
-      if (typeof setToast === 'function') {
-        setToast({ show: true, msg: "Opening X composer..." });
-        setTimeout(() => setToast?.({ show: false, msg: "" }), 3000);
+      console.error("Mastodon Error:", err);
+      setToast?.({ show: true, msg: "Mastodon Error" });
+      setTimeout(() => setToast?.({ show: false, msg: "" }), 3000);
+    }
+  };
+
+  const handleBlueskyShare = async (p) => {
+    if (!p) return;
+
+    // --- 0. PRE-FLIGHT GUARD: Check Database ---
+    const { data: statusCheck } = await supabase
+      .from('travel_bucket_list')
+      .select('published_bsky_at')
+      .eq('id', p.id)
+      .single();
+
+    if (statusCheck?.published_bsky_at) {
+      setToast?.({ show: true, msg: "Already shared to Bluesky!" });
+      return;
+    }
+
+    // 1. BASE CONTENT SETUP
+    const locationName = p.place_name || "Island Vignette";
+    const shareLink = `https://my-journal-view.vercel.app/?place=${encodeURIComponent(locationName)}`;
+
+    // --- 2. DYNAMIC HASHTAG PAYLOAD ---
+    const coreTags = "#MyJournal #SriLanka";
+    const specificTags = getSpecificTags(p).split(' ').slice(0, 2).join(' ');
+    const dynamicHashtags = `${coreTags} ${specificTags}`.trim();
+
+    const storyText = p.ai_article?.story || p.ai_article?.description || "";
+    const cleanText = storyText.replace(/[#*]/g, '').trim();
+
+    // 3. DYNAMIC CHARACTER BUDGETING
+    const fixedCost = locationName.length + 4 + 7 + shareLink.length + 4 + dynamicHashtags.length;
+    const maxDescBudget = 300 - fixedCost - 5;
+
+    // 4. SMART TEXT PARSING
+    const sentences = cleanText.match(/[^.!?]+[.!?]+/g) || [cleanText];
+    let shortDesc = "";
+
+    for (let sentence of sentences) {
+      const candidate = (shortDesc + " " + sentence.trim()).trim();
+      if (candidate.length <= maxDescBudget) {
+        shortDesc = candidate;
+      } else {
+        break;
       }
     }
 
-    // 3. LAUNCH X COMPOSER
-    const twitterIntentUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(tweetText)}`;
-    window.open(twitterIntentUrl, '_blank', 'noopener,noreferrer');
+    if (!shortDesc && cleanText) {
+      shortDesc = cleanText.substring(0, maxDescBudget).trim();
+      const lastSpace = shortDesc.lastIndexOf(" ");
+      if (lastSpace > 0) shortDesc = shortDesc.substring(0, lastSpace);
+      shortDesc += "...";
+    }
+
+    const bskyText = `${locationName}\n\n${shortDesc}\n\n 📍Location: ${shareLink}\n\n${dynamicHashtags}`;
+
+    setToast?.({ show: true, msg: "Publishing to Bluesky..." });
+
+    // 5. CALL PROXY API
+    try {
+      const response = await fetch('/api/share-bluesky', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: bskyText,
+          coverImageUrl: p.cover_photo_url,
+          locationName
+        }),
+      });
+
+      if (response.ok) {
+        // --- SUCCESS: Update Supabase ---
+        await supabase
+          .from('travel_bucket_list')
+          .update({ published_bsky_at: new Date().toISOString() })
+          .eq('id', p.id);
+
+        setToast?.({ show: true, msg: "Shared to Bluesky!" });
+        setTimeout(() => setToast?.({ show: false, msg: "" }), 3000);
+      } else {
+        throw new Error("Failed to post to Bluesky");
+      }
+    } catch (err) {
+      console.error("Bluesky Error:", err);
+      setToast?.({ show: true, msg: "Bluesky Error" });
+      setTimeout(() => setToast?.({ show: false, msg: "" }), 3000);
+    }
   };
+
+
 
 
   const pinIndividualImage = (imageUrl, index, p) => {
@@ -925,27 +1091,25 @@ function App() {
     );
   };
 
-
-  const handleMastodonShare = async (p) => {
+  const handleTwitterPush = async (p) => {
     if (!p) return;
 
-    // 1. BASE CONTENT SETUP
+    // 1. CONTENT SETUP
     const locationName = p.place_name || "Island Vignette";
-    const shareLink = `https://my-journal-view.vercel.app/?place=${encodeURIComponent(locationName)}`;
+    const shareLink = `https://my-journal-viewer.vercel.app/?place=${encodeURIComponent(locationName)}`;
 
-    // --- 2. DYNAMIC HASHTAG PAYLOAD ---
+    // Dynamic Hashtags Conversion
     const coreTags = "#MyJournal #SriLanka #TravelSriLanka #TravelPhotography";
     const dynamicHashtags = `${coreTags} ${getSpecificTags(p)}`.trim();
 
-    // Clean up text by removing markdown artifacts
     const storyText = p.ai_article?.story || p.ai_article?.description || "";
     const cleanText = storyText.replace(/[#*]/g, '').trim();
 
-    // 3. DYNAMIC CHARACTER BUDGETING (Mastodon counts URLs as exactly 23 characters)
-    const fixedCost = locationName.length + 4 + 7 + 23 + 4 + dynamicHashtags.length;
-    const maxDescBudget = 500 - fixedCost - 5; // Strict limit with a 5-character safety buffer
+    // --- X (TWITTER) CHARACTER LIMIT HANDLING ---
+    // X treats links natively as 23 characters
+    const fixedCost = locationName.length + 4 + 11 + 23 + 4 + dynamicHashtags.length;
+    const maxDescBudget = 280 - fixedCost - 5; // Standard strict ceiling limits
 
-    // 4. SMART TEXT PARSING (Ensures grammatically complete sentences)
     const sentences = cleanText.match(/[^.!?]+[.!?]+/g) || [cleanText];
     let shortDesc = "";
 
@@ -954,11 +1118,10 @@ function App() {
       if (candidate.length <= maxDescBudget) {
         shortDesc = candidate;
       } else {
-        break; // Stop adding text before it cuts off grammatically
+        break;
       }
     }
 
-    // Fallback protection in case a single starting sentence is longer than the budget
     if (!shortDesc && cleanText) {
       shortDesc = cleanText.substring(0, maxDescBudget).trim();
       const lastSpace = shortDesc.lastIndexOf(" ");
@@ -966,126 +1129,53 @@ function App() {
       shortDesc += "...";
     }
 
-    // 5. CONSTRUCT THE COMPLIANT TOOT
-    const tootText = `${locationName}\n\n${shortDesc}\n\n 📍Location: ${shareLink}\n\n${dynamicHashtags}`;
+    const tweetText = `${locationName}\n\n${shortDesc}\n\n📍Location: ${shareLink}\n\n${dynamicHashtags}`;
 
-    // 6. CALL PROXY API
+    // 2. COPY TO CLIPBOARD & UI FEEDBACK
     try {
-      const response = await fetch('/api/share-mastodon', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tootText,
-          coverImageUrl: p.cover_photo_url,
-          locationName
-        }),
-      });
-
-      if (response.ok) {
-        setToast?.({ show: true, msg: "Shared to Mastodon!" });
+      await navigator.clipboard.writeText(tweetText);
+      if (typeof setToast === 'function') {
+        setToast({ show: true, msg: "Caption copied! Opening X..." });
         setTimeout(() => setToast?.({ show: false, msg: "" }), 3000);
       }
     } catch (err) {
-      console.error("Mastodon Error:", err);
-      setToast?.({ show: true, msg: "Mastodon Error" });
-      setTimeout(() => setToast?.({ show: false, msg: "" }), 3000);
-    }
-  };
-
-  const handleBlueskyShare = async (p) => {
-    if (!p) return;
-
-    // 1. BASE CONTENT SETUP
-    const locationName = p.place_name || "Island Vignette";
-    const shareLink = `https://my-journal-view.vercel.app/?place=${encodeURIComponent(locationName)}`;
-
-    // --- 2. DYNAMIC HASHTAG PAYLOAD (Trimmed for Bluesky's 300 limit) ---
-    const coreTags = "#MyJournal #SriLanka";
-    // We limit specific tags to 2 max so they don't eat the description budget
-    const specificTags = getSpecificTags(p).split(' ').slice(0, 2).join(' ');
-    const dynamicHashtags = `${coreTags} ${specificTags}`.trim();
-
-    // Clean up text by removing markdown artifacts
-    const storyText = p.ai_article?.story || p.ai_article?.description || "";
-    const cleanText = storyText.replace(/[#*]/g, '').trim();
-
-    // 3. DYNAMIC CHARACTER BUDGETING (Bluesky absolute limit is 300)
-    const fixedCost = locationName.length + 4 + 7 + shareLink.length + 4 + dynamicHashtags.length;
-    const maxDescBudget = 300 - fixedCost - 5; // Strict limit with a 5-character safety buffer
-
-    // 4. SMART TEXT PARSING (Ensures grammatically complete sentences)
-    const sentences = cleanText.match(/[^.!?]+[.!?]+/g) || [cleanText];
-    let shortDesc = "";
-
-    for (let sentence of sentences) {
-      const candidate = (shortDesc + " " + sentence.trim()).trim();
-      if (candidate.length <= maxDescBudget) {
-        shortDesc = candidate;
-      } else {
-        break; // Stop adding text before it cuts off grammatically
-      }
-    }
-
-    // Fallback protection in case a single starting sentence is longer than the budget
-    if (!shortDesc && cleanText) {
-      shortDesc = cleanText.substring(0, maxDescBudget).trim();
-      const lastSpace = shortDesc.lastIndexOf(" ");
-      if (lastSpace > 0) shortDesc = shortDesc.substring(0, lastSpace);
-      shortDesc += "...";
-    }
-
-    // 5. CONSTRUCT THE COMPLIANT POST
-    const bskyText = `${locationName}\n\n${shortDesc}\n\n 📍Location: ${shareLink}\n\n${dynamicHashtags}`;
-
-    // 6. CALL PROXY API
-    try {
-      const response = await fetch('/api/share-bluesky', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          text: bskyText,
-          coverImageUrl: p.cover_photo_url,
-          locationName
-        }),
-      });
-
-      if (response.ok) {
-        setToast?.({ show: true, msg: "Shared to Bluesky!" });
+      console.error("Clipboard Error:", err);
+      if (typeof setToast === 'function') {
+        setToast({ show: true, msg: "Opening X composer..." });
         setTimeout(() => setToast?.({ show: false, msg: "" }), 3000);
-      } else {
-        throw new Error("Failed");
       }
-    } catch (err) {
-      console.error("Bluesky Error:", err);
-      setToast?.({ show: true, msg: "Bluesky Error" });
-      setTimeout(() => setToast?.({ show: false, msg: "" }), 3000);
     }
+
+    // 3. LAUNCH X COMPOSER
+    const twitterIntentUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(tweetText)}`;
+    window.open(twitterIntentUrl, '_blank', 'noopener,noreferrer');
   };
+
 
   const handleRedditShare = (p) => {
-  if (!p) return;
+    if (!p) return;
 
-  const locationName = p.place_name || "Island Vignette";
-  
-  // 1. Construct a "Scraper-Friendly" Link
-  // We include the proxied image URL as a query param so your page meta-tags can find it
-  const baseUrl = "https://my-journal-view.vercel.app";
-  const proxiedImage = `https://my-journal-admin.vercel.app/api/ig-image-proxy?url=${encodeURIComponent(p.cover_photo_url)}&ignore=/image.jpg`;
-  
-  const shareLink = `${baseUrl}/?place=${encodeURIComponent(locationName)}&og_image=${encodeURIComponent(proxiedImage)}`;
-  
-  // 2. Prepare Content
-  const storyText = p.ai_article?.story || p.ai_article?.description || "";
-  const cleanText = storyText.replace(/[#*]/g, '').trim();
-  const redditDescription = `${cleanText.substring(0, 400)}...\n\nRead more at: ${shareLink}`;
+    const locationName = p.place_name || "Island Vignette";
 
-  // 3. Open Reddit Submission
-  // Note: Reddit's 'submit' URL does not natively 'attach' images. 
-  // It fetches them via the scraper.
-  const redditUrl = `https://www.reddit.com/submit?url=${encodeURIComponent(shareLink)}&title=${encodeURIComponent(locationName)}&text=${encodeURIComponent(redditDescription)}`;
+    // 1. Construct a "Scraper-Friendly" Link
+    // We include the proxied image URL as a query param so your page meta-tags can find it
+    const baseUrl = "https://my-journal-view.vercel.app";
+    const proxiedImage = `https://my-journal-admin.vercel.app/api/ig-image-proxy?url=${encodeURIComponent(p.cover_photo_url)}&ignore=/image.jpg`;
 
-  window.open(redditUrl, '_blank', 'width=800,height=600');
-};
+    const shareLink = `${baseUrl}/?place=${encodeURIComponent(locationName)}&og_image=${encodeURIComponent(proxiedImage)}`;
+
+    // 2. Prepare Content
+    const storyText = p.ai_article?.story || p.ai_article?.description || "";
+    const cleanText = storyText.replace(/[#*]/g, '').trim();
+    const redditDescription = `${cleanText.substring(0, 400)}...\n\nRead more at: ${shareLink}`;
+
+    // 3. Open Reddit Submission
+    // Note: Reddit's 'submit' URL does not natively 'attach' images. 
+    // It fetches them via the scraper.
+    const redditUrl = `https://www.reddit.com/submit?url=${encodeURIComponent(shareLink)}&title=${encodeURIComponent(locationName)}&text=${encodeURIComponent(redditDescription)}`;
+
+    window.open(redditUrl, '_blank', 'width=800,height=600');
+  };
 
 
   // UTILITY & DATA SYNC FUNCTIONS ---
