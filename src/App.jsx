@@ -1896,9 +1896,6 @@ Return ONLY a JSON object with exactly this structure:
         'googleother', 'google-read-aloud', 'gtmetrix', 'adsense'
       ];
 
-      // Structural fingerprint validations
-      const isSuspiciousBrowserTrack = /Chrome\/\d+\.0\.0\.0/.test(ua);
-
       // Data center IP prefix markers (Meta, Google, Cloud networks)
       const isDataCenterNetwork =
         ip.startsWith('66.220.') ||
@@ -1921,7 +1918,6 @@ Return ONLY a JSON object with exactly this structure:
       let isBot =
         botPatterns.some(pattern => lowerUA.includes(pattern)) ||
         lowerUA.includes('headlesschrome') ||
-        isSuspiciousBrowserTrack ||
         isUptimeLoopback ||
         (isKnownDataCenterCity && (isDataCenterNetwork || taggedSource !== 'Instagram'));
       // Note: Keeps validated, residential cross-app targets out of Chicago/similar clean nodes
