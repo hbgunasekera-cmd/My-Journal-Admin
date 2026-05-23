@@ -888,50 +888,50 @@ function App() {
   };
 
   const pinIndividualImage = (imageUrl, index, p) => {
-  if (!p) return;
+    if (!p) return;
 
-  const locationName = p.place_name || "Island Vignette";
-  const baseUrl = "https://my-journal-view.vercel.app";
-  const shareUrl = `${baseUrl}/?place=${encodeURIComponent(locationName)}&utm_source=pinterest`;
+    const locationName = p.place_name || "Island Vignette";
+    const baseUrl = "https://my-journal-view.vercel.app";
+    const shareUrl = `${baseUrl}/?place=${encodeURIComponent(locationName)}&utm_source=pinterest`;
 
-  // Dynamic Hashtags Conversion
-  const coreTags = "#MyJournal #SriLanka #TravelSriLanka #TravelPhotography";
-  const dynamicHashtags = `${coreTags} ${getSpecificTags(p)}`.trim();
+    // Dynamic Hashtags Conversion
+    const coreTags = "#MyJournal #SriLanka #TravelSriLanka #TravelPhotography";
+    const dynamicHashtags = `${coreTags} ${getSpecificTags(p)}`.trim();
 
-  // --- SMART TEXT PARSING DESCRIPTION LOGIC ---
-  let shortDesc = "";
-  const fullStory = p.ai_article?.story || p.ai_article?.description;
+    // --- SMART TEXT PARSING DESCRIPTION LOGIC ---
+    let shortDesc = "";
+    const fullStory = p.ai_article?.story || p.ai_article?.description;
 
-  if (fullStory) {
-    const cleanText = fullStory.replace(/[#*]/g, '').trim();
-    const sentences = cleanText.match(/[^.!?]+[.!?]+/g) || [cleanText];
+    if (fullStory) {
+      const cleanText = fullStory.replace(/[#*]/g, '').trim();
+      const sentences = cleanText.match(/[^.!?]+[.!?]+/g) || [cleanText];
 
-    // Take the first clean sentence, capped intelligently around 150 chars max
-    shortDesc = sentences[0].trim();
-    if (shortDesc.length > 150) {
-      shortDesc = shortDesc.substring(0, 147).trim();
-      const lastSpace = shortDesc.lastIndexOf(" ");
-      if (lastSpace > 0) shortDesc = shortDesc.substring(0, lastSpace);
-      shortDesc += "...";
+      // Take the first clean sentence, capped intelligently around 150 chars max
+      shortDesc = sentences[0].trim();
+      if (shortDesc.length > 150) {
+        shortDesc = shortDesc.substring(0, 147).trim();
+        const lastSpace = shortDesc.lastIndexOf(" ");
+        if (lastSpace > 0) shortDesc = shortDesc.substring(0, lastSpace);
+        shortDesc += "...";
+      }
+    } else {
+      const fallbacks = [
+        `Breathtaking views at ${locationName}. A stunning escape in Sri Lanka.`,
+        `Capturing the raw beauty of ${locationName}. Island secrets revealed.`,
+        `Serene vibes and hidden landscapes. Discovering ${locationName}.`,
+        `The unique soul of ${locationName}, Sri Lanka. A visual journal.`
+      ];
+      shortDesc = fallbacks[index % fallbacks.length];
     }
-  } else {
-    const fallbacks = [
-      `Breathtaking views at ${locationName}. A stunning escape in Sri Lanka.`,
-      `Capturing the raw beauty of ${locationName}. Island secrets revealed.`,
-      `Serene vibes and hidden landscapes. Discovering ${locationName}.`,
-      `The unique soul of ${locationName}, Sri Lanka. A visual journal.`
-    ];
-    shortDesc = fallbacks[index % fallbacks.length];
-  }
 
-  // --- NEW STRUCTURED DESCRIPTION WITH LOCATION HEADER ---
-  const finalDescription = `${locationName} | Nature & Adventure Travel\n\n${shortDesc}\n\n📍Location: ${locationName}\n© Hasitha Gunasekera\n\n${dynamicHashtags}`;
+    // --- NEW STRUCTURED DESCRIPTION WITH LOCATION HEADER ---
+    const finalDescription = `${locationName} | Nature & Adventure Travel\n\n${shortDesc}\n\n📍Location: ${locationName}\n© Hasitha Gunasekera\n\n${dynamicHashtags}`;
 
-  const pinterestUrl = `https://www.pinterest.com/pin/create/button/?url=${encodeURIComponent(shareUrl)}&media=${encodeURIComponent(imageUrl)}&description=${encodeURIComponent(finalDescription)}`;
+    const pinterestUrl = `https://www.pinterest.com/pin/create/button/?url=${encodeURIComponent(shareUrl)}&media=${encodeURIComponent(imageUrl)}&description=${encodeURIComponent(finalDescription)}`;
 
-  window.open(pinterestUrl, '_blank', 'width=750,height=600');
-  if (typeof setActivePinHubId === 'function') setActivePinHubId(null);
-};
+    window.open(pinterestUrl, '_blank', 'width=750,height=600');
+    if (typeof setActivePinHubId === 'function') setActivePinHubId(null);
+  };
 
 
   const handleFlipboardShare = async (p) => {
@@ -1869,6 +1869,8 @@ Return ONLY a JSON object with exactly this structure:
 
     const parseUA = (v) => {
       const fullUA = v.user_agent || "";
+      const ip = v.ip_address || "";
+      const city = v.city || "";
 
       // 1. ROBUST TAGGED SOURCE EXTRACTION
       const lastHyphenIndex = fullUA.lastIndexOf('-');
@@ -1876,7 +1878,7 @@ Return ONLY a JSON object with exactly this structure:
       let ua = lastHyphenIndex !== -1 ? fullUA.substring(0, lastHyphenIndex) : fullUA;
 
       const lowerUA = ua.toLowerCase();
-      const fingerprint = `${v.ip_address}_${ua}`;
+      const fingerprint = `${ip}_${ua}`;
 
       // 2. Loyalty Check
       let loyaltyStatus = "Returning User";
@@ -1885,14 +1887,44 @@ Return ONLY a JSON object with exactly this structure:
         loyaltyStatus = "Unique Visit";
       }
 
-      // 3. Synchronized Bot Detection
+      // 3. SYNCHRONIZED BOT & NETWORK DETECTION MATRIX
       const botPatterns = [
         'bot', 'spider', 'crawl', 'lighthouse', 'slurp',
         'facebookexternalhit', 'twitterbot', 'google-safety',
         'headless', 'inspect', 'preview', 'pinterestbot',
-        'clarity', 'bingbot', 'msnbot', 'duckduckbot'
+        'clarity', 'bingbot', 'msnbot', 'duckduckbot',
+        'googleother', 'google-read-aloud', 'gtmetrix', 'adsense'
       ];
-      const isBot = botPatterns.some(pattern => lowerUA.includes(pattern)) || lowerUA.includes('headlesschrome');
+
+      // Structural fingerprint validations
+      const isSuspiciousBrowserTrack = /Chrome\/\d+\.0\.0\.0/.test(ua);
+
+      // Data center IP prefix markers (Meta, Google, Cloud networks)
+      const isDataCenterNetwork =
+        ip.startsWith('66.220.') ||
+        ip.startsWith('173.252.') ||
+        ip.startsWith('31.13.') ||
+        ip.startsWith('66.249.') ||
+        ip.startsWith('74.125.');
+
+      // Core Data Center hyper-scale locations
+      const isKnownDataCenterCity = [
+        'Prineville', 'Forest City', 'Altoona', 'Springfield',
+        'Gallatin', 'Boardman', 'Quincy', 'Mountain View'
+      ].includes(city);
+
+      // Isolate automated background loopback pings hitting from AWS Dublin infrastructure
+      const isUptimeLoopback = city === 'Dublin' && taggedSource === 'Direct' &&
+        (ip.startsWith('52.') || ip.startsWith('54.') || ip.startsWith('34.') || ip.startsWith('46.') || ip.startsWith('63.'));
+
+      // Master evaluates truth state
+      let isBot =
+        botPatterns.some(pattern => lowerUA.includes(pattern)) ||
+        lowerUA.includes('headlesschrome') ||
+        isSuspiciousBrowserTrack ||
+        isUptimeLoopback ||
+        (isKnownDataCenterCity && (isDataCenterNetwork || taggedSource !== 'Instagram'));
+      // Note: Keeps validated, residential cross-app targets out of Chicago/similar clean nodes
 
       // 4. Device & OS Detection
       let type = 'Desktop';
@@ -1908,7 +1940,6 @@ Return ONLY a JSON object with exactly this structure:
 
       // 5. EXCLUSIVE SOURCE DETECTION (Fallback: Direct)
       let finalSource = taggedSource || "Direct";
-
 
       if (finalSource === "Direct") {
         // Search Engine Catch-all
@@ -1935,7 +1966,6 @@ Return ONLY a JSON object with exactly this structure:
         else if (lowerUA.includes('mastodon') || lowerUA.includes('ivory') || lowerUA.includes('tusky')) finalSource = 'Mastodon';
         // Bluesky Detection
         else if (lowerUA.includes('bsky') || lowerUA.includes('bluesky')) finalSource = 'Bluesky';
-        // Final fallback stays "Direct"
         else finalSource = "Direct";
       }
 
