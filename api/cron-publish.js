@@ -42,7 +42,7 @@ export default async function handler(req, res) {
 
     const p = places[0];
     const locationName = p.place_name || "Island Vignette";
-    const shareLink = `https://my-journal-viewer.vercel.app/?place=${encodeURIComponent(locationName)}`;
+    const shareLink = `https://my-journal-view.vercel.app/?place=${encodeURIComponent(locationName)}`;
 
     // 4. CLEAN AND EXTRACT CONTENT
     const storyText = p.ai_article?.story || p.ai_article?.description || "";
