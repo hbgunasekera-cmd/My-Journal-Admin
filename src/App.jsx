@@ -2983,12 +2983,26 @@ Return ONLY a JSON object with exactly this structure:
                   <div>
                     <p className="text-[9px] font-black uppercase text-slate-500 mb-3 border-b border-slate-700 pb-1 tracking-wider">Traffic Type</p>
                     <div className="space-y-2">
-                      {dashboardStats.trafficType.map(([type, count]) => (
-                        <div key={type} className="flex justify-between items-center text-[10px] font-bold">
-                          <span className={type === 'Real Person' ? 'text-emerald-400' : 'text-rose-400'}>{type}</span>
-                          <span className="text-white font-black">{count}</span>
-                        </div>
-                      ))}
+                      {dashboardStats.trafficType.map(([type, count]) => {
+                        // Dynamically matches 'Real Person' or Bot categories with the latest log state
+                        const isLatestTraffic = dashboardStats.latest && (
+                          (dashboardStats.latest.isBot && type !== 'Real Person') ||
+                          (!dashboardStats.latest.isBot && type === 'Real Person')
+                        );
+
+                        return (
+                          <div key={type} className="flex justify-between items-center text-[10px] font-bold">
+                            {/* Label stays completely standard */}
+                            <span className={type === 'Real Person' ? 'text-emerald-400' : 'text-rose-400'}>
+                              {type}
+                            </span>
+                            {/* Only the count switches color to orange for the latest log type */}
+                            <span className={isLatestTraffic ? 'text-orange-400 font-black' : 'text-white font-black'}>
+                              {count}
+                            </span>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 </div>
