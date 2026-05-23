@@ -10,8 +10,11 @@ const PLATFORM_COLUMNS = {
 };
 
 export default async function handler(req, res) {
-  // 1. SECURITY CHECK: Verify Cron Token Secret
-  if (req.headers.authorization !== `Bearer ${process.env.CRON_SECRET}`) {
+  // 1. ROBUST SECURITY CHECK: Verify Cron Token Secret
+  // Extracts the header safely regardless of Node.js casing rules
+  const authHeader = req.headers['authorization'] || req.headers.authorization;
+  
+  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return res.status(401).json({ error: 'Unauthorized invocation' });
   }
 
@@ -41,7 +44,7 @@ export default async function handler(req, res) {
     const locationName = p.place_name || "Island Vignette";
     const shareLink = `https://my-journal-viewer.vercel.app/?place=${encodeURIComponent(locationName)}`;
 
-    // 4. CLEAN AND EXTRACT CONTENT Snip
+    // 4. CLEAN AND EXTRACT CONTENT
     const storyText = p.ai_article?.story || p.ai_article?.description || "";
     const cleanText = storyText.replace(/[#*]/g, '').trim();
     const sentences = cleanText.match(/[^.!?]+[.!?]+/g) || [cleanText];
@@ -58,7 +61,7 @@ export default async function handler(req, res) {
 
     const fullHashtags = Array.from(tagSet).join(" ");
 
-    // 6. PLATFORM TEXT GENERATORS WITH BUDGET BUDGETS
+    // 6. PLATFORM TEXT GENERATORS WITH CHARACTER BUDGETS
     // A. Meta Layout (Instagram/Threads Rules)
     const buildMetaText = (limit) => {
       const fixedCost = locationName.length + shareLink.length + fullHashtags.length + 40;
@@ -74,7 +77,7 @@ export default async function handler(req, res) {
 
     // B. Mastodon Layout Rules
     const buildMastodonText = () => {
-      const fixedCost = locationName.length + 4 + 7 + 23 + 4 + fullHashtags.length;
+      const fixedCost = locationName.length + 4 + 7 + 23 + 4 + fullHashtags.length; // 23 is masto link standard
       const budget = 500 - fixedCost - 5;
       let summary = "";
       for (let s of sentences) {
