@@ -1,7 +1,6 @@
 // api/cron-publish.js
 import { createClient } from '@supabase/supabase-js';
 
-// Central configuration map for tracking keys
 const PLATFORM_COLUMNS = {
   instagram: 'published_instagram_at',
   threads: 'published_threads_at',
@@ -10,11 +9,21 @@ const PLATFORM_COLUMNS = {
 };
 
 export default async function handler(req, res) {
-  // 1. ROBUST SECURITY CHECK: Verify Cron Token Secret
-  // Extracts the header safely regardless of Node.js casing rules
+  // 0. CRITICAL: Force Vercel to never cache this GET request. 
+  // This guarantees your function runs and writes logs on every single trigger.
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+
+  // 1. SECURITY CHECK: Verify Cron Token Secret
   const authHeader = req.headers['authorization'] || req.headers.authorization;
   
+  // Alert logs explicitly if the environment variable hasn't been set up yet
+  if (!process.env.CRON_SECRET) {
+    console.error("CRON_SECRET environment variable is missing in Vercel settings.");
+    return res.status(500).json({ error: "CRON_SECRET configuration required." });
+  }
+
   if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+    console.warn("Unauthorized cron execution attempt blocked.");
     return res.status(401).json({ error: 'Unauthorized invocation' });
   }
 
@@ -62,7 +71,6 @@ export default async function handler(req, res) {
     const fullHashtags = Array.from(tagSet).join(" ");
 
     // 6. PLATFORM TEXT GENERATORS WITH CHARACTER BUDGETS
-    // A. Meta Layout (Instagram/Threads Rules)
     const buildMetaText = (limit) => {
       const fixedCost = locationName.length + shareLink.length + fullHashtags.length + 40;
       const budget = Math.max(0, limit - fixedCost - 5);
@@ -72,12 +80,11 @@ export default async function handler(req, res) {
         else break;
       }
       if (!summary && cleanText) summary = cleanText.substring(0, budget) + "...";
-      return `📍 ${locationName}\n\n${summary}\n\n🔗 Explore more entries:\n${shareLink}\n\n${fullHashtags}`;
+      return `📸 ${locationName}\n\n${summary}\n\n🌐 Explore more entries:\n${shareLink}\n\n${fullHashtags}`;
     };
 
-    // B. Mastodon Layout Rules
     const buildMastodonText = () => {
-      const fixedCost = locationName.length + 4 + 7 + 23 + 4 + fullHashtags.length; // 23 is masto link standard
+      const fixedCost = locationName.length + 4 + 7 + 23 + 4 + fullHashtags.length;
       const budget = 500 - fixedCost - 5;
       let summary = "";
       for (let s of sentences) {
@@ -88,7 +95,6 @@ export default async function handler(req, res) {
       return `${locationName}\n\n${summary}\n\n📍Location: ${shareLink}\n\n${fullHashtags}`;
     };
 
-    // C. Bluesky Layout Rules (Strict 300 character cap)
     const buildBlueskyText = () => {
       const bskyTags = Array.from(tagSet).slice(0, 3).join(" ");
       const fixedCost = locationName.length + 4 + 7 + shareLink.length + 4 + bskyTags.length;
@@ -152,7 +158,6 @@ export default async function handler(req, res) {
       );
     }
 
-    // Wait for all delivery attempts to resolve independently
     await Promise.allSettled(publishPromises);
 
     // 8. COHESIVE TRANSACTION UPDATE
