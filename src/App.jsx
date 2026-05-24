@@ -265,7 +265,11 @@ function App() {
     instagram: 'published_instagram_at',
     threads: 'published_threads_at',
     mastodon: 'published_masto_at',
-    bluesky: 'published_bsky_at'
+    bluesky: 'published_bsky_at',
+    pinterest: 'published_pinterest_at',
+    flipboard: 'published_flipboard_at',
+    twitter: 'published_twitter_at',
+    reddit: 'published_reddit_at'
   };
 
   // --- Auth & UI States ---
@@ -887,7 +891,7 @@ function App() {
     }
   };
 
-  const pinIndividualImage = (imageUrl, index, p) => {
+  const pinIndividualImage = async (imageUrl, index, p) => {
     if (!p) return;
 
     const locationName = p.place_name || "Island Vignette";
@@ -925,12 +929,24 @@ function App() {
     }
 
     // --- NEW STRUCTURED DESCRIPTION WITH LOCATION HEADER ---
-    const finalDescription = `${locationName} | Nature & Adventure Travel\n\n${shortDesc}\n\n📍Location: ${locationName}\n© Hasitha Gunasekera\n\n${dynamicHashtags}`;
+    const finalDescription = `${locationName} \n\n${shortDesc}\n\n📍Location: ${locationName}\n© Hasitha Gunasekera\n\n${dynamicHashtags}`;
 
     const pinterestUrl = `https://www.pinterest.com/pin/create/button/?url=${encodeURIComponent(shareUrl)}&media=${encodeURIComponent(imageUrl)}&description=${encodeURIComponent(finalDescription)}`;
 
-    window.open(pinterestUrl, '_blank', 'width=750,height=600');
+    // Open Pinterest sharing popup window
+    const popup = window.open(pinterestUrl, '_blank', 'width=750,height=600');
     if (typeof setActivePinHubId === 'function') setActivePinHubId(null);
+
+    // Update state to validated since user initiated the direct link sharing successfully
+    if (popup) {
+      try {
+        await updateSupabasePostStatus(p.id, 'pinterest');
+        setToast?.({ show: true, msg: "Synced Pinterest Status!" });
+        setTimeout(() => setToast?.({ show: false, msg: "" }), 3000);
+      } catch (err) {
+        console.error("Pinterest DB sync failed:", err);
+      }
+    }
   };
 
 
@@ -952,7 +968,6 @@ function App() {
       const cleanText = storyText.replace(/[#*]/g, '').trim();
       const sentences = cleanText.match(/[^.!?]+[.!?]+/g) || [cleanText];
 
-      // Assemble smart short description to feed Flipboard framework rules gracefully
       for (let sentence of sentences) {
         const candidate = (shortDesc + " " + sentence.trim()).trim();
         if (candidate.length <= 300) { // Standard safe text blurb cap for Flipboard preview card layouts
@@ -971,28 +986,31 @@ function App() {
     // --- EXECUTE COPY TO CLIPBOARD ---
     try {
       await navigator.clipboard.writeText(fullTextToCopy);
-      if (typeof setToast === 'function') {
-        setToast({ show: true, msg: "First paragraph copied! Paste in Flipboard box." });
-        setTimeout(() => setToast({ show: false, msg: "" }), 3000);
-      }
+      setToast?.({ show: true, msg: "Caption copied! Opening Flipboard..." });
     } catch (err) {
-      console.error("Flipboard failed", err);
-      setToast({ show: true, msg: "Flipboard failed" });
-      setTimeout(() => setToast({ show: false, msg: "" }), 3000);
+      console.error("Flipboard clipboard failure", err);
     }
 
     // --- OPEN FLIPBOARD ---
     const targetUrl = p.cover_photo_url || shareLink;
-
     const flipboardUrl = `https://share.flipboard.com/bookmarklet/popout?v=2` +
       `&url=${encodeURIComponent(targetUrl)}` +
       `&title=${encodeURIComponent(locationName)}`;
 
-    window.open(
+    const popup = window.open(
       flipboardUrl,
       'flipboard-share',
       'width=700,height=680,scrollbars=yes,resizable=yes'
     );
+
+    if (popup) {
+      try {
+        await updateSupabasePostStatus(p.id, 'flipboard');
+        setTimeout(() => setToast?.({ show: false, msg: "" }), 3000);
+      } catch (err) {
+        console.error("Flipboard DB sync failed:", err);
+      }
+    }
   };
 
   const handleTwitterPush = async (p) => {
@@ -1010,9 +1028,8 @@ function App() {
     const cleanText = storyText.replace(/[#*]/g, '').trim();
 
     // --- X (TWITTER) CHARACTER LIMIT HANDLING ---
-    // X treats links natively as 23 characters
     const fixedCost = locationName.length + 4 + 11 + 23 + 4 + dynamicHashtags.length;
-    const maxDescBudget = 280 - fixedCost - 5; // Standard strict ceiling limits
+    const maxDescBudget = 280 - fixedCost - 5;
 
     const sentences = cleanText.match(/[^.!?]+[.!?]+/g) || [cleanText];
     let shortDesc = "";
@@ -1038,34 +1055,34 @@ function App() {
     // 2. COPY TO CLIPBOARD & UI FEEDBACK
     try {
       await navigator.clipboard.writeText(tweetText);
-      if (typeof setToast === 'function') {
-        setToast({ show: true, msg: "Caption copied! Opening X..." });
-        setTimeout(() => setToast?.({ show: false, msg: "" }), 3000);
-      }
+      setToast?.({ show: true, msg: "Caption copied! Opening X Composer..." });
     } catch (err) {
       console.error("Clipboard Error:", err);
-      if (typeof setToast === 'function') {
-        setToast({ show: true, msg: "Opening X composer..." });
-        setTimeout(() => setToast?.({ show: false, msg: "" }), 3000);
-      }
     }
 
-    // 3. LAUNCH X COMPOSER
+    // 3. LAUNCH X COMPOSER & SYNC STATUS
     const twitterIntentUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(tweetText)}`;
-    window.open(twitterIntentUrl, '_blank', 'noopener,noreferrer');
+    const popup = window.open(twitterIntentUrl, '_blank', 'noopener,noreferrer');
+
+    if (popup) {
+      try {
+        await updateSupabasePostStatus(p.id, 'twitter');
+        setTimeout(() => setToast?.({ show: false, msg: "" }), 3000);
+      } catch (err) {
+        console.error("Twitter DB sync failed:", err);
+      }
+    }
   };
 
 
-  const handleRedditShare = (p) => {
+  const handleRedditShare = async (p) => {
     if (!p) return;
 
     const locationName = p.place_name || "Island Vignette";
 
     // 1. Construct a "Scraper-Friendly" Link
-    // We include the proxied image URL as a query param so your page meta-tags can find it
     const baseUrl = "https://my-journal-view.vercel.app";
     const proxiedImage = `https://my-journal-admin.vercel.app/api/ig-image-proxy?url=${encodeURIComponent(p.cover_photo_url)}&ignore=/image.jpg`;
-
     const shareLink = `${baseUrl}/?place=${encodeURIComponent(locationName)}&og_image=${encodeURIComponent(proxiedImage)}`;
 
     // 2. Prepare Content
@@ -1073,12 +1090,21 @@ function App() {
     const cleanText = storyText.replace(/[#*]/g, '').trim();
     const redditDescription = `${cleanText.substring(0, 400)}...\n\nRead more at: ${shareLink}`;
 
-    // 3. Open Reddit Submission
-    // Note: Reddit's 'submit' URL does not natively 'attach' images. 
-    // It fetches them via the scraper.
-    const redditUrl = `https://www.reddit.com/submit?url=${encodeURIComponent(shareLink)}&title=${encodeURIComponent(locationName)}&text=${encodeURIComponent(redditDescription)}`;
+    setToast?.({ show: true, msg: "Opening Reddit Submission..." });
 
-    window.open(redditUrl, '_blank', 'width=800,height=600');
+    // 3. Open Reddit Submission
+    const redditUrl = `https://www.reddit.com/submit?url=${encodeURIComponent(shareLink)}&title=${encodeURIComponent(locationName)}&text=${encodeURIComponent(redditDescription)}`;
+    const popup = window.open(redditUrl, '_blank', 'width=800,height=600');
+
+    if (popup) {
+      try {
+        await updateSupabasePostStatus(p.id, 'reddit');
+        setToast?.({ show: true, msg: "Shared to Reddit!" });
+        setTimeout(() => setToast?.({ show: false, msg: "" }), 3000);
+      } catch (err) {
+        console.error("Reddit DB sync failed:", err);
+      }
+    }
   };
 
 
@@ -2674,30 +2700,29 @@ Return ONLY a JSON object with exactly this structure:
 
                         {/* Pinterest */}
                         <button
-                          onClick={() => setActivePinHubId(p.id)}
-                          className="flex flex-col items-center justify-center gap-1 py-2 bg-white text-black border border-slate-200 rounded-xl hover:bg-rose-600 hover:text-white transition-all shadow-sm"
+                          onClick={() => checkAndPost(p, 'pinterest', () => setActivePinHubId(p.id))}
+                          className="flex flex-col items-center justify-center gap-1 py-2 bg-white text-black border border-slate-200 rounded-xl hover:bg-rose-600 hover:text-white transition-all shadow-sm group"
                         >
-                          <Icon name="heart" className="w-3.5 h-3.5" />
+                          <Icon name="heart" className="w-3.5 h-3.5 group-hover:scale-105 transition-transform" />
                           <span className="text-[7px] font-black uppercase tracking-tighter">Pin</span>
                         </button>
 
-
                         {/* Flipboard */}
                         <button
-                          onClick={() => handleFlipboardShare(p)}
-                          className="flex flex-col items-center justify-center gap-1 py-2 bg-white text-black border border-slate-200 rounded-xl hover:bg-red-300 hover:text-white transition-all shadow-sm"
+                          onClick={() => checkAndPost(p, 'flipboard', () => handleFlipboardShare(p))}
+                          className="flex flex-col items-center justify-center gap-1 py-2 bg-white text-black border border-slate-200 rounded-xl hover:bg-red-500 hover:text-white transition-all shadow-sm group"
                         >
-                          <Icon name="refresh-cw" className="w-3.5 h-3.5" />
+                          <Icon name="refresh-cw" className="w-3.5 h-3.5 group-hover:scale-105 transition-transform" />
                           <span className="text-[7px] font-black uppercase tracking-tighter">Flip</span>
                         </button>
 
                         {/* Reddit */}
                         <button
-                          onClick={() => handleRedditShare(p)}
-                          className="flex flex-col items-center justify-center gap-1 py-2 bg-white text-black border border-slate-200 rounded-xl hover:bg-orange-600 hover:text-white transition-all shadow-sm"
+                          onClick={() => checkAndPost(p, 'reddit', () => handleRedditShare(p))}
+                          className="flex flex-col items-center justify-center gap-1 py-2 bg-white text-black border border-slate-200 rounded-xl hover:bg-orange-600 hover:text-white transition-all shadow-sm group"
                         >
                           <svg
-                            className="w-3.5 h-3.5 fill-current"
+                            className="w-3.5 h-3.5 fill-current text-orange-600 group-hover:text-white transition-colors"
                             viewBox="0 0 24 24"
                           >
                             <path d="M12 0C5.373 0 0 5.373 0 12c0 6.627 5.373 12 12 12s12-5.373 12-12C24 5.373 18.627 0 12 0zm5.347 17.518c-1.424 1.424-5.347 1.424-5.347 1.424s-3.923 0-5.347-1.424c-.29-.29-.29-.76 0-1.05.29-.29.76-.29 1.05 0 .977.977 3.518 1.05 4.297 1.05.779 0 3.32-.073 4.297-1.05.29-.29.76-.29 1.05 0 .29.29.29.76 0 1.05zm-6.84-4.526c0-.853-.692-1.545-1.545-1.545-.853 0-1.545.692-1.545 1.545 0 .853.692 1.545 1.545 1.545.853 0 1.545-.692 1.545-1.545zm6.182 0c0-.853-.692-1.545-1.545-1.545-.853 0-1.545.692-1.545 1.545 0 .853.692 1.545 1.545 1.545.853 0 1.545-.692 1.545-1.545z" />
@@ -2707,10 +2732,10 @@ Return ONLY a JSON object with exactly this structure:
 
                         {/* Twitter (X) */}
                         <button
-                          onClick={() => handleTwitterPush(p)}
-                          className="flex flex-col items-center justify-center gap-1 py-2 bg-white text-black border border-slate-200 rounded-xl hover:bg-slate-900 hover:text-white transition-all shadow-sm"
+                          onClick={() => checkAndPost(p, 'twitter', () => handleTwitterPush(p))}
+                          className="flex flex-col items-center justify-center gap-1 py-2 bg-white text-black border border-slate-200 rounded-xl hover:bg-slate-900 hover:text-white transition-all shadow-sm group"
                         >
-                          <Icon name="twitter" className="w-3.5 h-3.5" />
+                          <Icon name="twitter" className="w-3.5 h-3.5 text-sky-500 group-hover:text-white transition-colors" />
                           <span className="text-[7px] font-black uppercase tracking-tighter">X / Twt</span>
                         </button>
 
