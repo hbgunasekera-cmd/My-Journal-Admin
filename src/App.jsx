@@ -2662,8 +2662,17 @@ Return ONLY a JSON object with exactly this structure:
                         {/* Instagram */}
                         <button
                           onClick={() => checkAndPost(p, 'instagram', () => handleMetaShare(p, 'instagram', fbToken))}
-                          className="flex flex-col items-center justify-center gap-1 py-2 bg-white text-black border border-slate-200 rounded-xl hover:bg-gradient-to-tr hover:from-amber-400 hover:via-rose-500 hover:to-fuchsia-600 hover:text-white transition-all shadow-sm"
+                          className={`flex flex-col items-center justify-center gap-1 py-2 text-black border rounded-xl hover:bg-gradient-to-tr hover:from-amber-400 hover:via-rose-500 hover:to-fuchsia-600 hover:text-white transition-all shadow-sm relative ${p.published_instagram_at
+                              ? 'border-emerald-500 bg-emerald-50/50 shadow-sm shadow-emerald-100'
+                              : 'border-slate-200 bg-white'
+                            }`}
                         >
+                          {p.published_instagram_at && (
+                            <span className="absolute top-1 right-1 flex h-1.5 w-1.5">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                            </span>
+                          )}
                           <Icon name="instagram" className="w-3.5 h-3.5" />
                           <span className="text-[7px] font-black uppercase tracking-tighter">Insta</span>
                         </button>
@@ -2671,8 +2680,17 @@ Return ONLY a JSON object with exactly this structure:
                         {/* Threads */}
                         <button
                           onClick={() => checkAndPost(p, 'threads', () => handleMetaShare(p, 'threads', threadsToken))}
-                          className="flex flex-col items-center justify-center gap-1 py-2 bg-white text-black border border-slate-200 rounded-xl hover:bg-black hover:text-white transition-all shadow-sm"
+                          className={`flex flex-col items-center justify-center gap-1 py-2 text-black border rounded-xl hover:bg-black hover:text-white transition-all shadow-sm relative ${p.published_threads_at
+                              ? 'border-emerald-500 bg-emerald-50/50 shadow-sm shadow-emerald-100'
+                              : 'border-slate-200 bg-white'
+                            }`}
                         >
+                          {p.published_threads_at && (
+                            <span className="absolute top-1 right-1 flex h-1.5 w-1.5">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                            </span>
+                          )}
                           <Icon name="threads" className="w-3.5 h-3.5" />
                           <span className="text-[7px] font-black uppercase tracking-tighter">Threads</span>
                         </button>
@@ -2680,8 +2698,17 @@ Return ONLY a JSON object with exactly this structure:
                         {/* Mastodon */}
                         <button
                           onClick={() => checkAndPost(p, 'mastodon', () => handleMastodonShare(p))}
-                          className="flex flex-col items-center justify-center gap-1 py-2 bg-white text-black border border-slate-200 rounded-xl hover:bg-indigo-600 hover:text-white transition-all shadow-sm group"
+                          className={`flex flex-col items-center justify-center gap-1 py-2 text-black border rounded-xl hover:bg-indigo-600 hover:text-white transition-all shadow-sm group relative ${p.published_masto_at
+                              ? 'border-emerald-500 bg-emerald-50/50 shadow-sm shadow-emerald-100'
+                              : 'border-slate-200 bg-white'
+                            }`}
                         >
+                          {p.published_masto_at && (
+                            <span className="absolute top-1 right-1 flex h-1.5 w-1.5">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                            </span>
+                          )}
                           <span className="text-sm">🐘</span>
                           <span className="text-[7px] font-black uppercase tracking-tighter">Masto</span>
                         </button>
@@ -2689,20 +2716,37 @@ Return ONLY a JSON object with exactly this structure:
                         {/* Bluesky */}
                         <button
                           onClick={() => checkAndPost(p, 'bluesky', () => handleBlueskyShare(p))}
-                          className="flex flex-col items-center justify-center gap-1 py-2 bg-white text-black border border-slate-200 rounded-xl hover:bg-[#0085ff] hover:text-white transition-all shadow-sm group"
+                          className={`flex flex-col items-center justify-center gap-1 py-2 text-black border rounded-xl hover:bg-[#0085ff] hover:text-white transition-all shadow-sm group relative ${p.published_bsky_at
+                              ? 'border-emerald-500 bg-emerald-50/50 shadow-sm shadow-emerald-100'
+                              : 'border-slate-200 bg-white'
+                            }`}
                         >
+                          {p.published_bsky_at && (
+                            <span className="absolute top-1 right-1 flex h-1.5 w-1.5">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                            </span>
+                          )}
                           <svg className="w-4 h-4 fill-current text-blue-500 group-hover:text-white transition-colors" viewBox="0 0 24 24">
                             <path d="M12,2C9,2 7,4 7,7C7,10 9,12 12,12C15,12 17,10 17,7C17,4 15,2 12,2M12,14C9,14 7,16 7,19C7,22 9,24 12,24C15,24 17,22 17,19C17,16 15,14 12,14Z" transform="rotate(90 12 12)" />
                           </svg>
                           <span className="text-[7px] font-black uppercase tracking-tighter">Bsky</span>
                         </button>
 
-
                         {/* Pinterest */}
                         <button
                           onClick={() => checkAndPost(p, 'pinterest', () => setActivePinHubId(p.id))}
-                          className="flex flex-col items-center justify-center gap-1 py-2 bg-white text-black border border-slate-200 rounded-xl hover:bg-rose-600 hover:text-white transition-all shadow-sm group"
+                          className={`flex flex-col items-center justify-center gap-1 py-2 text-black border rounded-xl hover:bg-rose-600 hover:text-white transition-all shadow-sm group relative ${p.published_pinterest_at
+                              ? 'border-emerald-500 bg-emerald-50/50 shadow-sm shadow-emerald-100'
+                              : 'border-slate-200 bg-white'
+                            }`}
                         >
+                          {p.published_pinterest_at && (
+                            <span className="absolute top-1 right-1 flex h-1.5 w-1.5">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                            </span>
+                          )}
                           <Icon name="heart" className="w-3.5 h-3.5 group-hover:scale-105 transition-transform" />
                           <span className="text-[7px] font-black uppercase tracking-tighter">Pin</span>
                         </button>
@@ -2710,8 +2754,17 @@ Return ONLY a JSON object with exactly this structure:
                         {/* Flipboard */}
                         <button
                           onClick={() => checkAndPost(p, 'flipboard', () => handleFlipboardShare(p))}
-                          className="flex flex-col items-center justify-center gap-1 py-2 bg-white text-black border border-slate-200 rounded-xl hover:bg-red-500 hover:text-white transition-all shadow-sm group"
+                          className={`flex flex-col items-center justify-center gap-1 py-2 text-black border rounded-xl hover:bg-red-500 hover:text-white transition-all shadow-sm group relative ${p.published_flipboard_at
+                              ? 'border-emerald-500 bg-emerald-50/50 shadow-sm shadow-emerald-100'
+                              : 'border-slate-200 bg-white'
+                            }`}
                         >
+                          {p.published_flipboard_at && (
+                            <span className="absolute top-1 right-1 flex h-1.5 w-1.5">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                            </span>
+                          )}
                           <Icon name="refresh-cw" className="w-3.5 h-3.5 group-hover:scale-105 transition-transform" />
                           <span className="text-[7px] font-black uppercase tracking-tighter">Flip</span>
                         </button>
@@ -2719,8 +2772,17 @@ Return ONLY a JSON object with exactly this structure:
                         {/* Reddit */}
                         <button
                           onClick={() => checkAndPost(p, 'reddit', () => handleRedditShare(p))}
-                          className="flex flex-col items-center justify-center gap-1 py-2 bg-white text-black border border-slate-200 rounded-xl hover:bg-orange-600 hover:text-white transition-all shadow-sm group"
+                          className={`flex flex-col items-center justify-center gap-1 py-2 text-black border rounded-xl hover:bg-orange-600 hover:text-white transition-all shadow-sm group relative ${p.published_reddit_at
+                              ? 'border-emerald-500 bg-emerald-50/50 shadow-sm shadow-emerald-100'
+                              : 'border-slate-200 bg-white'
+                            }`}
                         >
+                          {p.published_reddit_at && (
+                            <span className="absolute top-1 right-1 flex h-1.5 w-1.5">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                            </span>
+                          )}
                           <svg
                             className="w-3.5 h-3.5 fill-current text-orange-600 group-hover:text-white transition-colors"
                             viewBox="0 0 24 24"
@@ -2733,8 +2795,17 @@ Return ONLY a JSON object with exactly this structure:
                         {/* Twitter (X) */}
                         <button
                           onClick={() => checkAndPost(p, 'twitter', () => handleTwitterPush(p))}
-                          className="flex flex-col items-center justify-center gap-1 py-2 bg-white text-black border border-slate-200 rounded-xl hover:bg-slate-900 hover:text-white transition-all shadow-sm group"
+                          className={`flex flex-col items-center justify-center gap-1 py-2 text-black border rounded-xl hover:bg-slate-900 hover:text-white transition-all shadow-sm group relative ${p.published_twitter_at
+                              ? 'border-emerald-500 bg-emerald-50/50 shadow-sm shadow-emerald-100'
+                              : 'border-slate-200 bg-white'
+                            }`}
                         >
+                          {p.published_twitter_at && (
+                            <span className="absolute top-1 right-1 flex h-1.5 w-1.5">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                            </span>
+                          )}
                           <Icon name="twitter" className="w-3.5 h-3.5 text-sky-500 group-hover:text-white transition-colors" />
                           <span className="text-[7px] font-black uppercase tracking-tighter">X / Twt</span>
                         </button>
