@@ -260,6 +260,7 @@ function App() {
   const [activePinHubId, setActivePinHubId] = useState(null);
   const [fbToken, setFbToken] = useState("");
   const [threadsToken, setThreadsToken] = useState("");
+  const twitterActionLock = useRef(false);
 
   const PLATFORM_COLUMNS = {
     instagram: 'published_instagram_at',
@@ -684,10 +685,22 @@ function App() {
 
   const updateSupabasePostStatus = async (id, platform) => {
     const targetColumn = PLATFORM_COLUMNS[platform];
+    const currentTimestamp = new Date().toISOString();
+
+    // 1. Update the persistent remote backend database
     await supabaseClient
       .from('travel_bucket_list')
-      .update({ [targetColumn]: new Date().toISOString() })
+      .update({ [targetColumn]: currentTimestamp })
       .eq('id', id);
+
+    // 2. IMMEDIATELY mutate local React states to trigger instant visual updates
+    const stateUpdateHandler = (prevItems) =>
+      prevItems.map((item) =>
+        item.id === id ? { ...item, [targetColumn]: currentTimestamp } : item
+      );
+
+    setPlaces(stateUpdateHandler);
+    setFilteredPlaces(stateUpdateHandler);
   };
 
 
@@ -1016,6 +1029,14 @@ function App() {
   const handleTwitterPush = async (p) => {
     if (!p) return;
 
+    // --- CONCURRENCY LOCK GUARD ---
+    // If the function was already triggered in the last 1000ms, discard this execution
+    if (twitterActionLock.current) return;
+    twitterActionLock.current = true;
+    setTimeout(() => {
+      twitterActionLock.current = false;
+    }, 1000);
+
     // 1. CONTENT SETUP
     const locationName = p.place_name || "Island Vignette";
     const shareLink = `https://my-journal-view.vercel.app/?place=${encodeURIComponent(locationName)}`;
@@ -1028,8 +1049,8 @@ function App() {
     const cleanText = storyText.replace(/[#*]/g, '').trim();
 
     // --- X (TWITTER) CHARACTER LIMIT HANDLING ---
-    const fixedCost = locationName.length + 4 + 11 + 23 + 4 + dynamicHashtags.length;
-    const maxDescBudget = 280 - fixedCost - 5;
+    const fixedCost = locationName.length + 18 + 23 + dynamicHashtags.length;
+    const maxDescBudget = Math.max(0, 280 - fixedCost - 5);
 
     const sentences = cleanText.match(/[^.!?]+[.!?]+/g) || [cleanText];
     let shortDesc = "";
@@ -1043,7 +1064,7 @@ function App() {
       }
     }
 
-    if (!shortDesc && cleanText) {
+    if (!shortDesc && cleanText && maxDescBudget > 3) {
       shortDesc = cleanText.substring(0, maxDescBudget).trim();
       const lastSpace = shortDesc.lastIndexOf(" ");
       if (lastSpace > 0) shortDesc = shortDesc.substring(0, lastSpace);
@@ -1052,7 +1073,11 @@ function App() {
 
     const tweetText = `${locationName}\n\n${shortDesc}\n\n📍Location: ${shareLink}\n\n${dynamicHashtags}`;
 
-    // 2. COPY TO CLIPBOARD & UI FEEDBACK
+    // 2. LAUNCH X COMPOSER 
+    const twitterIntentUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(tweetText)}`;
+    const popup = window.open(twitterIntentUrl, '_blank', 'noopener,noreferrer');
+
+    // 3. COPY TO CLIPBOARD & UI FEEDBACK
     try {
       await navigator.clipboard.writeText(tweetText);
       setToast?.({ show: true, msg: "Caption copied! Opening X Composer..." });
@@ -1060,10 +1085,7 @@ function App() {
       console.error("Clipboard Error:", err);
     }
 
-    // 3. LAUNCH X COMPOSER & SYNC STATUS
-    const twitterIntentUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(tweetText)}`;
-    const popup = window.open(twitterIntentUrl, '_blank', 'noopener,noreferrer');
-
+    // 4. SYNC DATABASE STATUS
     if (popup) {
       try {
         await updateSupabasePostStatus(p.id, 'twitter');
@@ -2661,10 +2683,14 @@ Return ONLY a JSON object with exactly this structure:
 
                         {/* Instagram */}
                         <button
-                          onClick={() => checkAndPost(p, 'instagram', () => handleMetaShare(p, 'instagram', fbToken))}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            checkAndPost(p, 'instagram', () => handleMetaShare(p, 'instagram', fbToken));
+                          }}
                           className={`flex flex-col items-center justify-center gap-1 py-2 text-black border rounded-xl hover:bg-gradient-to-tr hover:from-amber-400 hover:via-rose-500 hover:to-fuchsia-600 hover:text-white transition-all shadow-sm relative ${p.published_instagram_at
-                              ? 'border-emerald-500 bg-emerald-50/50 shadow-sm shadow-emerald-100'
-                              : 'border-slate-200 bg-white'
+                            ? 'border-emerald-500 bg-emerald-50/50 shadow-sm shadow-emerald-100'
+                            : 'border-slate-200 bg-white'
                             }`}
                         >
                           {p.published_instagram_at && (
@@ -2679,10 +2705,14 @@ Return ONLY a JSON object with exactly this structure:
 
                         {/* Threads */}
                         <button
-                          onClick={() => checkAndPost(p, 'threads', () => handleMetaShare(p, 'threads', threadsToken))}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            checkAndPost(p, 'threads', () => handleMetaShare(p, 'threads', threadsToken));
+                          }}
                           className={`flex flex-col items-center justify-center gap-1 py-2 text-black border rounded-xl hover:bg-black hover:text-white transition-all shadow-sm relative ${p.published_threads_at
-                              ? 'border-emerald-500 bg-emerald-50/50 shadow-sm shadow-emerald-100'
-                              : 'border-slate-200 bg-white'
+                            ? 'border-emerald-500 bg-emerald-50/50 shadow-sm shadow-emerald-100'
+                            : 'border-slate-200 bg-white'
                             }`}
                         >
                           {p.published_threads_at && (
@@ -2697,10 +2727,14 @@ Return ONLY a JSON object with exactly this structure:
 
                         {/* Mastodon */}
                         <button
-                          onClick={() => checkAndPost(p, 'mastodon', () => handleMastodonShare(p))}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            checkAndPost(p, 'mastodon', () => handleMastodonShare(p));
+                          }}
                           className={`flex flex-col items-center justify-center gap-1 py-2 text-black border rounded-xl hover:bg-indigo-600 hover:text-white transition-all shadow-sm group relative ${p.published_masto_at
-                              ? 'border-emerald-500 bg-emerald-50/50 shadow-sm shadow-emerald-100'
-                              : 'border-slate-200 bg-white'
+                            ? 'border-emerald-500 bg-emerald-50/50 shadow-sm shadow-emerald-100'
+                            : 'border-slate-200 bg-white'
                             }`}
                         >
                           {p.published_masto_at && (
@@ -2715,10 +2749,14 @@ Return ONLY a JSON object with exactly this structure:
 
                         {/* Bluesky */}
                         <button
-                          onClick={() => checkAndPost(p, 'bluesky', () => handleBlueskyShare(p))}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            checkAndPost(p, 'bluesky', () => handleBlueskyShare(p));
+                          }}
                           className={`flex flex-col items-center justify-center gap-1 py-2 text-black border rounded-xl hover:bg-[#0085ff] hover:text-white transition-all shadow-sm group relative ${p.published_bsky_at
-                              ? 'border-emerald-500 bg-emerald-50/50 shadow-sm shadow-emerald-100'
-                              : 'border-slate-200 bg-white'
+                            ? 'border-emerald-500 bg-emerald-50/50 shadow-sm shadow-emerald-100'
+                            : 'border-slate-200 bg-white'
                             }`}
                         >
                           {p.published_bsky_at && (
@@ -2735,10 +2773,14 @@ Return ONLY a JSON object with exactly this structure:
 
                         {/* Pinterest */}
                         <button
-                          onClick={() => checkAndPost(p, 'pinterest', () => setActivePinHubId(p.id))}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            checkAndPost(p, 'pinterest', () => setActivePinHubId(p.id));
+                          }}
                           className={`flex flex-col items-center justify-center gap-1 py-2 text-black border rounded-xl hover:bg-rose-600 hover:text-white transition-all shadow-sm group relative ${p.published_pinterest_at
-                              ? 'border-emerald-500 bg-emerald-50/50 shadow-sm shadow-emerald-100'
-                              : 'border-slate-200 bg-white'
+                            ? 'border-emerald-500 bg-emerald-50/50 shadow-sm shadow-emerald-100'
+                            : 'border-slate-200 bg-white'
                             }`}
                         >
                           {p.published_pinterest_at && (
@@ -2753,10 +2795,14 @@ Return ONLY a JSON object with exactly this structure:
 
                         {/* Flipboard */}
                         <button
-                          onClick={() => checkAndPost(p, 'flipboard', () => handleFlipboardShare(p))}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            checkAndPost(p, 'flipboard', () => handleFlipboardShare(p));
+                          }}
                           className={`flex flex-col items-center justify-center gap-1 py-2 text-black border rounded-xl hover:bg-red-500 hover:text-white transition-all shadow-sm group relative ${p.published_flipboard_at
-                              ? 'border-emerald-500 bg-emerald-50/50 shadow-sm shadow-emerald-100'
-                              : 'border-slate-200 bg-white'
+                            ? 'border-emerald-500 bg-emerald-50/50 shadow-sm shadow-emerald-100'
+                            : 'border-slate-200 bg-white'
                             }`}
                         >
                           {p.published_flipboard_at && (
@@ -2771,10 +2817,14 @@ Return ONLY a JSON object with exactly this structure:
 
                         {/* Reddit */}
                         <button
-                          onClick={() => checkAndPost(p, 'reddit', () => handleRedditShare(p))}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            checkAndPost(p, 'reddit', () => handleRedditShare(p));
+                          }}
                           className={`flex flex-col items-center justify-center gap-1 py-2 text-black border rounded-xl hover:bg-orange-600 hover:text-white transition-all shadow-sm group relative ${p.published_reddit_at
-                              ? 'border-emerald-500 bg-emerald-50/50 shadow-sm shadow-emerald-100'
-                              : 'border-slate-200 bg-white'
+                            ? 'border-emerald-500 bg-emerald-50/50 shadow-sm shadow-emerald-100'
+                            : 'border-slate-200 bg-white'
                             }`}
                         >
                           {p.published_reddit_at && (
@@ -2794,10 +2844,14 @@ Return ONLY a JSON object with exactly this structure:
 
                         {/* Twitter (X) */}
                         <button
-                          onClick={() => checkAndPost(p, 'twitter', () => handleTwitterPush(p))}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            checkAndPost(p, 'twitter', () => handleTwitterPush(p));
+                          }}
                           className={`flex flex-col items-center justify-center gap-1 py-2 text-black border rounded-xl hover:bg-slate-900 hover:text-white transition-all shadow-sm group relative ${p.published_twitter_at
-                              ? 'border-emerald-500 bg-emerald-50/50 shadow-sm shadow-emerald-100'
-                              : 'border-slate-200 bg-white'
+                            ? 'border-emerald-500 bg-emerald-50/50 shadow-sm shadow-emerald-100'
+                            : 'border-slate-200 bg-white'
                             }`}
                         >
                           {p.published_twitter_at && (
