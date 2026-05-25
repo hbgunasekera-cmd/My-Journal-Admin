@@ -260,7 +260,7 @@ function App() {
   const [activePinHubId, setActivePinHubId] = useState(null);
   const [fbToken, setFbToken] = useState("");
   const [threadsToken, setThreadsToken] = useState("");
-  const twitterActionLock = useRef(false);
+  
 
   const PLATFORM_COLUMNS = {
     instagram: 'published_instagram_at',
@@ -1026,29 +1026,32 @@ function App() {
     }
   };
 
-  const handleTwitterPush = async (p) => {
+  const handleTwitterPush = async (p, e) => {
+    // 1. INSTANT BROWSER INTERCEPT (Stops DOM bubbling immediately)
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+
     if (!p) return;
 
-    // --- CONCURRENCY LOCK GUARD ---
-    // If the function was already triggered in the last 1000ms, discard this execution
-    if (twitterActionLock.current) return;
-    twitterActionLock.current = true;
-    setTimeout(() => {
-      twitterActionLock.current = false;
-    }, 1000);
+    // 2. LOCAL CACHE GUARD (Completely bypasses the async delay of checkAndPost)
+    if (p.published_twitter_at) {
+      setToast?.({ show: true, msg: "Already shared to X / Twt!" });
+      setTimeout(() => setToast?.({ show: false, msg: "" }), 3000);
+      return;
+    }
 
-    // 1. CONTENT SETUP
+    // 3. CONTENT SETUP 
     const locationName = p.place_name || "Island Vignette";
     const shareLink = `https://my-journal-view.vercel.app/?place=${encodeURIComponent(locationName)}`;
 
-    // Dynamic Hashtags Conversion
     const coreTags = "#MyJournal #SriLanka #TravelSriLanka #TravelPhotography";
     const dynamicHashtags = `${coreTags} ${getSpecificTags(p)}`.trim();
 
     const storyText = p.ai_article?.story || p.ai_article?.description || "";
     const cleanText = storyText.replace(/[#*]/g, '').trim();
 
-    // --- X (TWITTER) CHARACTER LIMIT HANDLING ---
     const fixedCost = locationName.length + 18 + 23 + dynamicHashtags.length;
     const maxDescBudget = Math.max(0, 280 - fixedCost - 5);
 
@@ -1073,11 +1076,17 @@ function App() {
 
     const tweetText = `${locationName}\n\n${shortDesc}\n\n📍Location: ${shareLink}\n\n${dynamicHashtags}`;
 
-    // 2. LAUNCH X COMPOSER 
+    // 4. SYNCHRONOUS POPUP CREATION (The Magic Fix)
+    // Specifying a named window ('twitter_intent') strictly prevents duplicate tabs.
+    // Specifying dimensions forces a clean floating popup instead of a heavy browser tab.
     const twitterIntentUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(tweetText)}`;
-    const popup = window.open(twitterIntentUrl, '_blank', 'noopener,noreferrer');
+    const popup = window.open(
+      twitterIntentUrl,
+      'twitter_intent',
+      'width=550,height=420,scrollbars=yes,resizable=yes'
+    );
 
-    // 3. COPY TO CLIPBOARD & UI FEEDBACK
+    // 5. ASYNC TASKS (Execute safely *after* the window is secured)
     try {
       await navigator.clipboard.writeText(tweetText);
       setToast?.({ show: true, msg: "Caption copied! Opening X Composer..." });
@@ -1085,7 +1094,7 @@ function App() {
       console.error("Clipboard Error:", err);
     }
 
-    // 4. SYNC DATABASE STATUS
+    // 6. SYNC LOCAL & REMOTE DATABASE
     if (popup) {
       try {
         await updateSupabasePostStatus(p.id, 'twitter');
@@ -2844,11 +2853,8 @@ Return ONLY a JSON object with exactly this structure:
 
                         {/* Twitter (X) */}
                         <button
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            checkAndPost(p, 'twitter', () => handleTwitterPush(p));
-                          }}
+                          type="button"
+                          onClick={(e) => handleTwitterPush(p, e)}
                           className={`flex flex-col items-center justify-center gap-1 py-2 text-black border rounded-xl hover:bg-slate-900 hover:text-white transition-all shadow-sm group relative ${p.published_twitter_at
                             ? 'border-emerald-500 bg-emerald-50/50 shadow-sm shadow-emerald-100'
                             : 'border-slate-200 bg-white'
