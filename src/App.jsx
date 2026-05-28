@@ -251,6 +251,7 @@ function App() {
   const [analyticsData, setAnalyticsData] = useState([]);
   const [allComments, setAllComments] = useState([]);
   const [likesData, setLikesData] = useState([]);
+  const [expandedLikeLoc, setExpandedLikeLoc] = useState(null);
   const [manualHome, setManualHome] = useState(null);
   const [weatherData, setWeatherData] = useState({});
   const [debouncedSearch, setDebouncedSearch] = useState('');
@@ -260,7 +261,7 @@ function App() {
   const [activePinHubId, setActivePinHubId] = useState(null);
   const [fbToken, setFbToken] = useState("");
   const [threadsToken, setThreadsToken] = useState("");
-  
+
 
   const PLATFORM_COLUMNS = {
     instagram: 'published_instagram_at',
@@ -424,8 +425,6 @@ function App() {
 
 
   // --- 3. STEADY ROUTING EFFECT (No More Blinking) ---
-
-  // --- 3. STEADY ROUTING EFFECT (No More Blinking & Debounced) ---
 
   React.useEffect(() => {
     // 1. Cleanup: If we aren't on the map tab, safely remove the control
@@ -2053,12 +2052,28 @@ Return ONLY a JSON object with exactly this structure:
       os: getSortedMetrics(parsedData, 'os'),
       // Now correctly identifies Elakiri users as 'Real Person'
       trafficType: getSortedMetrics(parsedData, v => v.isBot ? 'Bot/Crawler' : 'Real Person'),
+
       likesSummary: safeLikes.reduce((acc, l) => {
-        const locName = l.travel_bucket_list?.place_name || 'Unknown';
+        const locName = l.travel_bucket_list?.place_name;
+        const category = l.travel_bucket_list?.category; // Included category to prevent UI errors
+        const country = l.country || 'Unknown'; // Capture the country
+
         const existing = acc.find(x => x.name === locName);
-        if (existing) existing.hits += 1; else acc.push({ name: locName, hits: 1 });
+        if (existing) {
+          existing.hits += 1;
+          // Increment the country counter for this location
+          existing.countries[country] = (existing.countries[country] || 0) + 1;
+        } else {
+          acc.push({
+            name: locName,
+            category: category,
+            hits: 1,
+            countries: { [country]: 1 } // Initialize the country mapping
+          });
+        }
         return acc;
       }, []).sort((a, b) => b.hits - a.hits)
+
     };
   }, [analyticsData, likesData]);
 
@@ -3183,21 +3198,57 @@ Return ONLY a JSON object with exactly this structure:
                 {/* Inner List - Matched to Block 2's dark transparent style */}
                 <div className="bg-white/10 rounded-[2rem] p-5 flex-1 flex flex-col min-h-0 border border-white/5">
                   <div className="overflow-y-auto custom-scrollbar pr-2 flex-1 space-y-1">
-                    {dashboardStats.likesSummary.map((item, i) => (
-                      <div key={i} className="flex justify-between items-center py-3 border-b border-white/10 last:border-0 group">
-                        <div className="flex flex-col truncate pr-4">
-                          <p className="text-[11px] font-black uppercase truncate text-white group-hover:text-rose-600 transition-colors">
-                            {item.name}
-                          </p>
-                          <p className="text-[8px] font-bold text-white/50 uppercase tracking-widest">
-                            {item.category}
-                          </p>
+                    {dashboardStats.likesSummary.map((item, i) => {
+                      const isExpanded = expandedLikeLoc === item.name;
+
+                      return (
+                        <div
+                          key={i}
+                          className="flex flex-col border-b border-white/10 last:border-0 group cursor-pointer transition-colors hover:bg-white/5 rounded-xl px-2 -mx-2"
+                          onClick={() => setExpandedLikeLoc(isExpanded ? null : item.name)}
+                        >
+                          <div className="flex justify-between items-center py-3">
+                            <div className="flex flex-col truncate pr-4">
+                              <p className="text-[11px] font-black uppercase truncate text-white group-hover:text-rose-200 transition-colors">
+                                {item.name}
+                              </p>
+                              <p className="text-[8px] font-bold text-white/50 uppercase tracking-widest">
+                                {item.category}
+                              </p>
+                            </div>
+                            <div className="text-right shrink-0 flex items-center gap-2">
+                              <p className="text-sm font-black tracking-tighter text-white">{item.hits}</p>
+                              {/* Small indicator arrow */}
+                              <Icon
+                                name="navigation"
+                                className={`w-3 h-3 text-white/30 transition-transform ${isExpanded ? 'rotate-180' : 'rotate-90'}`}
+                              />
+                            </div>
+                          </div>
+
+                          {/* Expanded Country Breakdown */}
+                          {isExpanded && (
+                            <div className="pb-3 animate-in fade-in slide-in-from-top-2">
+                              <div className="bg-black/20 rounded-xl p-3 space-y-2 border border-white/5 shadow-inner">
+                                <p className="text-[8px] font-black uppercase tracking-widest text-white/40 mb-2 border-b border-white/10 pb-1">
+                                  Country Breakdown
+                                </p>
+                                <div className="space-y-1.5 max-h-32 overflow-y-auto custom-scrollbar pr-1">
+                                  {Object.entries(item.countries)
+                                    .sort((a, b) => b[1] - a[1]) // Sort highest to lowest
+                                    .map(([country, count]) => (
+                                      <div key={country} className="flex justify-between items-center">
+                                        <span className="text-[9px] font-bold text-white/80">{country}</span>
+                                        <span className="text-[9px] font-black text-rose-300">{count}</span>
+                                      </div>
+                                    ))}
+                                </div>
+                              </div>
+                            </div>
+                          )}
                         </div>
-                        <div className="text-right shrink-0">
-                          <p className="text-sm font-black tracking-tighter text-white">{item.hits}</p>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               </div>
