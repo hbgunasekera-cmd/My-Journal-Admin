@@ -2056,7 +2056,7 @@ Return ONLY a JSON object with exactly this structure:
       likesSummary: safeLikes.reduce((acc, l) => {
         const locName = l.travel_bucket_list?.place_name;
         const category = l.travel_bucket_list?.category; // Included category to prevent UI errors
-        const country = l.country || 'Unknown'; // Capture the country
+        const country = l.country; // Capture the country
 
         const existing = acc.find(x => x.name === locName);
         if (existing) {
