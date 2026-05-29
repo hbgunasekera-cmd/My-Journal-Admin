@@ -1943,54 +1943,7 @@ Return ONLY a JSON object with exactly this structure:
         loyaltyStatus = "Unique Visit";
       }
 
-      // 3. SYNCHRONIZED BOT & NETWORK DETECTION MATRIX
-      const botPatterns = [
-        'bot', 'spider', 'crawl', 'lighthouse', 'slurp',
-        'facebookexternalhit', 'twitterbot', 'google-safety',
-        'headless', 'inspect', 'preview', 'pinterestbot',
-        'clarity', 'bingbot', 'msnbot', 'duckduckbot',
-        'googleother', 'google-read-aloud', 'gtmetrix', 'adsense'
-      ];
-
-      // Data center IP prefix markers (Meta, Google, Cloud networks)
-      const isDataCenterNetwork =
-        ip.startsWith('66.220.') ||
-        ip.startsWith('173.252.') ||
-        ip.startsWith('31.13.') ||
-        ip.startsWith('66.249.') ||
-        ip.startsWith('74.125.');
-
-      // Core Data Center hyper-scale locations
-      const isKnownDataCenterCity = [
-        'Prineville', 'Forest City', 'Altoona', 'Springfield',
-        'Gallatin', 'Boardman', 'Quincy', 'Mountain View'
-      ].includes(city);
-
-      // Isolate automated background loopback pings hitting from AWS Dublin infrastructure
-      const isUptimeLoopback = city === 'Dublin' && taggedSource === 'Direct' &&
-        (ip.startsWith('52.') || ip.startsWith('54.') || ip.startsWith('34.') || ip.startsWith('46.') || ip.startsWith('63.'));
-
-      // Master evaluates truth state
-      let isBot =
-        botPatterns.some(pattern => lowerUA.includes(pattern)) ||
-        lowerUA.includes('headlesschrome') ||
-        isUptimeLoopback ||
-        (isKnownDataCenterCity && (isDataCenterNetwork || taggedSource !== 'Instagram'));
-      // Note: Keeps validated, residential cross-app targets out of Chicago/similar clean nodes
-
-      // 4. Device & OS Detection
-      let type = 'Desktop';
-      if (lowerUA.includes('tablet') || lowerUA.includes('ipad')) type = 'Tablet';
-      else if (lowerUA.includes('mobile') || lowerUA.includes('android') || lowerUA.includes('iphone')) type = 'Mobile';
-
-      let os = 'Other';
-      if (ua.includes('Windows')) os = 'Windows';
-      else if (ua.includes('Android')) os = 'Android';
-      else if (ua.includes('iPhone') || ua.includes('iPad')) os = 'iOS';
-      else if (ua.includes('Mac OS')) os = 'macOS';
-      else if (ua.includes('Linux')) os = 'Linux';
-
-      // 5. EXCLUSIVE SOURCE DETECTION (Fallback: Direct)
+      // 3. EXCLUSIVE SOURCE DETECTION (Moved up to inform Bot logic)
       let finalSource = taggedSource || "Direct";
 
       if (finalSource === "Direct") {
@@ -2020,6 +1973,60 @@ Return ONLY a JSON object with exactly this structure:
         else if (lowerUA.includes('bsky') || lowerUA.includes('bluesky')) finalSource = 'Bluesky';
         else finalSource = "Direct";
       }
+
+      // 4. SYNCHRONIZED BOT & NETWORK DETECTION MATRIX
+      const botPatterns = [
+        'bot', 'spider', 'crawl', 'lighthouse', 'slurp',
+        'facebookexternalhit', 'twitterbot', 'google-safety',
+        'headless', 'inspect', 'preview', 'pinterestbot',
+        'clarity', 'bingbot', 'msnbot', 'duckduckbot',
+        'googleother', 'google-read-aloud', 'gtmetrix', 'adsense'
+      ];
+
+      // Data center IP prefix markers (Meta, Google, Cloud networks)
+      const isDataCenterNetwork =
+        ip.startsWith('66.220.') ||
+        ip.startsWith('173.252.') ||
+        ip.startsWith('31.13.') ||
+        ip.startsWith('66.249.') ||
+        ip.startsWith('74.125.');
+
+      // Core Data Center hyper-scale locations
+      const isKnownDataCenterCity = [
+        'Prineville', 'Forest City', 'Altoona', 'Springfield',
+        'Gallatin', 'Boardman', 'Quincy', 'Mountain View'
+      ].includes(city);
+
+      // Isolate automated background loopback pings hitting from AWS Dublin infrastructure
+      const isUptimeLoopback = city === 'Dublin' && taggedSource === 'Direct' &&
+        (ip.startsWith('52.') || ip.startsWith('54.') || ip.startsWith('34.') || ip.startsWith('46.') || ip.startsWith('63.'));
+
+      // Define platforms that commonly use in-app browsers routing through data centers
+      const humanPlatforms = [
+        'Facebook', 'Instagram', 'Messenger', 'Threads', 'WhatsApp',
+        'TikTok', 'YouTube', 'Twitter(X)', 'Reddit', 'Pinterest'
+      ];
+      const isHumanAppTraffic = humanPlatforms.includes(finalSource);
+
+      // Master evaluates truth state
+      let isBot =
+        botPatterns.some(pattern => lowerUA.includes(pattern)) ||
+        lowerUA.includes('headlesschrome') ||
+        isUptimeLoopback ||
+        // Fixed: Flags as bot ONLY if it is a DC network AND NOT a recognized human app
+        (isKnownDataCenterCity && isDataCenterNetwork && !isHumanAppTraffic);
+
+      // 5. Device & OS Detection
+      let type = 'Desktop';
+      if (lowerUA.includes('tablet') || lowerUA.includes('ipad')) type = 'Tablet';
+      else if (lowerUA.includes('mobile') || lowerUA.includes('android') || lowerUA.includes('iphone')) type = 'Mobile';
+
+      let os = 'Other';
+      if (ua.includes('Windows')) os = 'Windows';
+      else if (ua.includes('Android')) os = 'Android';
+      else if (ua.includes('iPhone') || ua.includes('iPad')) os = 'iOS';
+      else if (ua.includes('Mac OS')) os = 'macOS';
+      else if (ua.includes('Linux')) os = 'Linux';
 
       return { type, source: finalSource, os, isBot, loyaltyStatus };
     };
