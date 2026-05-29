@@ -1112,8 +1112,7 @@ function App() {
 
     // 1. Construct a "Scraper-Friendly" Link
     const baseUrl = "https://my-journal-view.vercel.app";
-    const proxiedImage = `https://my-journal-admin.vercel.app/api/ig-image-proxy?url=${encodeURIComponent(p.cover_photo_url)}&ignore=/image.jpg`;
-    const shareLink = `${baseUrl}/?place=${encodeURIComponent(locationName)}&og_image=${encodeURIComponent(proxiedImage)}`;
+    const shareLink = `${baseUrl}/?place=${encodeURIComponent(locationName)}&utm_source=reddit`;
 
     // 2. Prepare Content
     const storyText = p.ai_article?.story || p.ai_article?.description || "";
