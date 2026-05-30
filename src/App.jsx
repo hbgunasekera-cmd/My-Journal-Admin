@@ -300,6 +300,7 @@ function App() {
   const routingControl = useRef(null);
   const autocompleteRef = useRef(null);
   const lastDrawnCoords = useRef(null);
+  const knownUsers = new Set();
 
 
   useEffect(() => {
@@ -1920,7 +1921,7 @@ Return ONLY a JSON object with exactly this structure:
   const dashboardStats = React.useMemo(() => {
     const safeAnalytics = Array.isArray(analyticsData) ? analyticsData : [];
     const safeLikes = Array.isArray(likesData) ? likesData : [];
-    const knownUsers = new Set();
+
 
     const parseUA = (v) => {
       const fullUA = v.user_agent || "";
@@ -1939,7 +1940,6 @@ Return ONLY a JSON object with exactly this structure:
       const fingerprint = `${ip}_${ua}`;
 
       // 2. Loyalty Check
-      const knownUsers = new Set(); // Ensure this is initialized in your scope
       let loyaltyStatus = "Returning User";
       if (!knownUsers.has(fingerprint)) {
         knownUsers.add(fingerprint);
