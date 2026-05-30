@@ -1927,6 +1927,9 @@ Return ONLY a JSON object with exactly this structure:
       const ip = v.ip_address || "";
       const city = v.city || "";
 
+      // Normalize Country (Fix for Netherlands discrepancy)
+      const country = (v.country === "The Netherlands") ? "Netherlands" : (v.country || "Unknown");
+
       // 1. ROBUST TAGGED SOURCE EXTRACTION
       const lastHyphenIndex = fullUA.lastIndexOf('-');
       let taggedSource = lastHyphenIndex !== -1 ? fullUA.substring(lastHyphenIndex + 1) : null;
@@ -1936,13 +1939,14 @@ Return ONLY a JSON object with exactly this structure:
       const fingerprint = `${ip}_${ua}`;
 
       // 2. Loyalty Check
+      const knownUsers = new Set(); // Ensure this is initialized in your scope
       let loyaltyStatus = "Returning User";
       if (!knownUsers.has(fingerprint)) {
         knownUsers.add(fingerprint);
         loyaltyStatus = "Unique Visit";
       }
 
-      // 3. EXCLUSIVE SOURCE DETECTION (Moved up to inform Bot logic)
+      // 3. EXCLUSIVE SOURCE DETECTION
       let finalSource = taggedSource || "Direct";
 
       if (finalSource === "Direct") {
@@ -1982,29 +1986,26 @@ Return ONLY a JSON object with exactly this structure:
         'googleother', 'google-read-aloud', 'gtmetrix', 'adsense'
       ];
 
-      // Data center IP prefix markers (Meta, Google, Cloud networks)
       const isDataCenterNetwork =
-        ip.startsWith('66.220.') ||
-        ip.startsWith('173.252.') ||
-        ip.startsWith('31.13.') ||
-        ip.startsWith('66.249.') ||
+        ip.startsWith('66.220.') || ip.startsWith('173.252.') ||
+        ip.startsWith('31.13.') || ip.startsWith('66.249.') ||
         ip.startsWith('74.125.');
 
-      // Core Data Center hyper-scale locations
       const isKnownDataCenterCity = [
         'Prineville', 'Forest City', 'Altoona', 'Springfield',
         'Gallatin', 'Boardman', 'Quincy', 'Mountain View'
       ].includes(city);
 
-      // Isolate automated background loopback pings hitting from AWS Dublin infrastructure
       const isUptimeLoopback = city === 'Dublin' && taggedSource === 'Direct' &&
         (ip.startsWith('52.') || ip.startsWith('54.') || ip.startsWith('34.') || ip.startsWith('46.') || ip.startsWith('63.'));
 
-      // Define platforms that commonly use in-app browsers routing through data centers
+      // Comprehensive whitelist of human-operated app browsers
       const humanPlatforms = [
         'Facebook', 'Instagram', 'Messenger', 'Threads', 'WhatsApp',
-        'TikTok', 'YouTube', 'Twitter(X)', 'Reddit', 'Pinterest'
+        'TikTok', 'YouTube', 'Twitter(X)', 'Reddit', 'Pinterest',
+        'Mastodon', 'Bluesky', 'Flipboard', 'Elakiri'
       ];
+
       const isHumanAppTraffic = humanPlatforms.includes(finalSource);
 
       // Master evaluates truth state
@@ -2012,7 +2013,6 @@ Return ONLY a JSON object with exactly this structure:
         botPatterns.some(pattern => lowerUA.includes(pattern)) ||
         lowerUA.includes('headlesschrome') ||
         isUptimeLoopback ||
-        // Fixed: Flags as bot ONLY if it is a DC network AND NOT a recognized human app
         (isKnownDataCenterCity && isDataCenterNetwork && !isHumanAppTraffic);
 
       // 5. Device & OS Detection
@@ -2027,7 +2027,7 @@ Return ONLY a JSON object with exactly this structure:
       else if (ua.includes('Mac OS')) os = 'macOS';
       else if (ua.includes('Linux')) os = 'Linux';
 
-      return { type, source: finalSource, os, isBot, loyaltyStatus };
+      return { type, source: finalSource, os, isBot, loyaltyStatus, country };
     };
 
     const parsedData = [...safeAnalytics]
