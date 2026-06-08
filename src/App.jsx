@@ -1978,42 +1978,45 @@ Return ONLY a JSON object with exactly this structure:
       }
 
       // 4. SYNCHRONIZED BOT & NETWORK DETECTION MATRIX
+      // Synchronized with frontend updates to trap direct API bot calls
       const botPatterns = [
         'bot', 'spider', 'crawl', 'lighthouse', 'slurp',
         'facebookexternalhit', 'twitterbot', 'google-safety',
         'headless', 'inspect', 'preview', 'pinterestbot',
         'clarity', 'bingbot', 'msnbot', 'duckduckbot',
-        'googleother', 'google-read-aloud', 'gtmetrix', 'adsense'
+        'googleother', 'google-read-aloud', 'gtmetrix', 'adsense',
+        'meta-externalagent', 'meta-externalfetcher', 'facebookbot',
+        'facebot', 'meta-webindexer', 'meta-externalads',
+        'applebot', 'googlebot', 'baiduspider', 'yandexbot',
+        'ia_archiver', 'screaming frog', 'adsbot'
       ];
 
+      // Expanded with target network prefixes identified in logs (Meta internal AS, GCP, AWS)
       const isDataCenterNetwork =
         ip.startsWith('66.220.') || ip.startsWith('173.252.') ||
         ip.startsWith('31.13.') || ip.startsWith('66.249.') ||
-        ip.startsWith('74.125.');
+        ip.startsWith('74.125.') || ip.startsWith('34.') ||
+        ip.startsWith('35.') || ip.startsWith('104.') ||
+        ip.startsWith('20.') || ip.startsWith('3.') ||
+        ip.startsWith('52.') || ip.startsWith('54.');
 
+      // Synchronized with your log data hubs
       const isKnownDataCenterCity = [
         'Prineville', 'Forest City', 'Altoona', 'Springfield',
-        'Gallatin', 'Boardman', 'Quincy', 'Mountain View'
+        'Gallatin', 'Boardman', 'Quincy', 'Mountain View',
+        'Council Bluffs', 'Luleå', 'Warsaw', 'Antwerp', 'Dublin'
       ].includes(city);
 
-      const isUptimeLoopback = city === 'Dublin' && taggedSource === 'Direct' &&
-        (ip.startsWith('52.') || ip.startsWith('54.') || ip.startsWith('34.') || ip.startsWith('46.') || ip.startsWith('63.'));
+      // Catch headless loopbacks executing from major server farms
+      const isCloudCloudflareOrCloudHub = isKnownDataCenterCity && isDataCenterNetwork;
 
-      // Comprehensive whitelist of human-operated app browsers
-      const humanPlatforms = [
-        'Facebook', 'Instagram', 'Messenger', 'Threads', 'WhatsApp',
-        'TikTok', 'YouTube', 'Twitter(X)', 'Reddit', 'Pinterest',
-        'Mastodon', 'Bluesky', 'Flipboard', 'Elakiri'
-      ];
-
-      const isHumanAppTraffic = humanPlatforms.includes(finalSource);
-
-      // Master evaluates truth state
+      // Master evaluates truth state 
+      // CRITICAL FIX: Removed "!isHumanAppTraffic". If traffic originates out of a corporate data 
+      // center network block/city, it is definitively a bot/scraper, regardless of what the UA claims.
       let isBot =
         botPatterns.some(pattern => lowerUA.includes(pattern)) ||
         lowerUA.includes('headlesschrome') ||
-        isUptimeLoopback ||
-        (isKnownDataCenterCity && isDataCenterNetwork && !isHumanAppTraffic);
+        isCloudCloudflareOrCloudHub;
 
       // 5. Device & OS Detection
       let type = 'Desktop';
