@@ -1837,8 +1837,16 @@ Return ONLY a JSON object with exactly this structure:
       triggerToast("Add some places to your trip first!");
       return;
     }
-    const text = encodeURIComponent(`Check out my travel route: ${link}`);
-    window.open(`https://wa.me/?text=${text}`, '_blank');
+
+    // Build the sequential list of location names
+    const locationsList = selectedTrip
+      .map((p, idx) => `${idx + 1}. ${p.place_name || p.n || 'Unknown Stop'}`)
+      .join('\n');
+
+    const messageText = `📍 Current Trip Route\n\nLocations:\n${locationsList}\n\n🗺️ Google Maps Link:\n${link}`;
+    const encodedText = encodeURIComponent(messageText);
+
+    window.open(`https://wa.me/?text=${encodedText}`, '_blank');
   };
 
   // For the "QR" button in the Live Planning Sidebar
@@ -1853,21 +1861,15 @@ Return ONLY a JSON object with exactly this structure:
   // For the "Share" button inside the Saved Routes list (Database)
   const shareRoute = (route) => {
     try {
-      // Parse waypoints (handling both Supabase stringified JSON and objects)
-      const pts = typeof route.waypoints === 'string'
-        ? JSON.parse(route.waypoints)
-        : route.waypoints;
-
+      // Parse waypoints (handling both Supabase stringified JSON and pre-parsed objects)
+      const pts = typeof route.waypoints === 'string' ? JSON.parse(route.waypoints) : route.waypoints;
       if (!pts || pts.length === 0) {
         triggerToast("This route has no waypoints.");
         return;
       }
-
-      // Open the unified modal using the saved points
-      showQRCode(pts, route.name || "Saved Route");
-
+      // Open the unified modal using the saved points, correctly targeting 'route_name'
+      showQRCode(pts, route.route_name || route.name || "Saved Route Plan");
     } catch (e) {
-
       triggerToast("Error processing route data.");
     }
   };
@@ -1886,58 +1888,70 @@ Return ONLY a JSON object with exactly this structure:
     overlay.id = "qr-modal-overlay";
     overlay.className = "fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[9999] flex items-center justify-center p-6";
 
+    // Generate the comprehensive multi-line text with location names
+    const locationsList = points
+      .map((pt, idx) => `${idx + 1}. ${pt.place_name || pt.n || 'Unknown Stop'}`)
+      .join('\n');
+
+    const fullShareContent = `🗺️ Route Plan: ${name}\n\nLocations:\n${locationsList}\n\n🔗 Google Maps Link:\n${universalUrl}`;
+
+    // Minimalistic, standard template design container
     const modal = document.createElement('div');
-    modal.className = "bg-white p-8 rounded-[2.5rem] shadow-2xl flex flex-col items-center gap-6 max-w-sm w-full animate-in zoom-in-95 duration-200 border border-slate-100";
-
-    // Logic for closing
-    modal.onclick = (e) => e.stopPropagation();
-    overlay.onclick = () => overlay.remove();
-
+    modal.className = "bg-white p-6 rounded-2xl max-w-sm w-full shadow-2xl flex flex-col items-center border border-slate-100 animate-in fade-in zoom-in-95 duration-150";
     modal.innerHTML = `
-        <div class="text-center">
-            <p class="text-[10px] font-black uppercase text-indigo-500 tracking-widest mb-1">Scan to Navigate</p>
-            <h3 class="text-sm font-black uppercase text-slate-800 leading-tight mb-4 px-4 line-clamp-2">${name}</h3>
-        </div>
-        
-        <div class="p-5 bg-slate-50 rounded-[2.5rem] border border-slate-100 shadow-inner">
-            <div id="qrcode-canvas"></div>
-        </div>
+      <div class="w-full flex justify-between items-center mb-4">
+        <h3 class="text-[11px] font-black uppercase tracking-wider text-slate-400">Share Route Plan</h3>
+        <button id="close-qr-btn" class="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-50 transition-colors">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
+      </div>
 
-        <div class="w-full space-y-3">
-            <button id="copy-link-btn" class="w-full py-4 bg-slate-900 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-800 transition-all shadow-lg active:scale-95">Copy Link</button>
-            <button id="whatsapp-modal-btn" class="w-full py-4 bg-green-500 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-green-600 transition-all shadow-lg active:scale-95">WhatsApp</button>
-            <button id="close-qr-btn" class="w-full py-3 text-slate-400 rounded-2xl text-[9px] font-black uppercase tracking-widest hover:text-slate-600">Dismiss</button>
-        </div>
+      <p class="text-xs font-black uppercase text-slate-800 text-center mb-4 w-full truncate px-2 italic">${name}</p>
+
+      <div class="bg-slate-50 p-4 rounded-xl mb-5 border border-slate-100 flex items-center justify-center shadow-inner">
+        <div id="qrcode-canvas" class="mix-blend-multiply"></div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-3 w-full">
+        <button id="copy-link-btn" class="flex items-center justify-center gap-2 py-2.5 bg-slate-900 text-white rounded-xl text-[10px] font-black uppercase shadow-lg shadow-slate-200 hover:bg-slate-800 transition-colors">
+          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+          Copy Info
+        </button>
+        <button id="whatsapp-modal-btn" class="flex items-center justify-center gap-2 py-2.5 bg-emerald-500 text-white rounded-xl text-[10px] font-black uppercase shadow-lg shadow-emerald-100 hover:bg-emerald-600 transition-colors">
+          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" viewBox="0 0 24 24"><path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946C.06 5.348 5.397.01 12.008.01c3.202.001 6.212 1.246 8.477 3.514 2.266 2.268 3.507 5.28 3.505 8.484-.004 6.657-5.34 11.997-11.953 11.997-2.005-.001-3.973-.503-5.714-1.458L0 24zm6.59-4.846c1.6.95 3.188 1.449 4.825 1.451 5.436 0 9.86-4.37 9.864-9.799.002-2.623-1.023-5.086-2.885-6.948C16.63 2.016 14.17 1 11.545 1 6.11 1 1.687 5.37 1.682 10.8c-.001 1.743.461 3.442 1.337 4.947l-1.01 3.694 3.79-.994z"/></svg>
+          WhatsApp
+        </button>
+      </div>
     `;
 
     overlay.appendChild(modal);
     document.body.appendChild(overlay);
 
-    // Initialize QR Code with slight delay for DOM insertion
+    // Render QR Code safely
     setTimeout(() => {
       const qrContainer = document.getElementById("qrcode-canvas");
-      if (qrContainer) {
+      if (qrContainer && window.QRCode) {
         new QRCode(qrContainer, {
           text: universalUrl,
-          width: 200,
-          height: 200,
+          width: 160,
+          height: 160,
           colorDark: "#0f172a",
-          colorLight: "#f8fafc", // Perfectly matches bg-slate-50
+          colorLight: "#f8fafc",
           correctLevel: QRCode.CorrectLevel.H
         });
       }
     }, 50);
 
-    // Modal Interaction Logic
+    // Interaction Observers
     modal.querySelector('#close-qr-btn').onclick = () => overlay.remove();
 
     modal.querySelector('#copy-link-btn').onclick = () => {
-      navigator.clipboard.writeText(universalUrl);
-      triggerToast("Link copied to clipboard!");
+      navigator.clipboard.writeText(fullShareContent);
+      triggerToast("Route info copied to clipboard!");
     };
 
     modal.querySelector('#whatsapp-modal-btn').onclick = () => {
-      const text = encodeURIComponent(`Check out my route: ${universalUrl}`);
+      const text = encodeURIComponent(fullShareContent);
       window.open(`https://wa.me/?text=${text}`, '_blank');
     };
   };
