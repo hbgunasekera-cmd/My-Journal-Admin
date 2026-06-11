@@ -517,7 +517,7 @@ function App() {
     markersLayer.current.clearLayers();
 
     // 4. Helper: Add customized CircleMarkers
-    const addDot = (lat, lng, color, title, subtitle) => {
+    const addDot = (lat, lng, color, title, subtitle, routePlanName = null) => {
       const pLat = parseFloat(lat);
       const pLng = parseFloat(lng);
       if (isNaN(pLat) || isNaN(pLng)) return;
@@ -531,19 +531,26 @@ function App() {
         fillOpacity: 0.9
       });
 
-      // HOVER: Show Name
-      marker.bindTooltip(title, {
+      // HOVER: Show Name (including route plan if reserved)
+      const tooltipContent = routePlanName ? `${title} (Plan: ${routePlanName})` : title;
+      marker.bindTooltip(tooltipContent, {
         direction: 'top',
         sticky: true,
         className: 'custom-map-tooltip',
         offset: [0, -5]
       });
 
-      // CLICK: Show Category Info
+      // CLICK: Show Category Info & Reserved Status
       marker.bindPopup(`
-            <div style="padding: 4px; font-family: sans-serif;">
+            <div style="padding: 4px; font-family: sans-serif; min-width: 120px;">
                 <b style="font-size: 11px; color: ${color}; text-transform: uppercase;">${title}</b><br/>
                 <span style="font-size: 9px; color: #64748b; font-weight: bold; text-transform: uppercase;">${subtitle}</span>
+                ${routePlanName ? `
+                  <div style="margin-top: 4px; border-top: 1px dashed #e2e8f0; padding-top: 4px;">
+                    <span style="font-size: 9px; color: #a855f7; font-weight: 900; text-transform: uppercase; tracking-tight: 0.05em; display: inline-block; background: #f3e8ff; padding: 1px 4px; border-radius: 3px;">★ Reserved</span>
+                    <div style="font-size: 9px; color: #7c3aed; font-weight: bold; font-style: italic; margin-top: 1px;">Plan: ${routePlanName}</div>
+                  </div>
+                ` : ''}
             </div>
         `);
 
@@ -554,20 +561,43 @@ function App() {
     // We use filteredPlaces so that markers disappear/appear as you search
     const displayList = searchTerm ? filteredPlaces : places;
     displayList.forEach(p => {
-      const color = p.status === 'done' ? '#22c55e' : '#f97316'; // Green for visited, Orange for bucket list
-      addDot(p.latitude, p.longitude, color, p.place_name || 'Location', p.category || 'Point of Interest');
+      // Find if this specific location is saved inside any of the route plans
+      const matchingRoute = savedRoutes.find(route => {
+        let wpArray = [];
+        try {
+          wpArray = typeof route.waypoints === 'string' ? JSON.parse(route.waypoints) : (route.waypoints || []);
+        } catch (e) {
+          wpArray = [];
+        }
+        return wpArray.some(wp => wp.n === p.place_name || wp.place_name === p.place_name || wp.id === p.id);
+      });
+
+      const reservedRouteName = matchingRoute ? matchingRoute.route_name : null;
+      const isReserved = !!reservedRouteName;
+
+      // Color coding: Purple if reserved in a route, Green for visited (done), Orange for bucket list (pending)
+      const color = isReserved ? '#a855f7' : (p.status === 'done' ? '#22c55e' : '#f97316');
+
+      addDot(
+        p.latitude,
+        p.longitude,
+        color,
+        p.place_name || 'Location',
+        p.category || 'Point of Interest',
+        reservedRouteName
+      );
     });
 
-    // 6. Draw Saved Route Waypoints
+    // 6. Draw Saved Route Waypoints directly
     savedRoutes.forEach(route => {
       try {
         const pts = typeof route.waypoints === 'string' ? JSON.parse(route.waypoints) : route.waypoints;
         pts?.forEach(pt => {
-          // Purple dots for route waypoints to distinguish them from locations
-          addDot(pt.lt, pt.ln, '#a855f7', pt.n || 'Route Stop', 'Saved Route Plan');
+          // Purple dots for route lines/waypoints to distinguish them from generic list markers
+          addDot(pt.lt, pt.ln, '#a855f7', pt.n || 'Route Stop', 'Saved Route Plan', route.route_name);
         });
       } catch (e) {
-
+        // Fallback for parsing errors
       }
     });
 
@@ -3069,17 +3099,54 @@ Return ONLY a JSON object with exactly this structure:
                   const km = (d / 1000).toFixed(1);
                   const isDone = p.status === 'done';
 
+                  // Find if this location is saved in any of the route plans
+                  const matchingRoute = savedRoutes.find(route => {
+                    let wpArray = [];
+                    try {
+                      wpArray = typeof route.waypoints === 'string' ? JSON.parse(route.waypoints) : (route.waypoints || []);
+                    } catch (e) {
+                      wpArray = [];
+                    }
+                    return wpArray.some(wp => wp.n === p.place_name || wp.place_name === p.place_name || wp.id === p.id);
+                  });
+
+                  const reservedRouteName = matchingRoute ? matchingRoute.route_name : null;
+                  const isReserved = !!reservedRouteName;
+
                   return (
                     <div key={p.id} className="flex justify-between items-center p-2 hover:bg-slate-50 rounded-xl transition-all border border-transparent hover:border-slate-100 group">
                       <div className="flex flex-col truncate pr-2">
                         <div className="flex items-center gap-2">
                           <span className="text-[9px] font-black uppercase truncate text-slate-600 group-hover:text-slate-900">{p.place_name}</span>
-                          <div className={`flex items-center gap-1 px-1 rounded-md border ${isDone ? 'bg-emerald-50 border-emerald-100 text-emerald-600' : 'bg-orange-50 border-orange-100 text-orange-600'}`}>
-                            <div className={`w-1 h-1 rounded-full ${isDone ? 'bg-emerald-500' : 'bg-orange-400/50 animate-pulse'}`}></div>
-                            <span className="text-[9px] font-black uppercase tracking-tighter">{isDone ? 'Done' : 'Pending'}</span>
+
+                          {/* DYNAMIC STATUS TAG WITH PURPLE RESERVED VARIANT */}
+                          <div className={`flex items-center gap-1 px-1 rounded-md border ${isReserved
+                            ? 'bg-purple-50 border-purple-100 text-purple-600'
+                            : isDone
+                              ? 'bg-emerald-50 border-emerald-100 text-emerald-600'
+                              : 'bg-orange-50 border-orange-100 text-orange-600'
+                            }`}>
+                            <div className={`w-1 h-1 rounded-full ${isReserved
+                              ? 'bg-purple-500'
+                              : isDone
+                                ? 'bg-emerald-500'
+                                : 'bg-orange-400/50 animate-pulse'
+                              }`}></div>
+                            <span className="text-[9px] font-black uppercase tracking-tighter">
+                              {isReserved ? 'Reserved' : isDone ? 'Done' : 'Pending'}
+                            </span>
                           </div>
                         </div>
-                        <span className="text-[10px] font-bold uppercase text-slate-400 tracking-tight">{km} KM</span>
+
+                        {/* DISTANCE & ROUTE PLAN ASSOCIATION NAME */}
+                        <div className="flex items-center gap-1.5 truncate">
+                          <span className="text-[10px] font-bold uppercase text-slate-400 tracking-tight shrink-0">{km} KM</span>
+                          {isReserved && (
+                            <span className="text-[9px] font-black uppercase text-purple-500 tracking-tight truncate italic">
+                              • Plan: {reservedRouteName}
+                            </span>
+                          )}
+                        </div>
                       </div>
                       <button
                         onClick={() => { setSelectedTrip([...selectedTrip, p]); fetchRouteWeather([...selectedTrip, p]); triggerToast(`Added ${p.place_name}`); }}
