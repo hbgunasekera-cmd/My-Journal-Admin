@@ -263,6 +263,7 @@ function App() {
   const [threadsToken, setThreadsToken] = useState("");
 
 
+
   const PLATFORM_COLUMNS = {
     instagram: 'published_instagram_at',
     threads: 'published_threads_at',
@@ -301,6 +302,7 @@ function App() {
   const autocompleteRef = useRef(null);
   const lastDrawnCoords = useRef(null);
   const knownUsers = new Set();
+  const downloadedImagesRef = useRef(new Set());
 
 
   useEffect(() => {
@@ -688,6 +690,12 @@ function App() {
 
   const checkAndPost = async (p, platform, shareAction) => {
     if (!p) return;
+
+    // Trigger the background download using the proxy
+    if (p.cover_photo_url) {
+      downloadCoverImage(p.cover_photo_url, p.place_name);
+    }
+
     const targetColumn = PLATFORM_COLUMNS[platform];
 
     const { data } = await supabaseClient
@@ -711,6 +719,64 @@ function App() {
     }
 
     await shareAction();
+  };
+
+  // ==========================================
+  // IMAGE DOWNLOADER (WITH WEBP/JPEG DETECTION)
+  // ==========================================
+  const downloadCoverImage = async (imageUrl, locationName) => {
+    if (!imageUrl) return;
+
+    try {
+      const proxyUrl = `/api/cover-image-proxy?url=${encodeURIComponent(imageUrl)}`;
+      const response = await fetch(proxyUrl);
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to download image");
+      }
+
+      const blob = await response.blob();
+      
+      if (blob.size < 1000) {
+        throw new Error("File too small; the image source appears to be empty or corrupted.");
+      }
+
+      // Force read the exact Content-Type from the proxy response
+      const mimeType = response.headers.get('content-type') || blob.type || '';
+      
+      // --- DEBUGGING LOGS --- 
+      console.log("DEBUG - Downloaded File Size:", blob.size, "bytes");
+      console.log("DEBUG - Detected MIME Type:", mimeType);
+      // ----------------------
+
+      let ext = 'jpg'; 
+      if (mimeType.includes('avif')) ext = 'avif';
+      else if (mimeType.includes('webp')) ext = 'webp';
+      else if (mimeType.includes('png')) ext = 'png';
+      else if (mimeType.includes('gif')) ext = 'gif';
+      else if (mimeType.includes('jpeg') || mimeType.includes('jpg')) ext = 'jpg';
+      else ext = 'bin'; // If it saves as .bin, the payload is not a valid image format
+
+      const blobUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+
+      link.download = `${locationName.replace(/[^a-z0-9]/gi, '_')}.${ext}`;
+
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(blobUrl);
+
+    } catch (err) {
+      console.error("Download Error:", err.message);
+      if (typeof triggerToast === 'function') {
+        triggerToast(`Error: ${err.message}`);
+      } else {
+        alert(`Error: ${err.message}`);
+      }
+    }
   };
 
   const updateSupabasePostStatus = async (id, platform) => {
@@ -1065,14 +1131,20 @@ function App() {
 
     if (!p) return;
 
-    // 2. LOCAL CACHE GUARD (Completely bypasses the async delay of checkAndPost)
+    // 2. TRIGGER BACKGROUND DOWNLOAD
+    // Initiated immediately via proxy to bypass CORS
+    if (p.cover_photo_url) {
+      downloadCoverImage(p.cover_photo_url, p.place_name);
+    }
+
+    // 3. LOCAL CACHE GUARD (Completely bypasses the async delay of checkAndPost)
     if (p.published_twitter_at) {
       setToast?.({ show: true, msg: "Already shared to X / Twt!" });
       setTimeout(() => setToast?.({ show: false, msg: "" }), 3000);
       return;
     }
 
-    // 3. CONTENT SETUP 
+    // 4. CONTENT SETUP 
     const locationName = p.place_name || "Island Vignette";
     const shareLink = `https://my-journal-view.vercel.app/?place=${encodeURIComponent(locationName)}`;
 
@@ -1106,9 +1178,7 @@ function App() {
 
     const tweetText = `${locationName}\n\n${shortDesc}\n\n📍Location: ${shareLink}\n\n${dynamicHashtags}`;
 
-    // 4. SYNCHRONOUS POPUP CREATION (The Magic Fix)
-    // Specifying a named window ('twitter_intent') strictly prevents duplicate tabs.
-    // Specifying dimensions forces a clean floating popup instead of a heavy browser tab.
+    // 5. SYNCHRONOUS POPUP CREATION
     const twitterIntentUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(tweetText)}`;
     const popup = window.open(
       twitterIntentUrl,
@@ -1116,7 +1186,7 @@ function App() {
       'width=550,height=420,scrollbars=yes,resizable=yes'
     );
 
-    // 5. ASYNC TASKS (Execute safely *after* the window is secured)
+    // 6. ASYNC TASKS (Execute safely *after* the window is secured)
     try {
       await navigator.clipboard.writeText(tweetText);
       setToast?.({ show: true, msg: "Caption copied! Opening X Composer..." });
@@ -1124,7 +1194,7 @@ function App() {
       console.error("Clipboard Error:", err);
     }
 
-    // 6. SYNC LOCAL & REMOTE DATABASE
+    // 7. SYNC LOCAL & REMOTE DATABASE
     if (popup) {
       try {
         await updateSupabasePostStatus(p.id, 'twitter');
