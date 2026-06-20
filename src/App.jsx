@@ -727,6 +727,12 @@ function App() {
   const downloadCoverImage = async (imageUrl, locationName) => {
     if (!imageUrl) return;
 
+    // --- FIX: Check if this location's cover image was already downloaded ---
+    if (downloadedImagesRef.current.has(locationName)) {
+      console.log(`Cover image for ${locationName} already downloaded in this session. Skipping duplicate.`);
+      return;
+    }
+
     try {
       const proxyUrl = `/api/cover-image-proxy?url=${encodeURIComponent(imageUrl)}`;
       const response = await fetch(proxyUrl);
@@ -737,20 +743,20 @@ function App() {
       }
 
       const blob = await response.blob();
-      
+
       if (blob.size < 1000) {
         throw new Error("File too small; the image source appears to be empty or corrupted.");
       }
 
       // Force read the exact Content-Type from the proxy response
       const mimeType = response.headers.get('content-type') || blob.type || '';
-      
+
       // --- DEBUGGING LOGS --- 
       console.log("DEBUG - Downloaded File Size:", blob.size, "bytes");
       console.log("DEBUG - Detected MIME Type:", mimeType);
       // ----------------------
 
-      let ext = 'jpg'; 
+      let ext = 'jpg';
       if (mimeType.includes('avif')) ext = 'avif';
       else if (mimeType.includes('webp')) ext = 'webp';
       else if (mimeType.includes('png')) ext = 'png';
@@ -768,6 +774,9 @@ function App() {
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(blobUrl);
+
+      // --- FIX: Record the successful download to prevent duplicates ---
+      downloadedImagesRef.current.add(locationName);
 
     } catch (err) {
       console.error("Download Error:", err.message);
