@@ -26,8 +26,8 @@ export default async function handler(req, res) {
 
   // 3. Construct RSS Items with Attribution Protection
   const rssItems = places.map(place => {
-    // Correct live domain: my-journal-view.vercel.app
-    const rawUrl = `https://my-journal-view.vercel.app/?place=${encodeURIComponent(place.place_name)}&utm_source=pinterest`;
+    // Correct live domain: www.myjournalview.com
+    const rawUrl = `https://www.myjournalview.com/?place=${encodeURIComponent(place.place_name)}&utm_source=pinterest`;
     
     // Safety: Escape XML characters
     const escapedUrl = rawUrl.replace(/&/g, '&amp;');
@@ -38,7 +38,7 @@ export default async function handler(req, res) {
       ? place.ai_article.story.substring(0, 400).trim() + "..." 
       : "Explore this hidden gem in Sri Lanka.";
     
-    const protectedDescription = `${storyText} \n\n© My Journal | hasitha-gunasekera. Original photography available only at my-journal-view.vercel.app`;
+    const protectedDescription = `${storyText} \n\n© My Journal | hasitha-gunasekera. Original photography available only at www.myjournalview.com`;
     
     return `
       <item>
@@ -64,8 +64,8 @@ export default async function handler(req, res) {
          xmlns:atom="http://www.w3.org/2005/Atom">
       <channel>
         <title>My Journal | Sri Lanka Travel Gallery</title>
-        <link>https://my-journal-view.vercel.app/</link>
-        <atom:link href="https://my-journal-view.vercel.app/api/feed" rel="self" type="application/rss+xml" />
+        <link>https://www.myjournalview.com/</link>
+        <atom:link href="https://www.myjournalview.com/api/feed" rel="self" type="application/rss+xml" />
         <description>Official cinematic drone and iPhone photography by Hasitha Gunasekera.</description>
         <language>en-us</language>
         <lastBuildDate>${new Date().toUTCString()}</lastBuildDate>
