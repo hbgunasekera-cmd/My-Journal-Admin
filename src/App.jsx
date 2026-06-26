@@ -1764,7 +1764,7 @@ const notifySubscribersOnCompletion = async (locationData) => {
 
     // 3. Construct the delivery payload container with responsive embedded style matrices
     const emailPayload = {
-      from: 'My Journal Expedition Logs <notifications@yourdomain.com>',
+      from: 'My Journal Expedition Logs <notifications@send.myjournalview.com>',
       to: emailList,
       subject: `📍 New Expedition Log Verified: ${locationData.place_name || 'Remote Target Location'}`,
       html: `
