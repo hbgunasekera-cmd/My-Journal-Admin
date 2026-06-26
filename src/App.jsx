@@ -27,6 +27,7 @@ import {
   Image,
   Landmark,
   LayoutGrid,
+  Mail,
   MapPin,
   MapPinned,
   MessageSquare,
@@ -161,6 +162,7 @@ const Icon = React.memo(({ name, className = "w-4 h-4" }) => {
     'instagram': InstagramIcon,
     'landmark': Landmark,
     'layout-grid': LayoutGrid,
+    'mail': Mail,
     'map-pin': MapPin,
     'message-square': MessageSquare,
     'navigation': Navigation,
@@ -251,6 +253,7 @@ function App() {
   const [analyticsData, setAnalyticsData] = useState([]);
   const [allComments, setAllComments] = useState([]);
   const [likesData, setLikesData] = useState([]);
+  const [subscribersData, setSubscribersData] = useState([]);
   const [expandedLikeLoc, setExpandedLikeLoc] = useState(null);
   const [manualHome, setManualHome] = useState(null);
   const [weatherData, setWeatherData] = useState({});
@@ -1255,18 +1258,21 @@ function App() {
   };
 
   const refreshAllData = async () => {
+
     try {
-      const [p, sr, v, a, c, l] = await Promise.all([
+
+      const [p, sr, v, a, c, l, sub] = await Promise.all([
         supabaseClient.from('travel_bucket_list').select('*').order('created_at', { ascending: false }),
         supabaseClient.from('saved_travel_routes').select('*').order('created_at', { ascending: false }),
         supabaseClient.from('page_visits').select('*'),
         supabaseClient.from('pending_approvals').select('*').order('created_at', { ascending: false }),
         supabaseClient.from('location_comments').select('*, travel_bucket_list(place_name)').order('created_at', { ascending: false }),
-        supabaseClient.from('location_likes').select('*, travel_bucket_list(place_name)')
+        supabaseClient.from('location_likes').select('*, travel_bucket_list(place_name)'),
+        supabaseClient.from('subscribers').select('*').order('subscribed_at', { ascending: false })
       ]);
 
-      // Throw an error if any fetch returns an error object from Supabase
       if (p.error) throw p.error;
+      if (sub.error) console.error("Subscribers fetch error:", sub.error);
 
       setPlaces(p.data || []);
       setSavedRoutes(sr.data || []);
@@ -1274,9 +1280,12 @@ function App() {
       setPendingApprovals(a.data || []);
       setAllComments(c.data || []);
       setLikesData(l.data || []);
-    } catch (error) {
+      setSubscribersData(sub.data || []);
 
-      triggerToast("Failed to sync database. Check connection.");
+      console.log("Fetched subscribers:", sub.data);
+    } catch (error) {
+      console.error("Data sync error:", error);
+      triggerToast("Failed to sync database.");
     }
   };
 
@@ -2157,7 +2166,7 @@ Return ONLY a JSON object with exactly this structure:
   const dashboardStats = React.useMemo(() => {
     const safeAnalytics = Array.isArray(analyticsData) ? analyticsData : [];
     const safeLikes = Array.isArray(likesData) ? likesData : [];
-
+    const safeSubscribers = Array.isArray(subscribersData) ? subscribersData : [];
 
     const parseUA = (v) => {
       const fullUA = v.user_agent || "";
@@ -2214,7 +2223,6 @@ Return ONLY a JSON object with exactly this structure:
       }
 
       // 4. SYNCHRONIZED BOT & NETWORK DETECTION MATRIX
-      // Synchronized with frontend updates to trap direct API bot calls
       const botPatterns = [
         'bot', 'spider', 'crawl', 'lighthouse', 'slurp',
         'facebookexternalhit', 'twitterbot', 'google-safety',
@@ -2227,7 +2235,6 @@ Return ONLY a JSON object with exactly this structure:
         'ia_archiver', 'screaming frog', 'adsbot'
       ];
 
-      // Expanded with target network prefixes identified in logs (Meta internal AS, GCP, AWS)
       const isDataCenterNetwork =
         ip.startsWith('66.220.') || ip.startsWith('173.252.') ||
         ip.startsWith('31.13.') || ip.startsWith('66.249.') ||
@@ -2236,19 +2243,14 @@ Return ONLY a JSON object with exactly this structure:
         ip.startsWith('20.') || ip.startsWith('3.') ||
         ip.startsWith('52.') || ip.startsWith('54.');
 
-      // Synchronized with your log data hubs
       const isKnownDataCenterCity = [
         'Prineville', 'Forest City', 'Altoona', 'Springfield',
         'Gallatin', 'Boardman', 'Quincy', 'Mountain View',
         'Council Bluffs', 'Luleå', 'Warsaw', 'Antwerp', 'Dublin'
       ].includes(city);
 
-      // Catch headless loopbacks executing from major server farms
       const isCloudCloudflareOrCloudHub = isKnownDataCenterCity && isDataCenterNetwork;
 
-      // Master evaluates truth state 
-      // CRITICAL FIX: Removed "!isHumanAppTraffic". If traffic originates out of a corporate data 
-      // center network block/city, it is definitively a bot/scraper, regardless of what the UA claims.
       let isBot =
         botPatterns.some(pattern => lowerUA.includes(pattern)) ||
         lowerUA.includes('headlesschrome') ||
@@ -2287,6 +2289,7 @@ Return ONLY a JSON object with exactly this structure:
     return {
       latest: latestMetrics,
       totalVisits: parsedData.length,
+      totalSubscribers: safeSubscribers.length,
       countries: getSortedMetrics(parsedData, 'country'),
       regions: getSortedMetrics(parsedData, 'region'),
       cities: getSortedMetrics(parsedData, 'city'),
@@ -2295,32 +2298,29 @@ Return ONLY a JSON object with exactly this structure:
       loyalty: getSortedMetrics(parsedData, 'loyaltyStatus'),
       pageHistory: getSortedMetrics(parsedData, 'page_path'),
       os: getSortedMetrics(parsedData, 'os'),
-      // Now correctly identifies Elakiri users as 'Real Person'
       trafficType: getSortedMetrics(parsedData, v => v.isBot ? 'Bot/Crawler' : 'Real Person'),
 
       likesSummary: safeLikes.reduce((acc, l) => {
         const locName = l.travel_bucket_list?.place_name;
-        const category = l.travel_bucket_list?.category; // Included category to prevent UI errors
-        const country = l.country; // Capture the country
+        const category = l.travel_bucket_list?.category;
+        const country = l.country;
 
         const existing = acc.find(x => x.name === locName);
         if (existing) {
           existing.hits += 1;
-          // Increment the country counter for this location
           existing.countries[country] = (existing.countries[country] || 0) + 1;
         } else {
           acc.push({
             name: locName,
             category: category,
             hits: 1,
-            countries: { [country]: 1 } // Initialize the country mapping
+            countries: { [country]: 1 }
           });
         }
         return acc;
       }, []).sort((a, b) => b.hits - a.hits)
-
     };
-  }, [analyticsData, likesData]);
+  }, [analyticsData, likesData, subscribersData]);
 
 
   // --- DASHBOARD ACTIONS (Comments & Suggestions) ---
@@ -3646,6 +3646,47 @@ Return ONLY a JSON object with exactly this structure:
                   )}
                 </div>
               </div>
+
+              {/* 5. NEWSLETTER SUBSCRIBERS */}
+              <div className="bg-white rounded-[2.5rem] p-8 border border-slate-100 shadow-sm flex flex-col h-[450px]">
+                <div className="flex justify-between items-center mb-6">
+                  <h2 className="text-[10px] font-black uppercase text-indigo-600 flex items-center gap-2 tracking-widest">
+                    <Icon name="mail" className="w-4 h-4 lucide" /> Subscribers
+                  </h2>
+                  {/* Corrected to ensure safe access and accurate length calculation */}
+                  <span className="px-3 py-1 bg-indigo-50 text-indigo-600 rounded-full text-[9px] font-black uppercase tracking-tighter border border-indigo-100">
+                    {(subscribersData || []).length} Total
+                  </span>
+                </div>
+
+                <div className="space-y-3 overflow-y-auto custom-scrollbar flex-1 pr-2 min-h-0">
+                  {(subscribersData || []).map(sub => (
+                    <div key={sub.id} className="p-4 bg-slate-50/50 rounded-2xl border border-slate-100 flex justify-between items-center group hover:bg-slate-50 transition-all">
+                      <div className="flex flex-col truncate pr-4">
+                        <p className="text-[10px] font-black text-slate-800 truncate">{sub.email}</p>
+                        <p className="text-[8px] font-bold text-slate-400 mt-0.5 tracking-widest uppercase">
+                          {/* Using subscribed_at as the primary date source */}
+                          {new Date(sub.subscribed_at).toLocaleDateString()}
+                        </p>
+                      </div>
+                      <div className="flex items-center shrink-0">
+                        {/* Strictly evaluate the boolean is_active status */}
+                        <span className={`px-2 py-1 rounded-md text-[7px] font-black uppercase tracking-widest ${sub.is_active === true ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-600'}`}>
+                          {sub.is_active === true ? 'Active' : 'Opted Out'}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+
+                  {(!subscribersData || subscribersData.length === 0) && (
+                    <div className="flex flex-col items-center justify-center h-full opacity-30">
+                      <Icon name="mail" className="w-10 h-10 mb-2 lucide" />
+                      <p className="text-[10px] font-black uppercase tracking-widest text-center">No Subscribers Yet</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
             </div>
           </div>
         )}
