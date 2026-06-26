@@ -997,18 +997,25 @@ function App() {
       const response = await fetch('/api/share-bluesky', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: bskyText, coverImageUrl: p.cover_photo_url, locationName }),
+        body: JSON.stringify({
+          text: bskyText,
+          coverImageUrl: p.cover_photo_url,
+          locationName
+        }),
       });
 
-      if (!response.ok) throw new Error("Failed to post to Bluesky");
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || `HTTP ${response.status}: Failed to post to Bluesky`);
+      }
 
       await updateSupabasePostStatus(p.id, 'bluesky');
       setToast?.({ show: true, msg: "Shared to Bluesky!" });
       setTimeout(() => setToast?.({ show: false, msg: "" }), 3000);
     } catch (err) {
       console.error("Bluesky Error:", err);
-      setToast?.({ show: true, msg: "Bluesky Error" });
-      setTimeout(() => setToast?.({ show: false, msg: "" }), 3000);
+      setToast?.({ show: true, msg: `Bluesky Error: ${err.message}` });
+      setTimeout(() => setToast?.({ show: false, msg: "" }), 4000);
     }
   };
 
@@ -1727,47 +1734,47 @@ Return ONLY a JSON object with exactly this structure:
  * when a field log location shifts into a completed status matrix.
  * * @param {Object} locationData - The raw location object payload from the database.
  */
-const notifySubscribersOnCompletion = async (locationData) => {
-  if (!supabaseClient) {
-    console.error("Supabase engine not initialized; email broadcast failed.");
-    return;
-  }
-
-  try {
-    // 1. Fetch subscriber email payloads directly from Supabase 
-    // Note: Added an explicit check for active status matching your application layout
-    const { data: subscribers, error: subError } = await supabaseClient
-      .from('subscribers')
-      .select('email')
-      .eq('is_active', true);
-
-    if (subError) throw subError;
-    if (!subscribers || subscribers.length === 0) {
-      console.log("No active subscribers found in database. Email dispatch aborted.");
+  const notifySubscribersOnCompletion = async (locationData) => {
+    if (!supabaseClient) {
+      console.error("Supabase engine not initialized; email broadcast failed.");
       return;
     }
 
-    const emailList = subscribers.map(s => s.email);
+    try {
+      // 1. Fetch subscriber email payloads directly from Supabase 
+      // Note: Added an explicit check for active status matching your application layout
+      const { data: subscribers, error: subError } = await supabaseClient
+        .from('subscribers')
+        .select('email')
+        .eq('is_active', true);
 
-    // 2. Parse and apply structural Google Photos proxy URL transformations 
-    let emailCoverImageUrl = '';
-    if (locationData.cover_photo_url) {
-      // Force safe connection layer protocols
-      let targetUrl = locationData.cover_photo_url.replace(/^http:\/\//i, 'https://');
+      if (subError) throw subError;
+      if (!subscribers || subscribers.length === 0) {
+        console.log("No active subscribers found in database. Email dispatch aborted.");
+        return;
+      }
 
-      // Strip out pre-existing query parameters or size keys (=s0, =w200-h150, etc.)
-      const baseUrl = targetUrl.split('=')[0];
+      const emailList = subscribers.map(s => s.email);
 
-      // Append deterministic 16:9 widescreen bounding parameters optimized for template columns
-      emailCoverImageUrl = `${baseUrl}=w600-h338-c`;
-    }
+      // 2. Parse and apply structural Google Photos proxy URL transformations 
+      let emailCoverImageUrl = '';
+      if (locationData.cover_photo_url) {
+        // Force safe connection layer protocols
+        let targetUrl = locationData.cover_photo_url.replace(/^http:\/\//i, 'https://');
 
-    // 3. Construct the delivery payload container with responsive embedded style matrices
-    const emailPayload = {
-      from: 'My Journal Expedition Logs <notifications@info.myjournalview.com>',
-      to: emailList,
-      subject: `📍 New Expedition Log Verified: ${locationData.place_name || 'Remote Target Location'}`,
-      html: `
+        // Strip out pre-existing query parameters or size keys (=s0, =w200-h150, etc.)
+        const baseUrl = targetUrl.split('=')[0];
+
+        // Append deterministic 16:9 widescreen bounding parameters optimized for template columns
+        emailCoverImageUrl = `${baseUrl}=w600-h338-c`;
+      }
+
+      // 3. Construct the delivery payload container with responsive embedded style matrices
+      const emailPayload = {
+        from: 'My Journal Expedition Logs <notifications@info.myjournalview.com>',
+        to: emailList,
+        subject: `📍 New Expedition Log Verified: ${locationData.place_name || 'Remote Target Location'}`,
+        html: `
       <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; padding: 24px; color: #1e293b; max-width: 600px; margin: 0 auto; background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 24px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
         
         ${emailCoverImageUrl ? `
@@ -1813,29 +1820,29 @@ const notifySubscribersOnCompletion = async (locationData) => {
         </div>
       </div>
     `
-    };
+      };
 
-    // 4. Securely dispatch the payload to your internal backend proxy handler
-    // This resolves CORS barriers and protects your private tokens from client disclosure
-    const response = await fetch('/api/send-email', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ emailPayload })
-    });
+      // 4. Securely dispatch the payload to your internal backend proxy handler
+      // This resolves CORS barriers and protects your private tokens from client disclosure
+      const response = await fetch('/api/send-email', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ emailPayload })
+      });
 
-    const result = await response.json();
+      const result = await response.json();
 
-    if (!response.ok) {
-      throw new Error(result.error || `Server proxy error encountered with status code: ${response.status}`);
+      if (!response.ok) {
+        throw new Error(result.error || `Server proxy error encountered with status code: ${response.status}`);
+      }
+
+      console.log(`Successfully broadcasted field update notification to ${emailList.length} subscribers via serverless API proxy.`);
+    } catch (err) {
+      console.error("Background Email Notification Dispatch Failed:", err.message || err);
     }
-
-    console.log(`Successfully broadcasted field update notification to ${emailList.length} subscribers via serverless API proxy.`);
-  } catch (err) {
-    console.error("Background Email Notification Dispatch Failed:", err.message || err);
-  }
-};
+  };
 
 
   // --- TAB 2: MAP FUNCTIONS & ROUTING ---
