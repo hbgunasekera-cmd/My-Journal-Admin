@@ -1480,7 +1480,7 @@ function App() {
     }
   };
 
-  
+
   const generateTravelArticle = async (place) => {
     const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${ARTICLE_KEY}`;
 
@@ -1729,11 +1729,10 @@ function App() {
   };
 
   /**
- * Automatically fetches active email subscribers from Supabase and dispatches 
- * a media-rich transactional notification alert via an internal serverless API proxy
- * when a field log location shifts into a completed status matrix.
- * * @param {Object} locationData - The raw location object payload from the database.
- */
+  * Automatically fetches active email subscribers from Supabase and dispatches 
+  * a media-rich transactional notification alert via an internal serverless API proxy.
+  * @param {Object} locationData - The raw location object payload from the database.
+  */
   const notifySubscribersOnCompletion = async (locationData) => {
     if (!supabaseClient) {
       console.error("Supabase engine not initialized; email broadcast failed.");
@@ -1741,8 +1740,7 @@ function App() {
     }
 
     try {
-      // 1. Fetch subscriber email payloads directly from Supabase 
-      // Note: Added an explicit check for active status matching your application layout
+      // 1. Fetch active subscriber email payloads directly from Supabase 
       const { data: subscribers, error: subError } = await supabaseClient
         .from('subscribers')
         .select('email')
@@ -1759,21 +1757,22 @@ function App() {
       // 2. Parse and apply structural Google Photos proxy URL transformations 
       let emailCoverImageUrl = '';
       if (locationData.cover_photo_url) {
-        // Force safe connection layer protocols
         let targetUrl = locationData.cover_photo_url.replace(/^http:\/\//i, 'https://');
-
-        // Strip out pre-existing query parameters or size keys (=s0, =w200-h150, etc.)
         const baseUrl = targetUrl.split('=')[0];
-
-        // Append deterministic 16:9 widescreen bounding parameters optimized for template columns
         emailCoverImageUrl = `${baseUrl}=w600-h338-c`;
       }
+
+      // [FIX 2]: Construct the exact dynamic URL to open the article on your website
+      const locationName = locationData.place_name || 'Remote Target Location';
+      const articleLink = `https://www.myjournalview.com/?place=${encodeURIComponent(locationName)}`;
 
       // 3. Construct the delivery payload container with responsive embedded style matrices
       const emailPayload = {
         from: 'My Journal Expedition Logs <notifications@info.myjournalview.com>',
-        to: emailList,
-        subject: `📍 New Expedition Log Verified: ${locationData.place_name || 'Remote Target Location'}`,
+        // [FIX 1]: Address the email to yourself to satisfy email clients, hide subscribers in BCC
+        to: ['my.journal.view@gmail.com'],
+        bcc: emailList,
+        subject: `📍 New Expedition Log Verified: ${locationName}`,
         html: `
       <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; padding: 24px; color: #1e293b; max-width: 600px; margin: 0 auto; background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 24px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
         
@@ -1781,7 +1780,7 @@ function App() {
           <div style="width: 100%; aspect-ratio: 16/9; max-height: 280px; overflow: hidden; border-radius: 16px; margin-bottom: 20px; background-color: #f1f5f9;">
             <img 
               src="${emailCoverImageUrl}" 
-              alt="${locationData.place_name || 'Expedition Site'}" 
+              alt="${locationName}" 
               style="width: 100%; height: 100%; object-fit: cover; display: block; max-height: 280px;"
             />
           </div>
@@ -1799,7 +1798,7 @@ function App() {
         <table style="width: 100%; border-collapse: collapse; margin-bottom: 24px;">
           <tr>
             <td style="padding: 6px 0; font-size: 12px; font-weight: 800; text-transform: uppercase; color: #94a3b8; width: 130px; vertical-align: top;">Location Name:</td>
-            <td style="padding: 6px 0; font-size: 13px; font-weight: 700; color: #0f172a; vertical-align: top; text-transform: uppercase;">${locationData.place_name || 'Unknown Target Location'}</td>
+            <td style="padding: 6px 0; font-size: 13px; font-weight: 700; color: #0f172a; vertical-align: top; text-transform: uppercase;">${locationName}</td>
           </tr>
           <tr>
             <td style="padding: 6px 0; font-size: 12px; font-weight: 800; text-transform: uppercase; color: #94a3b8; vertical-align: top;">Region/Locality:</td>
@@ -1814,8 +1813,8 @@ function App() {
         </table>
         
         <div style="margin-top: 28px; margin-bottom: 12px;">
-          <a href="${locationData.map_url || '#'}" target="_blank" style="background-color: #4f46e5; color: #ffffff; padding: 14px 28px; text-decoration: none; font-weight: 900; border-radius: 14px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; display: inline-block; box-shadow: 0 4px 12px rgba(79, 70, 229, 0.25);">
-            Open Expedition Map
+          <a href="${articleLink}" target="_blank" style="background-color: #4f46e5; color: #ffffff; padding: 14px 28px; text-decoration: none; font-weight: 900; border-radius: 14px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; display: inline-block; box-shadow: 0 4px 12px rgba(79, 70, 229, 0.25);">
+            Read Journal Entry
           </a>
         </div>
       </div>
@@ -1823,7 +1822,6 @@ function App() {
       };
 
       // 4. Securely dispatch the payload to your internal backend proxy handler
-      // This resolves CORS barriers and protects your private tokens from client disclosure
       const response = await fetch('/api/send-email', {
         method: 'POST',
         headers: {
