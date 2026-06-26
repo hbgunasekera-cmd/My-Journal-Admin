@@ -846,7 +846,7 @@ function App() {
 
   const handleMetaShare = async (p, platform, accessToken) => {
     const locationName = p.place_name || "Island Vignette";
-    const shareLink = `https://my-journal-view.vercel.app/?place=${encodeURIComponent(locationName)}`;
+    const shareLink = `https://www.myjournalview.com/?place=${encodeURIComponent(locationName)}`;
     const coreTags = "#MyJournal #SriLanka #TravelSriLanka #TravelPhotography";
     const dynamicHashtags = `${coreTags} ${getSpecificTags(p)}`.trim();
 
@@ -913,7 +913,7 @@ function App() {
 
   const handleMastodonShare = async (p) => {
     const locationName = p.place_name || "Island Vignette";
-    const shareLink = `https://my-journal-view.vercel.app/?place=${encodeURIComponent(locationName)}`;
+    const shareLink = `https://www.myjournalview.com/?place=${encodeURIComponent(locationName)}`;
     const coreTags = "#MyJournal #SriLanka #TravelSriLanka #TravelPhotography";
     const dynamicHashtags = `${coreTags} ${getSpecificTags(p)}`.trim();
 
@@ -963,7 +963,7 @@ function App() {
 
   const handleBlueskyShare = async (p) => {
     const locationName = p.place_name || "Island Vignette";
-    const shareLink = `https://my-journal-view.vercel.app/?place=${encodeURIComponent(locationName)}`;
+    const shareLink = `https://www.myjournalview.com/?place=${encodeURIComponent(locationName)}`;
     const coreTags = "#MyJournal #SriLanka";
     const specificTags = getSpecificTags(p).split(' ').slice(0, 2).join(' ');
     const dynamicHashtags = `${coreTags} ${specificTags}`.trim();
@@ -1016,7 +1016,7 @@ function App() {
     if (!p) return;
 
     const locationName = p.place_name || "Island Vignette";
-    const baseUrl = "https://my-journal-view.vercel.app";
+    const baseUrl = "https://www.myjournalview.com";
     const shareUrl = `${baseUrl}/?place=${encodeURIComponent(locationName)}&utm_source=pinterest`;
 
     // Dynamic Hashtags Conversion
@@ -1075,7 +1075,7 @@ function App() {
     if (!p) return;
 
     const locationName = p.place_name || "Island Vignette";
-    const shareLink = `https://my-journal-view.vercel.app/?place=${encodeURIComponent(locationName)}`;
+    const shareLink = `https://www.myjournalview.com/?place=${encodeURIComponent(locationName)}`;
 
     // Dynamic Hashtags Conversion
     const coreTags = "#MyJournal #SriLanka #TravelSriLanka #TravelPhotography";
@@ -1158,7 +1158,7 @@ function App() {
 
     // 4. CONTENT SETUP 
     const locationName = p.place_name || "Island Vignette";
-    const shareLink = `https://my-journal-view.vercel.app/?place=${encodeURIComponent(locationName)}`;
+    const shareLink = `https://www.myjournalview.com/?place=${encodeURIComponent(locationName)}`;
 
     const coreTags = "#MyJournal #SriLanka #TravelSriLanka #TravelPhotography";
     const dynamicHashtags = `${coreTags} ${getSpecificTags(p)}`.trim();
@@ -1224,7 +1224,7 @@ function App() {
     const locationName = p.place_name || "Island Vignette";
 
     // 1. Construct a "Scraper-Friendly" Link
-    const baseUrl = "https://my-journal-view.vercel.app";
+    const baseUrl = "https://www.myjournalview.com";
     const shareLink = `${baseUrl}/?place=${encodeURIComponent(locationName)}&utm_source=reddit`;
 
     // 2. Prepare Content
