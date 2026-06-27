@@ -3567,7 +3567,47 @@ function App() {
                 </div>
               </div>
 
-              {/* 3. PENDING COMMENTS */}
+              {/* 3. NEWSLETTER SUBSCRIBERS */}
+              <div className="bg-white rounded-[2.5rem] p-8 border border-slate-100 shadow-sm flex flex-col h-[450px]">
+                <div className="flex justify-between items-center mb-6">
+                  <h2 className="text-[10px] font-black uppercase text-indigo-600 flex items-center gap-2 tracking-widest">
+                    <Icon name="mail" className="w-4 h-4 lucide" /> Subscribers
+                  </h2>
+                  {/* Corrected to ensure safe access and accurate length calculation */}
+                  <span className="px-3 py-1 bg-indigo-50 text-indigo-600 rounded-full text-[9px] font-black uppercase tracking-tighter border border-indigo-100">
+                    {(subscribersData || []).length} Total
+                  </span>
+                </div>
+
+                <div className="space-y-3 overflow-y-auto custom-scrollbar flex-1 pr-2 min-h-0">
+                  {(subscribersData || []).map(sub => (
+                    <div key={sub.id} className="p-4 bg-slate-50/50 rounded-2xl border border-slate-100 flex justify-between items-center group hover:bg-slate-50 transition-all">
+                      <div className="flex flex-col truncate pr-4">
+                        <p className="text-[10px] font-black text-slate-800 truncate">{sub.email}</p>
+                        <p className="text-[8px] font-bold text-slate-400 mt-0.5 tracking-widest uppercase">
+                          {/* Using subscribed_at as the primary date source */}
+                          {new Date(sub.subscribed_at).toLocaleDateString()}
+                        </p>
+                      </div>
+                      <div className="flex items-center shrink-0">
+                        {/* Strictly evaluate the boolean is_active status */}
+                        <span className={`px-2 py-1 rounded-md text-[7px] font-black uppercase tracking-widest ${sub.is_active === true ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-600'}`}>
+                          {sub.is_active === true ? 'Active' : 'Opted Out'}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+
+                  {(!subscribersData || subscribersData.length === 0) && (
+                    <div className="flex flex-col items-center justify-center h-full opacity-30">
+                      <Icon name="mail" className="w-10 h-10 mb-2 lucide" />
+                      <p className="text-[10px] font-black uppercase tracking-widest text-center">No Subscribers Yet</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* 4. PENDING COMMENTS */}
               <div className="bg-white rounded-[2.5rem] p-8 border border-slate-100 shadow-sm flex flex-col h-[450px]">
                 <div className="flex justify-between items-center mb-6">
                   <h2 className="text-[10px] font-black uppercase text-slate-800 flex items-center gap-2 tracking-widest">
@@ -3623,7 +3663,7 @@ function App() {
                 </div>
               </div>
 
-              {/* 4. SUGGESTIONS */}
+              {/* 5. SUGGESTIONS */}
               <div className="bg-white rounded-[2.5rem] p-8 border border-slate-100 shadow-sm flex flex-col h-[450px]">
                 <div className="flex justify-between items-center mb-6">
                   <h2 className="text-[10px] font-black uppercase text-orange-600 flex items-center gap-2 tracking-widest">
@@ -3655,45 +3695,7 @@ function App() {
                 </div>
               </div>
 
-              {/* 5. NEWSLETTER SUBSCRIBERS */}
-              <div className="bg-white rounded-[2.5rem] p-8 border border-slate-100 shadow-sm flex flex-col h-[450px]">
-                <div className="flex justify-between items-center mb-6">
-                  <h2 className="text-[10px] font-black uppercase text-indigo-600 flex items-center gap-2 tracking-widest">
-                    <Icon name="mail" className="w-4 h-4 lucide" /> Subscribers
-                  </h2>
-                  {/* Corrected to ensure safe access and accurate length calculation */}
-                  <span className="px-3 py-1 bg-indigo-50 text-indigo-600 rounded-full text-[9px] font-black uppercase tracking-tighter border border-indigo-100">
-                    {(subscribersData || []).length} Total
-                  </span>
-                </div>
 
-                <div className="space-y-3 overflow-y-auto custom-scrollbar flex-1 pr-2 min-h-0">
-                  {(subscribersData || []).map(sub => (
-                    <div key={sub.id} className="p-4 bg-slate-50/50 rounded-2xl border border-slate-100 flex justify-between items-center group hover:bg-slate-50 transition-all">
-                      <div className="flex flex-col truncate pr-4">
-                        <p className="text-[10px] font-black text-slate-800 truncate">{sub.email}</p>
-                        <p className="text-[8px] font-bold text-slate-400 mt-0.5 tracking-widest uppercase">
-                          {/* Using subscribed_at as the primary date source */}
-                          {new Date(sub.subscribed_at).toLocaleDateString()}
-                        </p>
-                      </div>
-                      <div className="flex items-center shrink-0">
-                        {/* Strictly evaluate the boolean is_active status */}
-                        <span className={`px-2 py-1 rounded-md text-[7px] font-black uppercase tracking-widest ${sub.is_active === true ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-600'}`}>
-                          {sub.is_active === true ? 'Active' : 'Opted Out'}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-
-                  {(!subscribersData || subscribersData.length === 0) && (
-                    <div className="flex flex-col items-center justify-center h-full opacity-30">
-                      <Icon name="mail" className="w-10 h-10 mb-2 lucide" />
-                      <p className="text-[10px] font-black uppercase tracking-widest text-center">No Subscribers Yet</p>
-                    </div>
-                  )}
-                </div>
-              </div>
 
             </div>
           </div>
