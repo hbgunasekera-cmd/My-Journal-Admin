@@ -1772,53 +1772,56 @@ function App() {
         // [FIX 1]: Address the email to yourself to satisfy email clients, hide subscribers in BCC
         to: ['my.journal.view@gmail.com'],
         bcc: emailList,
-        subject: `📍 New Expedition Log Verified: ${locationName}`,
+        // 1. Artistic and adventurous subject line
+        subject: `🧭 New Horizon Unlocked: ${locationName} is Live`,
         html: `
-      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; padding: 24px; color: #1e293b; max-width: 600px; margin: 0 auto; background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 24px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
-        
-        ${emailCoverImageUrl ? `
-          <div style="width: 100%; aspect-ratio: 16/9; max-height: 280px; overflow: hidden; border-radius: 16px; margin-bottom: 20px; background-color: #f1f5f9;">
-            <img 
-              src="${emailCoverImageUrl}" 
-              alt="${locationName}" 
-              style="width: 100%; height: 100%; object-fit: cover; display: block; max-height: 280px;"
-            />
-          </div>
-        ` : ''}
+ <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; padding: 24px; color: #1e293b; max-width: 600px; margin: 0 auto; background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 24px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
+  
+  ${emailCoverImageUrl ? `
+    <div style="width: 100%; aspect-ratio: 16/9; max-height: 280px; overflow: hidden; border-radius: 16px; margin-bottom: 20px; background-color: #f1f5f9;">
+      <img 
+        src="${emailCoverImageUrl}" 
+        alt="${locationName}" 
+        style="width: 100%; height: 100%; object-fit: cover; display: block; max-height: 280px;"
+      />
+    </div>
+  ` : ''}
 
-        <h2 style="text-transform: uppercase; letter-spacing: 0.08em; color: #4f46e5; font-size: 18px; font-weight: 900; margin-top: 0; margin-bottom: 8px;">
-          New Location Online
-        </h2>
-        <p style="font-size: 14px; color: #64748b; margin-top: 0; margin-bottom: 20px; line-height: 1.5;">
-          Field log verification has been successfully updated to <strong style="color: #10b981;">Done / Completed</strong>.
-        </p>
-        
-        <hr style="border: none; border-top: 1px solid #f1f5f9; margin: 20px 0;" />
-        
-        <table style="width: 100%; border-collapse: collapse; margin-bottom: 24px;">
-          <tr>
-            <td style="padding: 6px 0; font-size: 12px; font-weight: 800; text-transform: uppercase; color: #94a3b8; width: 130px; vertical-align: top;">Location Name:</td>
-            <td style="padding: 6px 0; font-size: 13px; font-weight: 700; color: #0f172a; vertical-align: top; text-transform: uppercase;">${locationName}</td>
-          </tr>
-          <tr>
-            <td style="padding: 6px 0; font-size: 12px; font-weight: 800; text-transform: uppercase; color: #94a3b8; vertical-align: top;">Region/Locality:</td>
-            <td style="padding: 6px 0; font-size: 13px; font-weight: 600; color: #475569; vertical-align: top; text-transform: uppercase;">${locationData.locality || 'Verified Terrain'}</td>
-          </tr>
-          <tr>
-            <td style="padding: 6px 0; font-size: 12px; font-weight: 800; text-transform: uppercase; color: #94a3b8; vertical-align: top;">Category:</td>
-            <td style="padding: 6px 0; font-size: 11px; font-weight: 800; color: #4f46e5; vertical-align: top; text-transform: uppercase;">
-              <span style="background-color: #e0e7ff; padding: 3px 8px; border-radius: 6px; display: inline-block;">${locationData.category || 'Exploration Zone'}</span>
-            </td>
-          </tr>
-        </table>
-        
-        <div style="margin-top: 28px; margin-bottom: 12px;">
-          <a href="${articleLink}" target="_blank" style="background-color: #4f46e5; color: #ffffff; padding: 14px 28px; text-decoration: none; font-weight: 900; border-radius: 14px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; display: inline-block; box-shadow: 0 4px 12px rgba(79, 70, 229, 0.25);">
-            Read Journal Entry
-          </a>
-        </div>
-      </div>
-    `
+  <!-- 3. Attractive replacement for "New Location Online" -->
+  <h2 style="text-transform: uppercase; letter-spacing: 0.08em; color: #4f46e5; font-size: 18px; font-weight: 900; margin-top: 0; margin-bottom: 8px;">
+    The Map Expands
+  </h2>
+  
+  <!-- 2. Re-written status sentence and dynamic "Done/Completed" replacement -->
+  <p style="font-size: 14px; color: #64748b; margin-top: 0; margin-bottom: 20px; line-height: 1.5;">
+    The latest field logs have been meticulously polished, verified, and are officially <strong style="color: #10b981;">Ready for Discovery</strong>.
+  </p>
+  
+  <hr style="border: none; border-top: 1px solid #f1f5f9; margin: 20px 0;" />
+  
+  <table style="width: 100%; border-collapse: collapse; margin-bottom: 24px;">
+    <tr>
+      <td style="padding: 6px 0; font-size: 12px; font-weight: 800; text-transform: uppercase; color: #94a3b8; width: 130px; vertical-align: top;">Location Name:</td>
+      <td style="padding: 6px 0; font-size: 13px; font-weight: 700; color: #0f172a; vertical-align: top; text-transform: uppercase;">${locationName}</td>
+    </tr>
+    <tr>
+      <td style="padding: 6px 0; font-size: 12px; font-weight: 800; text-transform: uppercase; color: #94a3b8; vertical-align: top;">Region/Locality:</td>
+      <td style="padding: 6px 0; font-size: 13px; font-weight: 600; color: #475569; vertical-align: top; text-transform: uppercase;">${locationData.locality || 'Verified Terrain'}</td>
+    </tr>
+    <tr>
+      <td style="padding: 6px 0; font-size: 12px; font-weight: 800; text-transform: uppercase; color: #94a3b8; vertical-align: top;">Category:</td>
+      <td style="padding: 6px 0; font-size: 11px; font-weight: 800; color: #4f46e5; vertical-align: top; text-transform: uppercase;">
+        <span style="background-color: #e0e7ff; padding: 3px 8px; border-radius: 6px; display: inline-block;">${locationData.category || 'Exploration Zone'}</span>
+      </td>
+    </tr>
+  </table>
+  
+  <div style="margin-top: 28px; margin-bottom: 12px;">
+    <a href="${articleLink}" target="_blank" style="background-color: #4f46e5; color: #ffffff; padding: 14px 28px; text-decoration: none; font-weight: 900; border-radius: 14px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; display: inline-block; box-shadow: 0 4px 12px rgba(79, 70, 229, 0.25);">
+      Read Journal Entry
+    </a>
+  </div>
+ </div> `
       };
 
       // 4. Securely dispatch the payload to your internal backend proxy handler
@@ -3616,8 +3619,8 @@ function App() {
                           onClick={() => toggleSubscriberStatus(sub.id, sub.is_active)}
                           title={`Click to mark as ${sub.is_active === true ? 'Inactive' : 'Active'}`}
                           className={`px-3 py-1.5 rounded-xl text-[8px] font-black uppercase tracking-widest transition-all transform active:scale-95 hover:scale-105 ${sub.is_active === true
-                              ? 'bg-emerald-100 text-emerald-700 border border-emerald-200 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 group-hover:shadow-sm'
-                              : 'bg-rose-100 text-rose-700 border border-rose-200 hover:bg-emerald-50 hover:text-emerald-600 hover:border-emerald-200 group-hover:shadow-sm'
+                            ? 'bg-emerald-100 text-emerald-700 border border-emerald-200 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 group-hover:shadow-sm'
+                            : 'bg-rose-100 text-rose-700 border border-rose-200 hover:bg-emerald-50 hover:text-emerald-600 hover:border-emerald-200 group-hover:shadow-sm'
                             }`}
                         >
                           {sub.is_active === true ? 'Active' : 'Inactive'}
