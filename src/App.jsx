@@ -813,7 +813,7 @@ function App() {
 
 
   // ==========================================
-  // 1. CENTRALIZED TAG & LINK GENERATOR HELPER
+  // 1. CENTRALIZED TAG GENERATOR & URL HELPER
   // ==========================================
   const getSpecificTags = (place) => {
     const tags = new Set();
@@ -840,11 +840,17 @@ function App() {
     return Array.from(tags).join(" ");
   };
 
+  /**
+   * Generates clean URL path structures: https://www.myjournalview.com/place/Devon-Falls
+   */
   const generateShareLink = (locationName, utmSource = '') => {
-    const formattedName = encodeURIComponent(locationName.replace(/\s+/g, '-'));
-    let url = `https://www.myjournalview.com/?place=${formattedName}`;
+    const formattedName = encodeURIComponent(locationName.trim().replace(/\s+/g, '-'));
+    // Updated to use the clean sub-directory route layout
+    let url = `https://www.myjournalview.com/place/${formattedName}`;
+
     if (utmSource) {
-      url += `&utm_source=${utmSource}`;
+      // Changed from '&' to '?' because it is now the first parameter in the path URL
+      url += `?utm_source=${utmSource}`;
     }
     return url;
   };
@@ -1236,7 +1242,7 @@ function App() {
 
     const locationName = p.place_name || "Island Vignette";
 
-    // 1. Construct a "Scraper-Friendly" Link
+    // 1. Construct a "Scraper-Friendly" Path Link
     const shareLink = generateShareLink(locationName, 'reddit');
 
     // 2. Prepare Content
