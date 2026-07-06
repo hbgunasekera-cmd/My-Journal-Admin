@@ -813,7 +813,7 @@ function App() {
 
 
   // ==========================================
-  // 1. CENTRALIZED TAG GENERATOR HELPER
+  // 1. CENTRALIZED TAG & LINK GENERATOR HELPER
   // ==========================================
   const getSpecificTags = (place) => {
     const tags = new Set();
@@ -840,13 +840,22 @@ function App() {
     return Array.from(tags).join(" ");
   };
 
+  const generateShareLink = (locationName, utmSource = '') => {
+    const formattedName = encodeURIComponent(locationName.replace(/\s+/g, '-'));
+    let url = `https://www.myjournalview.com/?place=${formattedName}`;
+    if (utmSource) {
+      url += `&utm_source=${utmSource}`;
+    }
+    return url;
+  };
+
   // ==========================================
   // 2. REVISED INTEGRATION SHARING FUNCTIONS
   // ==========================================
 
   const handleMetaShare = async (p, platform, accessToken) => {
     const locationName = p.place_name || "Island Vignette";
-    const shareLink = `https://www.myjournalview.com/?place=${encodeURIComponent(locationName.replace(/\s+/g, '-'))}`;
+    const shareLink = generateShareLink(locationName);
     const coreTags = "#MyJournal #SriLanka #TravelSriLanka #TravelPhotography";
     const dynamicHashtags = `${coreTags} ${getSpecificTags(p)}`.trim();
 
@@ -913,14 +922,14 @@ function App() {
 
   const handleMastodonShare = async (p) => {
     const locationName = p.place_name || "Island Vignette";
-    const shareLink = `https://www.myjournalview.com/?place=${encodeURIComponent(locationName.replace(/\s+/g, '-'))}`;
+    const shareLink = generateShareLink(locationName);
     const coreTags = "#MyJournal #SriLanka #TravelSriLanka #TravelPhotography";
     const dynamicHashtags = `${coreTags} ${getSpecificTags(p)}`.trim();
 
     const storyText = p.ai_article?.story || p.ai_article?.description || "";
     const cleanText = storyText.replace(/[#*]/g, '').trim();
 
-    const fixedCost = locationName.length + 4 + 7 + 23 + 4 + dynamicHashtags.length;
+    const fixedCost = locationName.length + 4 + 7 + shareLink.length + 4 + dynamicHashtags.length;
     const maxDescBudget = 500 - fixedCost - 5;
 
     const sentences = cleanText.match(/[^.!?]+[.!?]+/g) || [cleanText];
@@ -963,7 +972,7 @@ function App() {
 
   const handleBlueskyShare = async (p) => {
     const locationName = p.place_name || "Island Vignette";
-    const shareLink = `https://www.myjournalview.com/?place=${encodeURIComponent(locationName.replace(/\s+/g, '-'))}`;
+    const shareLink = generateShareLink(locationName);
     const coreTags = "#MyJournal #SriLanka";
     const specificTags = getSpecificTags(p).split(' ').slice(0, 2).join(' ');
     const dynamicHashtags = `${coreTags} ${specificTags}`.trim();
@@ -1023,8 +1032,7 @@ function App() {
     if (!p) return;
 
     const locationName = p.place_name || "Island Vignette";
-    const baseUrl = "https://www.myjournalview.com";
-    const shareUrl = `${baseUrl}/?place=${encodeURIComponent(locationName.replace(/\s+/g, '-'))}&utm_source=pinterest`;
+    const shareUrl = generateShareLink(locationName, 'pinterest');
 
     // Dynamic Hashtags Conversion
     const coreTags = "#MyJournal #SriLanka #TravelSriLanka #TravelPhotography";
@@ -1077,12 +1085,11 @@ function App() {
     }
   };
 
-
   const handleFlipboardShare = async (p) => {
     if (!p) return;
 
     const locationName = p.place_name || "Island Vignette";
-    const shareLink = `https://www.myjournalview.com/?place=${encodeURIComponent(locationName.replace(/\s+/g, '-'))}`;
+    const shareLink = generateShareLink(locationName);
 
     // Dynamic Hashtags Conversion
     const coreTags = "#MyJournal #SriLanka #TravelSriLanka #TravelPhotography";
@@ -1165,7 +1172,7 @@ function App() {
 
     // 4. CONTENT SETUP 
     const locationName = p.place_name || "Island Vignette";
-    const shareLink = `https://www.myjournalview.com/?place=${encodeURIComponent(locationName.replace(/\s+/g, '-'))}`;
+    const shareLink = generateShareLink(locationName);
 
     const coreTags = "#MyJournal #SriLanka #TravelSriLanka #TravelPhotography";
     const dynamicHashtags = `${coreTags} ${getSpecificTags(p)}`.trim();
@@ -1224,15 +1231,13 @@ function App() {
     }
   };
 
-
   const handleRedditShare = async (p) => {
     if (!p) return;
 
     const locationName = p.place_name || "Island Vignette";
 
     // 1. Construct a "Scraper-Friendly" Link
-    const baseUrl = "https://www.myjournalview.com";
-    const shareLink = `${baseUrl}/?place=${encodeURIComponent(locationName.replace(/\s+/g, '-'))}&utm_source=reddit`;
+    const shareLink = generateShareLink(locationName, 'reddit');
 
     // 2. Prepare Content
     const storyText = p.ai_article?.story || p.ai_article?.description || "";
