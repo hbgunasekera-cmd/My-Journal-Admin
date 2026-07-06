@@ -846,7 +846,7 @@ function App() {
 
   const handleMetaShare = async (p, platform, accessToken) => {
     const locationName = p.place_name || "Island Vignette";
-    const shareLink = `https://www.myjournalview.com/?place=${encodeURIComponent(locationName)}`;
+    const shareLink = `https://www.myjournalview.com/?place=${encodeURIComponent(locationName.replace(/\s+/g, '-'))}`;
     const coreTags = "#MyJournal #SriLanka #TravelSriLanka #TravelPhotography";
     const dynamicHashtags = `${coreTags} ${getSpecificTags(p)}`.trim();
 
@@ -913,7 +913,7 @@ function App() {
 
   const handleMastodonShare = async (p) => {
     const locationName = p.place_name || "Island Vignette";
-    const shareLink = `https://www.myjournalview.com/?place=${encodeURIComponent(locationName)}`;
+    const shareLink = `https://www.myjournalview.com/?place=${encodeURIComponent(locationName.replace(/\s+/g, '-'))}`;
     const coreTags = "#MyJournal #SriLanka #TravelSriLanka #TravelPhotography";
     const dynamicHashtags = `${coreTags} ${getSpecificTags(p)}`.trim();
 
@@ -963,7 +963,7 @@ function App() {
 
   const handleBlueskyShare = async (p) => {
     const locationName = p.place_name || "Island Vignette";
-    const shareLink = `https://www.myjournalview.com/?place=${encodeURIComponent(locationName)}`;
+    const shareLink = `https://www.myjournalview.com/?place=${encodeURIComponent(locationName.replace(/\s+/g, '-'))}`;
     const coreTags = "#MyJournal #SriLanka";
     const specificTags = getSpecificTags(p).split(' ').slice(0, 2).join(' ');
     const dynamicHashtags = `${coreTags} ${specificTags}`.trim();
@@ -1024,7 +1024,7 @@ function App() {
 
     const locationName = p.place_name || "Island Vignette";
     const baseUrl = "https://www.myjournalview.com";
-    const shareUrl = `${baseUrl}/?place=${encodeURIComponent(locationName)}&utm_source=pinterest`;
+    const shareUrl = `${baseUrl}/?place=${encodeURIComponent(locationName.replace(/\s+/g, '-'))}&utm_source=pinterest`;
 
     // Dynamic Hashtags Conversion
     const coreTags = "#MyJournal #SriLanka #TravelSriLanka #TravelPhotography";
@@ -1082,7 +1082,7 @@ function App() {
     if (!p) return;
 
     const locationName = p.place_name || "Island Vignette";
-    const shareLink = `https://www.myjournalview.com/?place=${encodeURIComponent(locationName)}`;
+    const shareLink = `https://www.myjournalview.com/?place=${encodeURIComponent(locationName.replace(/\s+/g, '-'))}`;
 
     // Dynamic Hashtags Conversion
     const coreTags = "#MyJournal #SriLanka #TravelSriLanka #TravelPhotography";
@@ -1123,7 +1123,7 @@ function App() {
     const targetUrl = p.cover_photo_url || shareLink;
     const flipboardUrl = `https://share.flipboard.com/bookmarklet/popout?v=2` +
       `&url=${encodeURIComponent(targetUrl)}` +
-      `&title=${encodeURIComponent(locationName)}`;
+      `&title=${encodeURIComponent(locationName.replace(/\s+/g, '-'))}`;
 
     const popup = window.open(
       flipboardUrl,
@@ -1165,7 +1165,7 @@ function App() {
 
     // 4. CONTENT SETUP 
     const locationName = p.place_name || "Island Vignette";
-    const shareLink = `https://www.myjournalview.com/?place=${encodeURIComponent(locationName)}`;
+    const shareLink = `https://www.myjournalview.com/?place=${encodeURIComponent(locationName.replace(/\s+/g, '-'))}`;
 
     const coreTags = "#MyJournal #SriLanka #TravelSriLanka #TravelPhotography";
     const dynamicHashtags = `${coreTags} ${getSpecificTags(p)}`.trim();
@@ -1232,7 +1232,7 @@ function App() {
 
     // 1. Construct a "Scraper-Friendly" Link
     const baseUrl = "https://www.myjournalview.com";
-    const shareLink = `${baseUrl}/?place=${encodeURIComponent(locationName)}&utm_source=reddit`;
+    const shareLink = `${baseUrl}/?place=${encodeURIComponent(locationName.replace(/\s+/g, '-'))}&utm_source=reddit`;
 
     // 2. Prepare Content
     const storyText = p.ai_article?.story || p.ai_article?.description || "";
@@ -1242,7 +1242,7 @@ function App() {
     setToast?.({ show: true, msg: "Opening Reddit Submission..." });
 
     // 3. Open Reddit Submission
-    const redditUrl = `https://www.reddit.com/submit?url=${encodeURIComponent(shareLink)}&title=${encodeURIComponent(locationName)}&text=${encodeURIComponent(redditDescription)}`;
+    const redditUrl = `https://www.reddit.com/submit?url=${encodeURIComponent(shareLink)}&title=${encodeURIComponent(locationName.replace(/\s+/g, '-'))}&text=${encodeURIComponent(redditDescription)}`;
     const popup = window.open(redditUrl, '_blank', 'width=800,height=600');
 
     if (popup) {
@@ -1764,7 +1764,7 @@ function App() {
 
       // [FIX 2]: Construct the exact dynamic URL to open the article on your website
       const locationName = locationData.place_name || 'Remote Target Location';
-      const articleLink = `https://www.myjournalview.com/?place=${encodeURIComponent(locationName)}`;
+      const articleLink = `https://www.myjournalview.com/?place=${encodeURIComponent(locationName.replace(/\s+/g, '-'))}`;
 
       // 3. Construct the delivery payload container with responsive embedded style matrices
       const emailPayload = {
