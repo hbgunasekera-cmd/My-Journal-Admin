@@ -841,12 +841,12 @@ function App() {
   };
 
   /**
-   * Generates clean URL path structures: https://www.myjournalview.com/place/Devon-Falls
+   * Generates clean URL path structures: https://www.myjournalview.com/gallery/Devon-Falls
    */
   const generateShareLink = (locationName, utmSource = '') => {
     const formattedName = encodeURIComponent(locationName.trim().replace(/\s+/g, '-'));
     // Updated to use the clean sub-directory route layout
-    let url = `https://www.myjournalview.com/place/${formattedName}`;
+    let url = `https://www.myjournalview.com/gallery/${formattedName}`;
 
     if (utmSource) {
       // Changed from '&' to '?' because it is now the first parameter in the path URL
@@ -928,7 +928,7 @@ function App() {
 
   const handleMastodonShare = async (p) => {
     const locationName = p.place_name || "Island Vignette";
-    const shareLink = generateShareLink(locationName);
+    const shareLink = generateShareLink(locationName,'mastodon');
     const coreTags = "#MyJournal #SriLanka #TravelSriLanka #TravelPhotography";
     const dynamicHashtags = `${coreTags} ${getSpecificTags(p)}`.trim();
 
@@ -978,7 +978,7 @@ function App() {
 
   const handleBlueskyShare = async (p) => {
     const locationName = p.place_name || "Island Vignette";
-    const shareLink = generateShareLink(locationName);
+    const shareLink = generateShareLink(locationName,'bluesky');
     const coreTags = "#MyJournal #SriLanka";
     const specificTags = getSpecificTags(p).split(' ').slice(0, 2).join(' ');
     const dynamicHashtags = `${coreTags} ${specificTags}`.trim();
@@ -1095,7 +1095,7 @@ function App() {
     if (!p) return;
 
     const locationName = p.place_name || "Island Vignette";
-    const shareLink = generateShareLink(locationName);
+    const shareLink = generateShareLink(locationName,'flipboard');
 
     // Dynamic Hashtags Conversion
     const coreTags = "#MyJournal #SriLanka #TravelSriLanka #TravelPhotography";
@@ -1178,7 +1178,7 @@ function App() {
 
     // 4. CONTENT SETUP 
     const locationName = p.place_name || "Island Vignette";
-    const shareLink = generateShareLink(locationName);
+    const shareLink = generateShareLink(locationName, 'twitter');
 
     const coreTags = "#MyJournal #SriLanka #TravelSriLanka #TravelPhotography";
     const dynamicHashtags = `${coreTags} ${getSpecificTags(p)}`.trim();
