@@ -853,16 +853,27 @@ function App() {
       .map(word => word.charAt(0).toUpperCase() + word.slice(1))
       .join(' ');
 
-  // Handle Gallery Links (e.g., /gallery/ella-rock)
+  // 1. Handle exact database strings or paths that already contain spaces
+  // (e.g., "Plan Function", "Add Function", or standard text labels)
+  if (path.includes(' ') || path === 'Plan Function' || path === 'Add Function' || path === 'Main Page') {
+    return path;
+  }
+
+  // 2. Handle Gallery Links (e.g., /gallery/ella-rock)
   if (path.startsWith('/gallery/')) {
     const slug = path.split('/').pop();
     return `Gallery - ${cleanSlug(slug)}`;
   }
 
-  // Handle Place/Article Links (e.g., /place/ella-rock)
+  // 3. Handle Place/Article Links (e.g., /place/ella-rock)
   if (path.startsWith('/place/')) {
     const slug = path.split('/').pop();
     return `Article - ${cleanSlug(slug)}`;
+  }
+
+  // 4. Handle raw slugs that aren't full paths (e.g., "plan-function" -> "Plan Function")
+  if (path.includes('-')) {
+    return cleanSlug(path);
   }
 
   // Fallback for any other defined routes
