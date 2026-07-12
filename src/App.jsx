@@ -215,29 +215,28 @@ const WeatherIcon = ({ condition }) => {
   return <WIcon className={`w-5 h-5 ${color} shrink-0`} strokeWidth={1.75} />;
 };
 
-/**
- * Metric Column for the Dashboard view.[cite: 2]
- */
 const MetricColumn = ({ title, data, highlightValue }) => (
   <div className="min-w-0">
     <p className="text-[9px] font-black uppercase text-slate-500 mb-3 border-b border-slate-700 pb-1 tracking-wider">
       {title}
     </p>
     <div className="space-y-2 max-h-48 overflow-y-auto no-scrollbar">
-      {(data || []).map(([name, count]) => {
-        const isLatest = highlightValue && name === highlightValue;
-        return (
-          <div key={name} className="flex justify-between text-[10px] font-bold group">
-            <span className={`truncate pr-2 transition-colors ${isLatest ? 'text-orange-500' : 'text-slate-400 group-hover:text-white'
-              }`}>
-              {name}
-            </span>
-            <span className={`font-black ${isLatest ? 'text-orange-500' : 'text-white'}`}>
-              {count}
-            </span>
-          </div>
-        );
-      })}
+      {(data || [])
+        .filter(([_, count]) => count > 0) // Explicitly deny 0 visits
+        .map(([name, count]) => {
+          const isLatest = highlightValue && name === highlightValue;
+          return (
+            <div key={name} className="flex justify-between text-[10px] font-bold group">
+              <span className={`truncate pr-2 transition-colors ${isLatest ? 'text-orange-500' : 'text-slate-400 group-hover:text-white'
+                }`}>
+                {name}
+              </span>
+              <span className={`font-black ${isLatest ? 'text-orange-500' : 'text-white'}`}>
+                {count}
+              </span>
+            </div>
+          );
+        })}
     </div>
   </div>
 );
@@ -2373,7 +2372,8 @@ function App() {
       sources: getSortedMetrics(parsedData, 'source'),
       deviceTypes: getSortedMetrics(parsedData, 'type'),
       loyalty: getSortedMetrics(parsedData, 'loyaltyStatus'),
-      pageHistory: getSortedMetrics(parsedData, 'page_path'),
+      pageHistory: getSortedMetrics(parsedData, 'page_path')
+        .filter(([path, count]) => count > 0 && path && path !== 'Unknown'),
       os: getSortedMetrics(parsedData, 'os'),
       trafficType: getSortedMetrics(parsedData, v => v.isBot ? 'Bot/Crawler' : 'Real Person'),
 
@@ -2799,7 +2799,7 @@ function App() {
                             }
                           }}
                           className={`absolute top-2 right-2 px-3 py-1 rounded-full text-[8px] font-black uppercase shadow-md transition-all active:scale-95 z-10 ${p.status === 'done' ? 'bg-emerald-500 text-white' : 'bg-white/90 text-orange-500'}`}
-                         >
+                        >
                           <div className="flex items-center gap-1">
                             <Icon name={p.status === 'done' ? 'check-circle' : 'circle'} className="w-2.5 h-2.5" /> {p.status}
                           </div>
@@ -3535,8 +3535,11 @@ function App() {
                   <MetricColumn title="Operating System" data={dashboardStats.os} highlightValue={dashboardStats.latest?.os} />
                   <MetricColumn title="App / Source" data={dashboardStats.sources} highlightValue={dashboardStats.latest?.source} />
                   <MetricColumn title="Visit Loyalty" data={dashboardStats.loyalty} highlightValue={dashboardStats.latest?.loyaltyStatus} />
-                  <MetricColumn title="Visit History" data={dashboardStats.pageHistory} highlight />
-
+                  <MetricColumn
+                    title="Visit History"
+                    data={dashboardStats.pageHistory}
+                    highlightValue={dashboardStats.latest?.page_path}
+                  />
                   {/* Traffic Type Breakdown */}
                   <div>
                     <p className="text-[9px] font-black uppercase text-slate-500 mb-3 border-b border-slate-700 pb-1 tracking-wider">Traffic Type</p>
