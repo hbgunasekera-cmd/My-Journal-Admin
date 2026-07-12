@@ -215,6 +215,38 @@ const WeatherIcon = ({ condition }) => {
   return <WIcon className={`w-5 h-5 ${color} shrink-0`} strokeWidth={1.75} />;
 };
 
+
+const formatPageName = (path) => {
+  if (!path || path === '/') return 'Main Page';
+
+  const cleanSlug = (slug) =>
+    slug
+      .split('-')
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ');
+
+  if (path.includes(' ') || path === 'Plan Function' || path === 'Add Function' || path === 'Main Page') {
+    return path;
+  }
+
+  if (path.startsWith('/gallery/')) {
+    const slug = path.split('/').pop();
+    return `Gallery - ${cleanSlug(slug)}`;
+  }
+
+  if (path.startsWith('/place/')) {
+    const slug = path.split('/').pop();
+    return `Article - ${cleanSlug(slug)}`;
+  }
+
+  if (path.includes('-')) {
+    return cleanSlug(path);
+  }
+
+  return path;
+};
+
+
 const MetricColumn = ({ title, data, highlightValue }) => (
   <div className="min-w-0">
     <p className="text-[9px] font-black uppercase text-slate-500 mb-3 border-b border-slate-700 pb-1 tracking-wider">
@@ -224,16 +256,14 @@ const MetricColumn = ({ title, data, highlightValue }) => (
       {(data || [])
         .filter(([_, count]) => count > 0)
         .map(([name, count]) => {
-          // Compare using raw database paths
-          const isLatest = highlightValue && name === highlightValue; 
-          
+          const isLatest = highlightValue && name === highlightValue;
+
           return (
             <div key={name} className="flex justify-between text-[10px] font-bold group">
-              <span className={`truncate pr-2 transition-colors ${
-                isLatest ? 'text-orange-500' : 'text-slate-400 group-hover:text-white'
-              }`}>
-                {/* Display the clean, mapped name */}
-                {formatPageName(name)} 
+              <span className={`truncate pr-2 transition-colors ${isLatest ? 'text-orange-500' : 'text-slate-400 group-hover:text-white'
+                }`}>
+                {/* Now formatPageName is perfectly in scope! */}
+                {formatPageName(name)}
               </span>
               <span className={`font-black ${isLatest ? 'text-orange-500' : 'text-white'}`}>
                 {count}
@@ -244,6 +274,7 @@ const MetricColumn = ({ title, data, highlightValue }) => (
     </div>
   </div>
 );
+
 
 // --- Main Application Component ---
 function App() {
@@ -843,42 +874,7 @@ function App() {
     return Array.from(tags).join(" ");
   };
 
-  const formatPageName = (path) => {
-  if (!path || path === '/') return 'Main Page';
 
-  // Helper to turn "diyaluma-falls" into "Diyaluma Falls"
-  const cleanSlug = (slug) => 
-    slug
-      .split('-')
-      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-      .join(' ');
-
-  // 1. Handle exact database strings or paths that already contain spaces
-  // (e.g., "Plan Function", "Add Function", or standard text labels)
-  if (path.includes(' ') || path === 'Plan Function' || path === 'Add Function' || path === 'Main Page') {
-    return path;
-  }
-
-  // 2. Handle Gallery Links (e.g., /gallery/ella-rock)
-  if (path.startsWith('/gallery/')) {
-    const slug = path.split('/').pop();
-    return `Gallery - ${cleanSlug(slug)}`;
-  }
-
-  // 3. Handle Place/Article Links (e.g., /place/ella-rock)
-  if (path.startsWith('/place/')) {
-    const slug = path.split('/').pop();
-    return `Article - ${cleanSlug(slug)}`;
-  }
-
-  // 4. Handle raw slugs that aren't full paths (e.g., "plan-function" -> "Plan Function")
-  if (path.includes('-')) {
-    return cleanSlug(path);
-  }
-
-  // Fallback for any other defined routes
-  return path;
-};
 
   /**
    * Generates clean URL path structures: https://www.myjournalview.com/gallery/Devon-Falls
