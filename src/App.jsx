@@ -222,14 +222,18 @@ const MetricColumn = ({ title, data, highlightValue }) => (
     </p>
     <div className="space-y-2 max-h-48 overflow-y-auto no-scrollbar">
       {(data || [])
-        .filter(([_, count]) => count > 0) // Explicitly deny 0 visits
+        .filter(([_, count]) => count > 0)
         .map(([name, count]) => {
-          const isLatest = highlightValue && name === highlightValue;
+          // Compare using raw database paths
+          const isLatest = highlightValue && name === highlightValue; 
+          
           return (
             <div key={name} className="flex justify-between text-[10px] font-bold group">
-              <span className={`truncate pr-2 transition-colors ${isLatest ? 'text-orange-500' : 'text-slate-400 group-hover:text-white'
-                }`}>
-                {name}
+              <span className={`truncate pr-2 transition-colors ${
+                isLatest ? 'text-orange-500' : 'text-slate-400 group-hover:text-white'
+              }`}>
+                {/* Display the clean, mapped name */}
+                {formatPageName(name)} 
               </span>
               <span className={`font-black ${isLatest ? 'text-orange-500' : 'text-white'}`}>
                 {count}
@@ -838,6 +842,32 @@ function App() {
 
     return Array.from(tags).join(" ");
   };
+
+  const formatPageName = (path) => {
+  if (!path || path === '/') return 'Main Page';
+
+  // Helper to turn "diyaluma-falls" into "Diyaluma Falls"
+  const cleanSlug = (slug) => 
+    slug
+      .split('-')
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ');
+
+  // Handle Gallery Links (e.g., /gallery/ella-rock)
+  if (path.startsWith('/gallery/')) {
+    const slug = path.split('/').pop();
+    return `Gallery - ${cleanSlug(slug)}`;
+  }
+
+  // Handle Place/Article Links (e.g., /place/ella-rock)
+  if (path.startsWith('/place/')) {
+    const slug = path.split('/').pop();
+    return `Article - ${cleanSlug(slug)}`;
+  }
+
+  // Fallback for any other defined routes
+  return path;
+};
 
   /**
    * Generates clean URL path structures: https://www.myjournalview.com/gallery/Devon-Falls
