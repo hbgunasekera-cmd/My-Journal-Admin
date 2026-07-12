@@ -928,7 +928,7 @@ function App() {
 
   const handleMastodonShare = async (p) => {
     const locationName = p.place_name || "Island Vignette";
-    const shareLink = generateShareLink(locationName,'mastodon');
+    const shareLink = generateShareLink(locationName, 'mastodon');
     const coreTags = "#MyJournal #SriLanka #TravelSriLanka #TravelPhotography";
     const dynamicHashtags = `${coreTags} ${getSpecificTags(p)}`.trim();
 
@@ -978,7 +978,7 @@ function App() {
 
   const handleBlueskyShare = async (p) => {
     const locationName = p.place_name || "Island Vignette";
-    const shareLink = generateShareLink(locationName,'bluesky');
+    const shareLink = generateShareLink(locationName, 'bluesky');
     const coreTags = "#MyJournal #SriLanka";
     const specificTags = getSpecificTags(p).split(' ').slice(0, 2).join(' ');
     const dynamicHashtags = `${coreTags} ${specificTags}`.trim();
@@ -1095,7 +1095,7 @@ function App() {
     if (!p) return;
 
     const locationName = p.place_name || "Island Vignette";
-    const shareLink = generateShareLink(locationName,'flipboard');
+    const shareLink = generateShareLink(locationName, 'flipboard');
 
     // Dynamic Hashtags Conversion
     const coreTags = "#MyJournal #SriLanka #TravelSriLanka #TravelPhotography";
@@ -1273,6 +1273,40 @@ function App() {
   const triggerToast = (msg) => {
     setToast({ show: true, msg });
     setTimeout(() => setToast({ show: false, msg: '' }), 2500);
+  };
+
+  const triggerIndexNow = async (placeName, albumPhotos) => {
+    try {
+      const host = "www.myjournalview.com";
+      const cleanSlug = encodeURIComponent(placeName.trim().replace(/ /g, '-'));
+      const urlsToSubmit = [`https://${host}/place/${cleanSlug}`];
+
+      // If photos exist, submit the gallery link too
+      if (albumPhotos && albumPhotos.length > 0) {
+        urlsToSubmit.push(`https://${host}/gallery/${cleanSlug}`);
+      }
+
+      const payload = {
+        host: host,
+        key: "24d0f44fba0b4dc7bf211372ab00f787",
+        keyLocation: `https://${host}/24d0f44fba0b4dc7bf211372ab00f787.txt`,
+        urlList: urlsToSubmit
+      };
+
+      const response = await fetch('https://api.indexnow.org/indexnow', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json; charset=utf-8' },
+        body: JSON.stringify(payload)
+      });
+
+      if (response.ok) {
+        triggerToast("🚀 IndexNow notified of new links!");
+      } else {
+        console.error("IndexNow failed:", response.status);
+      }
+    } catch (error) {
+      console.error("IndexNow error:", error);
+    }
   };
 
   const refreshAllData = async () => {
@@ -2758,11 +2792,14 @@ function App() {
 
                             // If moving into completed phase, pass updated object metadata matrix to notify engine
                             if (updatedStatus === 'done') {
+
+                              await triggerIndexNow(p.place_name, p.album_photos);
                               await notifySubscribersOnCompletion({ ...p, status: 'done' });
+
                             }
                           }}
                           className={`absolute top-2 right-2 px-3 py-1 rounded-full text-[8px] font-black uppercase shadow-md transition-all active:scale-95 z-10 ${p.status === 'done' ? 'bg-emerald-500 text-white' : 'bg-white/90 text-orange-500'}`}
-                        >
+                         >
                           <div className="flex items-center gap-1">
                             <Icon name={p.status === 'done' ? 'check-circle' : 'circle'} className="w-2.5 h-2.5" /> {p.status}
                           </div>
@@ -2878,6 +2915,7 @@ function App() {
 
                               // Automatically flip location status payload parameters to complete and broadcast
                               await updatePlaceField(p.id, 'status', 'done');
+                              await triggerIndexNow(p.place_name, p.album_photos);
                               await notifySubscribersOnCompletion({ ...p, status: 'done' });
                             }
                           }}
