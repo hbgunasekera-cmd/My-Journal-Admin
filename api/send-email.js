@@ -1,7 +1,6 @@
 // api/send-email.js
 
 export default async function handler(req, res) {
-  // Reject incoming non-POST traffic
   if (req.method !== 'POST') {
     res.setHeader('Allow', ['POST']);
     return res.status(405).json({ error: `Method ${req.method} Not Allowed` });
@@ -12,15 +11,14 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: "Missing email container compilation payload." });
   }
 
-  // Retrieve private token bound exclusively to backend scope environments
   const resendApiKey = process.env.RESEND_API_KEY;
   if (!resendApiKey) {
     return res.status(500).json({ error: "Server error: RESEND_API_KEY environment variable is not configured." });
   }
 
   try {
-    // Perform server-to-server connection to Resend (No CORS constraints apply)
-    const response = await fetch('https://api.resend.com/emails', {
+    // FIX: Switched endpoint to /emails/batch to handle arrays of customized emails
+    const response = await fetch('https://api.resend.com/emails/batch', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
