@@ -26,8 +26,9 @@ export default async function handler(req, res) {
 
   // 3. Construct RSS Items with Attribution Protection
   const rssItems = places.map(place => {
-    // Correct live domain: www.myjournalview.com
-    const rawUrl = `https://www.myjournalview.com/?place=${encodeURIComponent(place.place_name)}&utm_source=pinterest`;
+    // --- REVISED: Generate URL slugs exactly matching generateShareLink in App.jsx ---
+    const formattedName = encodeURIComponent(place.place_name.trim().replace(/\s+/g, '-'));
+    const rawUrl = `https://www.myjournalview.com/gallery/${formattedName}?utm_source=pinterest`;
     
     // Safety: Escape XML characters
     const escapedUrl = rawUrl.replace(/&/g, '&amp;');
