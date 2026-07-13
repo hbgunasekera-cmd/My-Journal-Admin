@@ -1311,13 +1311,13 @@ function App() {
     setTimeout(() => setToast({ show: false, msg: '' }), 2500);
   };
 
+
   const triggerIndexNow = async (placeName, albumPhotos) => {
     try {
       const host = "www.myjournalview.com";
       const cleanSlug = encodeURIComponent(placeName.trim().replace(/ /g, '-'));
       const urlsToSubmit = [`https://${host}/place/${cleanSlug}`];
 
-      // If photos exist, submit the gallery link too
       if (albumPhotos && albumPhotos.length > 0) {
         urlsToSubmit.push(`https://${host}/gallery/${cleanSlug}`);
       }
@@ -1329,19 +1329,24 @@ function App() {
         urlList: urlsToSubmit
       };
 
-      const response = await fetch('https://api.indexnow.org/indexnow', {
+      const response = await fetch('/api/indexnow', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json; charset=utf-8' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
 
-      if (response.ok) {
-        triggerToast("🚀 IndexNow notified of new links!");
+      const result = await response.json();
+
+      if (response.ok && result.success) {
+        triggerToast("🚀 IndexNow notified of new links safely via backend!");
+        return true; // <-- ADD THIS: Tell the app it succeeded
       } else {
-        console.error("IndexNow failed:", response.status);
+        console.error("IndexNow failed via proxy:", result.error || response.status);
+        return false; // <-- ADD THIS: Tell the app it failed
       }
     } catch (error) {
-      console.error("IndexNow error:", error);
+      console.error("IndexNow integration error:", error);
+      return false; // <-- ADD THIS
     }
   };
 
@@ -1459,6 +1464,7 @@ function App() {
         status: 'pending',
         restriction_level: 'None',
         governing_org: 'Open',
+        is_indexed: false,
         created_at: new Date()
       }]);
 
@@ -1735,6 +1741,7 @@ function App() {
         .update({
           ai_article: articleData,
           status: 'done',
+          is_indexed: false,
           created_at: new Date().toISOString(),
         })
         .eq('id', id);
@@ -1810,10 +1817,10 @@ function App() {
   };
 
   /**
- * Automatically fetches active email subscribers from Supabase and dispatches 
- * a media-rich transactional notification alert via an internal serverless API proxy.
- * @param {Object} locationData - The raw location object payload from the database.
- */
+   * Automatically fetches active email subscribers from Supabase and dispatches 
+   * a media-rich transactional notification alert via an internal serverless API proxy.
+   * @param {Object} locationData - The raw location object payload from the database.
+   */
   const notifySubscribersOnCompletion = async (locationData) => {
     if (!supabaseClient) {
       console.error("Supabase engine not initialized; email broadcast failed.");
@@ -1843,64 +1850,64 @@ function App() {
         emailCoverImageUrl = `${baseUrl}=w600-h338-c`;
       }
 
-      // Construct the exact dynamic URL to open the article on your website
+      // Construct the exact dynamic URL to open the gallery on your website
       const locationName = locationData.place_name || 'Remote Target Location';
-      const articleLink = `https://www.myjournalview.com/?place=${encodeURIComponent(locationName.replace(/\s+/g, '-'))}`;
+
+      // REVISED: Changed to /gallery/ routing scheme
+      const galleryLink = `https://www.myjournalview.com/gallery/${encodeURIComponent(locationName.trim().replace(/\s+/g, '-'))}`;
 
       // 3. Construct the batch delivery payload container array mapping over each subscriber
-      // FIX: Switched from a single BCC object to an array of personalized 'to' objects for Resend's Batch API
       const emailPayload = emailList.map(subscriberEmail => ({
         from: 'My Journal Expedition Logs <notifications@info.myjournalview.com>',
-        to: [subscriberEmail], // Correctly targeting the individual subscriber
+        to: [subscriberEmail],
         subject: `🧭 New Horizon Unlocked: ${locationName} is Live`,
         html: `
-  <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; padding: 24px; color: #1e293b; max-width: 600px; margin: 0 auto; background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 24px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
+   <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; padding: 24px; color: #1e293b; max-width: 600px; margin: 0 auto; background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 24px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
 
-  ${emailCoverImageUrl ? `
-  <div style="width: 100%; aspect-ratio: 16/9; max-height: 280px; overflow: hidden; border-radius: 16px; margin-bottom: 20px; background-color: #f1f5f9;">
-    <img 
-      src="${emailCoverImageUrl}" 
-      alt="${locationName}" 
-      style="width: 100%; height: 100%; object-fit: cover; display: block; max-height: 280px;"
-    />
-  </div>
- ` : ''}
+   ${emailCoverImageUrl ? `
+   <div style="width: 100%; aspect-ratio: 16/9; max-height: 280px; overflow: hidden; border-radius: 16px; margin-bottom: 20px; background-color: #f1f5f9;">
+  <img 
+    src="${emailCoverImageUrl}" 
+    alt="${locationName}" 
+    style="width: 100%; height: 100%; object-fit: cover; display: block; max-height: 280px;"
+  />
+   </div>
+  ` : ''}
 
- <!-- Attractive replacement for "New Location Online" -->
- <h2 style="text-transform: uppercase; letter-spacing: 0.08em; color: #4f46e5; font-size: 18px; font-weight: 900; margin-top: 0; margin-bottom: 8px;">
-  The Map Expands
- </h2>
+   <h2 style="text-transform: uppercase; letter-spacing: 0.08em; color: #4f46e5; font-size: 18px; font-weight: 900; margin-top: 0; margin-bottom: 8px;">
+   The Map Expands
+   </h2>
 
- <!-- Re-written status sentence and dynamic "Done/Completed" replacement -->
- <p style="font-size: 14px; color: #64748b; margin-top: 0; margin-bottom: 20px; line-height: 1.5;">
-  The latest field logs have been meticulously polished, verified, and are officially <strong style="color: #10b981;">Ready for Discovery</strong>.
- </p>
+   <p style="font-size: 14px; color: #64748b; margin-top: 0; margin-bottom: 20px; line-height: 1.5;">
+   The latest field logs have been meticulously polished, verified, and are officially <strong style="color: #10b981;">Ready for Discovery</strong>.
+   </p>
 
- <hr style="border: none; border-top: 1px solid #f1f5f9; margin: 20px 0;" />
+   <hr style="border: none; border-top: 1px solid #f1f5f9; margin: 20px 0;" />
 
- <table style="width: 100%; border-collapse: collapse; margin-bottom: 24px;">
+  <table style="width: 100%; border-collapse: collapse; margin-bottom: 24px;">
   <tr>
-    <td style="padding: 6px 0; font-size: 12px; font-weight: 800; text-transform: uppercase; color: #94a3b8; width: 130px; vertical-align: top;">Location Name:</td>
-    <td style="padding: 6px 0; font-size: 13px; font-weight: 700; color: #0f172a; vertical-align: top; text-transform: uppercase;">${locationName}</td>
-  </tr>
-  <tr>
-    <td style="padding: 6px 0; font-size: 12px; font-weight: 800; text-transform: uppercase; color: #94a3b8; vertical-align: top;">Region/Locality:</td>
-    <td style="padding: 6px 0; font-size: 13px; font-weight: 600; color: #475569; vertical-align: top; text-transform: uppercase;">${locationData.locality || 'Verified Terrain'}</td>
-  </tr>
-  <tr>
-    <td style="padding: 6px 0; font-size: 12px; font-weight: 800; text-transform: uppercase; color: #94a3b8; vertical-align: top;">Category:</td>
-    <td style="padding: 6px 0; font-size: 11px; font-weight: 800; color: #4f46e5; vertical-align: top; text-transform: uppercase;">
-      <span style="background-color: #e0e7ff; padding: 3px 8px; border-radius: 6px; display: inline-block;">${locationData.category || 'Exploration Zone'}</span>
-    </td>
-  </tr>
- </table>
+  <td style="padding: 6px 0; font-size: 12px; font-weight: 800; text-transform: uppercase; color: #94a3b8; width: 130px; vertical-align: top;">Location Name:</td>
+  <td style="padding: 6px 0; font-size: 13px; font-weight: 700; color: #0f172a; vertical-align: top; text-transform: uppercase;">${locationName}</td>
+   </tr>
+   <tr>
+  <td style="padding: 6px 0; font-size: 12px; font-weight: 800; text-transform: uppercase; color: #94a3b8; vertical-align: top;">Region/Locality:</td>
+  <td style="padding: 6px 0; font-size: 13px; font-weight: 600; color: #475569; vertical-align: top; text-transform: uppercase;">${locationData.locality || 'Verified Terrain'}</td>
+   </tr>
+    <tr>
+  <td style="padding: 6px 0; font-size: 12px; font-weight: 800; text-transform: uppercase; color: #94a3b8; vertical-align: top;">Category:</td>
+  <td style="padding: 6px 0; font-size: 11px; font-weight: 800; color: #4f46e5; vertical-align: top; text-transform: uppercase;">
+    <span style="background-color: #e0e7ff; padding: 3px 8px; border-radius: 6px; display: inline-block;">${locationData.category || 'Exploration Zone'}</span>
+  </td>
+    </tr>
+   </table>
 
- <div style="margin-top: 28px; margin-bottom: 12px;">
-  <a href="${articleLink}" target="_blank" style="background-color: #4f46e5; color: #ffffff; padding: 14px 28px; text-decoration: none; font-weight: 900; border-radius: 14px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; display: inline-block; box-shadow: 0 4px 12px rgba(79, 70, 229, 0.25);">
-    Read Journal Entry
-  </a>
- </div>
- </div> `
+   <div style="margin-top: 28px; margin-bottom: 12px;">
+    <!-- REVISED: Updated href to galleryLink and inner text to View Gallery -->
+    <a href="${galleryLink}" target="_blank" style="background-color: #4f46e5; color: #ffffff; padding: 14px 28px; text-decoration: none; font-weight: 900; border-radius: 14px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; display: inline-block; box-shadow: 0 4px 12px rgba(79, 70, 229, 0.25);">
+  View Gallery
+    </a>
+   </div>
+   </div> `
       }));
 
       // 4. Securely dispatch the payload to your internal backend proxy handler
@@ -2520,6 +2527,7 @@ function App() {
             status: 'pending',
             restriction_level: 'None',
             governing_org: 'Open',
+            is_indexed: false,
             created_at: new Date().toISOString()
           }]);
 
@@ -2822,15 +2830,27 @@ function App() {
                         <button
                           onClick={async () => {
                             const updatedStatus = p.status === 'done' ? 'pending' : 'done';
-                            // Perform state commit to database first
+
+                            // 1. Perform state commit to database first
                             await updatePlaceField(p.id, 'status', updatedStatus);
 
-                            // If moving into completed phase, pass updated object metadata matrix to notify engine
+                            // 2. Trigger matrix exclusively for the 'done' phase
                             if (updatedStatus === 'done') {
 
-                              await triggerIndexNow(p.place_name, p.album_photos);
-                              await notifySubscribersOnCompletion({ ...p, status: 'done' });
+                              // Strict Single-Fire IndexNow Logic
+                              if (!p.is_indexed) {
+                                const indexSuccess = await triggerIndexNow(p.place_name, p.album_photos);
 
+                                // If the serverless proxy successfully logs the link into IndexNow, lock the column
+                                if (indexSuccess) {
+                                  await updatePlaceField(p.id, 'is_indexed', true);
+                                  // Optimistically update local state memory so UI is instantly aware
+                                  p.is_indexed = true;
+                                }
+                              }
+
+                              // Proceed with standard completion broadcast (Now fully guarded against duplicate indexing calls)
+                              await notifySubscribersOnCompletion({ ...p, status: 'done' });
                             }
                           }}
                           className={`absolute top-2 right-2 px-3 py-1 rounded-full text-[8px] font-black uppercase shadow-md transition-all active:scale-95 z-10 ${p.status === 'done' ? 'bg-emerald-500 text-white' : 'bg-white/90 text-orange-500'}`}
@@ -2839,6 +2859,7 @@ function App() {
                             <Icon name={p.status === 'done' ? 'check-circle' : 'circle'} className="w-2.5 h-2.5" /> {p.status}
                           </div>
                         </button>
+
                       </div>
 
                       {/* Body Details */}
@@ -2945,12 +2966,25 @@ function App() {
                             if (hasArticle) {
                               manualEditArticle(p);
                             } else {
-                              // Execute generation script first
+                              // 1. Execute generation script first
                               await generateTravelArticle(p);
 
-                              // Automatically flip location status payload parameters to complete and broadcast
+                              // 2. Automatically flip location status to done
                               await updatePlaceField(p.id, 'status', 'done');
-                              await triggerIndexNow(p.place_name, p.album_photos);
+
+                              // 3. Strict Single-Fire IndexNow Logic
+                              if (!p.is_indexed) {
+                                const indexSuccess = await triggerIndexNow(p.place_name, p.album_photos);
+
+                                // If the serverless proxy successfully logs the link into IndexNow, lock the column
+                                if (indexSuccess) {
+                                  await updatePlaceField(p.id, 'is_indexed', true);
+                                  // Optimistically update the local row instance to prevent immediate double clicks
+                                  p.is_indexed = true;
+                                }
+                              }
+
+                              // 4. Proceed with standard completion broadcast (Now fully guarded against duplicate indexing calls)
                               await notifySubscribersOnCompletion({ ...p, status: 'done' });
                             }
                           }}
@@ -2959,6 +2993,7 @@ function App() {
                         >
                           <Icon name={hasArticle ? "file-text" : "sparkles"} className="w-4 h-4" />
                         </button>
+
 
                         {hasArticle && (
                           <button
