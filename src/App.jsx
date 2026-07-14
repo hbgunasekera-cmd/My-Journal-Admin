@@ -2285,60 +2285,24 @@ function App() {
     const safeSubscribers = Array.isArray(subscribersData) ? subscribersData : [];
 
     const parseUA = (v) => {
-      const fullUA = v.user_agent || "";
+      // Use the raw user agent, fallback to empty string
+      const rawUA = v.user_agent || "";
+      const lowerUA = rawUA.toLowerCase();
+
       const ip = v.ip_address || "";
       const city = v.city || "";
-
-      // Normalize Country (Fix for Netherlands discrepancy)
       const country = (v.country === "The Netherlands") ? "Netherlands" : (v.country || "Unknown");
 
-      // 1. ROBUST TAGGED SOURCE EXTRACTION
-      const lastHyphenIndex = fullUA.lastIndexOf('-');
-      let taggedSource = lastHyphenIndex !== -1 ? fullUA.substring(lastHyphenIndex + 1) : null;
-      let ua = lastHyphenIndex !== -1 ? fullUA.substring(0, lastHyphenIndex) : fullUA;
+      const fingerprint = `${ip}_${rawUA}`;
 
-      const lowerUA = ua.toLowerCase();
-      const fingerprint = `${ip}_${ua}`;
-
-      // 2. Loyalty Check
+      // 1. Loyalty Check
       let loyaltyStatus = "Returning User";
       if (!knownUsers.has(fingerprint)) {
         knownUsers.add(fingerprint);
         loyaltyStatus = "Unique Visit";
       }
 
-      // 3. EXCLUSIVE SOURCE DETECTION
-      let finalSource = taggedSource || "Direct";
-
-      if (finalSource === "Direct") {
-        // Search Engine Catch-all
-        if (lowerUA.includes('google') || lowerUA.includes('bing') || lowerUA.includes('yahoo') || lowerUA.includes('duckduckgo') || lowerUA.includes('ecosia')) {
-          finalSource = 'Search Engine';
-        }
-        // Meta Ecosystem
-        else if (lowerUA.includes('messenger') || lowerUA.includes('fb_iab')) finalSource = 'Messenger';
-        else if (lowerUA.includes('instagram')) finalSource = 'Instagram';
-        else if (lowerUA.includes('threads') || lowerUA.includes('barcelona')) finalSource = 'Threads';
-        else if (lowerUA.includes('fban') || lowerUA.includes('fbav')) finalSource = 'Facebook';
-        // Social Platforms
-        else if (lowerUA.includes('tiktok') || lowerUA.includes('musical')) finalSource = 'TikTok';
-        else if (lowerUA.includes('whatsapp')) finalSource = 'WhatsApp';
-        else if (lowerUA.includes('surf.social')) finalSource = 'Surf.Social';
-        else if (lowerUA.includes('youtube') || lowerUA.includes('com.google.android.youtube')) finalSource = 'YouTube';
-        else if (lowerUA.includes('reddit')) finalSource = 'Reddit';
-        else if (lowerUA.includes('elakiri')) finalSource = 'Elakiri';
-        else if (lowerUA.includes('pinterest')) finalSource = 'Pinterest';
-        else if (lowerUA.includes('flipboard')) finalSource = 'Flipboard';
-        // Twitter(X) Detection
-        else if (lowerUA.includes('twitter') || lowerUA.includes(' x/')) finalSource = 'Twitter(X)';
-        // Fediverse / Mastodon Detection
-        else if (lowerUA.includes('mastodon') || lowerUA.includes('ivory') || lowerUA.includes('tusky')) finalSource = 'Mastodon';
-        // Bluesky Detection
-        else if (lowerUA.includes('bsky') || lowerUA.includes('bluesky')) finalSource = 'Bluesky';
-        else finalSource = "Direct";
-      }
-
-      // 4. SYNCHRONIZED BOT & NETWORK DETECTION MATRIX
+      // 2. SYNCHRONIZED BOT & NETWORK DETECTION MATRIX
       const botPatterns = [
         'bot', 'spider', 'crawl', 'lighthouse', 'slurp',
         'facebookexternalhit', 'twitterbot', 'google-safety',
@@ -2351,38 +2315,70 @@ function App() {
         'ia_archiver', 'screaming frog', 'adsbot'
       ];
 
+      // Expanded Data Center IP Prefixes (AWS, Google Cloud, Meta, Azure)
       const isDataCenterNetwork =
         ip.startsWith('66.220.') || ip.startsWith('173.252.') ||
         ip.startsWith('31.13.') || ip.startsWith('66.249.') ||
         ip.startsWith('74.125.') || ip.startsWith('34.') ||
         ip.startsWith('35.') || ip.startsWith('104.') ||
         ip.startsWith('20.') || ip.startsWith('3.') ||
-        ip.startsWith('52.') || ip.startsWith('54.');
+        ip.startsWith('52.') || ip.startsWith('54.') ||
+        ip.startsWith('69.171.') || ip.startsWith('31.13.');
 
-      const isKnownDataCenterCity = [
-        'Prineville', 'Forest City', 'Altoona', 'Springfield',
-        'Gallatin', 'Boardman', 'Quincy', 'Mountain View',
-        'Council Bluffs', 'Luleå', 'Warsaw', 'Antwerp', 'Dublin'
-      ].includes(city);
-
-      const isCloudCloudflareOrCloudHub = isKnownDataCenterCity && isDataCenterNetwork;
-
+      // The new bot boolean: True if UA matches patterns, OR it's a headless browser, OR it's from a known DC IP.
+      // (Assuming you passed v.is_webdriver from the front end, if not, it evaluates to false)
       let isBot =
         botPatterns.some(pattern => lowerUA.includes(pattern)) ||
         lowerUA.includes('headlesschrome') ||
-        isCloudCloudflareOrCloudHub;
+        v.is_webdriver === true ||
+        isDataCenterNetwork;
 
-      // 5. Device & OS Detection
+      // 3. SOURCE DETECTION
+      let finalSource = "Direct";
+
+      if (isBot) {
+        // Granular Bot Sources
+        if (lowerUA.includes('facebook') || lowerUA.includes('meta') || ip.startsWith('31.13.') || ip.startsWith('66.220.')) {
+          finalSource = 'Meta Scraper';
+        } else if (lowerUA.includes('google') || ip.startsWith('66.249.')) {
+          finalSource = 'Google Bot';
+        } else if (lowerUA.includes('twitter')) {
+          finalSource = 'Twitter Bot';
+        } else {
+          finalSource = 'Automated Crawler';
+        }
+      } else {
+        // Human Source Detection
+        // Note: If you passed referrer/utm from front-end to database, check them here.
+        // For now, retaining your UA-based heuristics:
+        if (lowerUA.includes('google') || lowerUA.includes('bing') || lowerUA.includes('yahoo') || lowerUA.includes('duckduckgo')) finalSource = 'Search Engine';
+        else if (lowerUA.includes('messenger') || lowerUA.includes('fb_iab')) finalSource = 'Messenger';
+        else if (lowerUA.includes('instagram')) finalSource = 'Instagram';
+        else if (lowerUA.includes('threads') || lowerUA.includes('barcelona')) finalSource = 'Threads';
+        else if (lowerUA.includes('fban') || lowerUA.includes('fbav')) finalSource = 'Facebook';
+        else if (lowerUA.includes('tiktok') || lowerUA.includes('musical')) finalSource = 'TikTok';
+        else if (lowerUA.includes('whatsapp')) finalSource = 'WhatsApp';
+        else if (lowerUA.includes('youtube') || lowerUA.includes('com.google.android.youtube')) finalSource = 'YouTube';
+        else if (lowerUA.includes('twitter') || lowerUA.includes(' x/')) finalSource = 'Twitter(X)';
+        else finalSource = "Direct";
+      }
+
+      // 4. Device & OS Detection
       let type = 'Desktop';
       if (lowerUA.includes('tablet') || lowerUA.includes('ipad')) type = 'Tablet';
       else if (lowerUA.includes('mobile') || lowerUA.includes('android') || lowerUA.includes('iphone')) type = 'Mobile';
 
+      // Force type to "Bot/Server" if it's automated, to keep device stats clean
+      if (isBot) type = 'Bot/Server';
+
       let os = 'Other';
-      if (ua.includes('Windows')) os = 'Windows';
-      else if (ua.includes('Android')) os = 'Android';
-      else if (ua.includes('iPhone') || ua.includes('iPad')) os = 'iOS';
-      else if (ua.includes('Mac OS')) os = 'macOS';
-      else if (ua.includes('Linux')) os = 'Linux';
+      if (rawUA.includes('Windows')) os = 'Windows';
+      else if (rawUA.includes('Android')) os = 'Android';
+      else if (rawUA.includes('iPhone') || rawUA.includes('iPad')) os = 'iOS';
+      else if (rawUA.includes('Mac OS')) os = 'macOS';
+      else if (rawUA.includes('Linux')) os = 'Linux';
+
+      if (isBot) os = 'Server OS';
 
       return { type, source: finalSource, os, isBot, loyaltyStatus, country };
     };
