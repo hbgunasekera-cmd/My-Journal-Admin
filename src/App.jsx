@@ -2323,10 +2323,9 @@ function App() {
         ip.startsWith('35.') || ip.startsWith('104.') ||
         ip.startsWith('20.') || ip.startsWith('3.') ||
         ip.startsWith('52.') || ip.startsWith('54.') ||
-        ip.startsWith('69.171.') || ip.startsWith('31.13.');
+        ip.startsWith('69.171.');
 
-      // The new bot boolean: True if UA matches patterns, OR it's a headless browser, OR it's from a known DC IP.
-      // (Assuming you passed v.is_webdriver from the front end, if not, it evaluates to false)
+      // The bot boolean: True if UA matches patterns, headless browser, or known DC IP.
       let isBot =
         botPatterns.some(pattern => lowerUA.includes(pattern)) ||
         lowerUA.includes('headlesschrome') ||
@@ -2338,28 +2337,43 @@ function App() {
 
       if (isBot) {
         // Granular Bot Sources
-        if (lowerUA.includes('facebook') || lowerUA.includes('meta') || ip.startsWith('31.13.') || ip.startsWith('66.220.')) {
+        if (lowerUA.includes('facebook') || lowerUA.includes('meta') || ip.startsWith('31.13.') || ip.startsWith('66.220.') || ip.startsWith('69.171.')) {
           finalSource = 'Meta Scraper';
         } else if (lowerUA.includes('google') || ip.startsWith('66.249.')) {
           finalSource = 'Google Bot';
         } else if (lowerUA.includes('twitter')) {
           finalSource = 'Twitter Bot';
+        } else if (lowerUA.includes('pinterest')) {
+          finalSource = 'Pinterest Bot';
         } else {
           finalSource = 'Automated Crawler';
         }
       } else {
-        // Human Source Detection
-        // Note: If you passed referrer/utm from front-end to database, check them here.
-        // For now, retaining your UA-based heuristics:
-        if (lowerUA.includes('google') || lowerUA.includes('bing') || lowerUA.includes('yahoo') || lowerUA.includes('duckduckgo')) finalSource = 'Search Engine';
+        // Human Source Detection (All identifiers restored)
+        if (lowerUA.includes('google') || lowerUA.includes('bing') || lowerUA.includes('yahoo') || lowerUA.includes('duckduckgo') || lowerUA.includes('ecosia')) {
+          finalSource = 'Search Engine';
+        }
+        // Meta Ecosystem
         else if (lowerUA.includes('messenger') || lowerUA.includes('fb_iab')) finalSource = 'Messenger';
         else if (lowerUA.includes('instagram')) finalSource = 'Instagram';
         else if (lowerUA.includes('threads') || lowerUA.includes('barcelona')) finalSource = 'Threads';
         else if (lowerUA.includes('fban') || lowerUA.includes('fbav')) finalSource = 'Facebook';
+        // Other Social Platforms
         else if (lowerUA.includes('tiktok') || lowerUA.includes('musical')) finalSource = 'TikTok';
         else if (lowerUA.includes('whatsapp')) finalSource = 'WhatsApp';
+        else if (lowerUA.includes('surf.social')) finalSource = 'Surf.Social';
         else if (lowerUA.includes('youtube') || lowerUA.includes('com.google.android.youtube')) finalSource = 'YouTube';
+        else if (lowerUA.includes('reddit')) finalSource = 'Reddit';
+        else if (lowerUA.includes('elakiri')) finalSource = 'Elakiri';
+        else if (lowerUA.includes('pinterest')) finalSource = 'Pinterest';
+        else if (lowerUA.includes('flipboard')) finalSource = 'Flipboard';
+        // Twitter(X) Detection
         else if (lowerUA.includes('twitter') || lowerUA.includes(' x/')) finalSource = 'Twitter(X)';
+        // Fediverse / Mastodon Detection
+        else if (lowerUA.includes('mastodon') || lowerUA.includes('ivory') || lowerUA.includes('tusky')) finalSource = 'Mastodon';
+        // Bluesky Detection
+        else if (lowerUA.includes('bsky') || lowerUA.includes('bluesky')) finalSource = 'Bluesky';
+
         else finalSource = "Direct";
       }
 
