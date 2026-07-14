@@ -475,7 +475,14 @@ function App() {
     const startPoint = L.latLng(HomePoint.lat, HomePoint.lng);
     const waypoints = [
       startPoint,
-      ...selectedTrip.map(p => L.latLng(p.latitude, p.longitude))
+      ...selectedTrip.map(p => {
+        // Safely extract coordinates regardless of the data schema
+        const lat = p.latitude !== undefined ? p.latitude : p.lt;
+        const lng = p.longitude !== undefined ? p.longitude : p.ln;
+
+        // Ensure they are parsed as numbers before passing to Leaflet
+        return L.latLng(parseFloat(lat), parseFloat(lng));
+      })
     ];
 
     // 3. Debounce the routing request to prevent OSRM rate-limiting blocks
@@ -664,22 +671,25 @@ function App() {
 
 
   useEffect(() => {
-    if (filteredPlaces.length > 0 && searchTerm.length > 2 && mapRef.current) {
+
+    if (activeTab === 'map' && filteredPlaces.length > 0 && searchTerm.length > 2 && mapRef.current) {
       const firstMatch = filteredPlaces[0];
 
-      // Parse coordinates to ensure they are numbers
       const lat = parseFloat(firstMatch.latitude);
       const lng = parseFloat(firstMatch.longitude);
 
-      // Only fly if coordinates are valid numbers
       if (!isNaN(lat) && !isNaN(lng)) {
-        mapRef.current.flyTo([lat, lng], 12, {
-          animate: true,
-          duration: 1.5
-        });
+
+        const mapContainer = mapRef.current.getContainer();
+        if (mapContainer && mapContainer.clientWidth > 0) {
+          mapRef.current.flyTo([lat, lng], 12, {
+            animate: true,
+            duration: 1.5
+          });
+        }
       }
     }
-  }, [filteredPlaces, searchTerm]);
+  }, [filteredPlaces, searchTerm, activeTab]);
 
 
   // Social Media Sharing
@@ -2652,8 +2662,8 @@ function App() {
                 key={t}
                 onClick={() => setActiveTab(t)}
                 className={`px-6 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all flex items-center gap-2 ${activeTab === t
-                    ? 'bg-white text-indigo-600 shadow-sm'
-                    : 'text-slate-400 hover:text-slate-600 hover:bg-slate-200/50'
+                  ? 'bg-white text-indigo-600 shadow-sm'
+                  : 'text-slate-400 hover:text-slate-600 hover:bg-slate-200/50'
                   }`}
               >
                 {/* Optional: Dynamic icon dots for the social tab to make it stand out */}
