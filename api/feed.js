@@ -28,7 +28,7 @@ export default async function handler(req, res) {
   const rssItems = places.map(place => {
     // --- REVISED: Generate URL slugs exactly matching generateShareLink in App.jsx ---
     const formattedName = encodeURIComponent(place.place_name.trim().replace(/\s+/g, '-'));
-    const rawUrl = `https://www.myjournalview.com/gallery/${formattedName}?utm_source=pinterest`;
+    const rawUrl = `https://www.myjournalview.com/gallery/${formattedName}`;
     
     // Safety: Escape XML characters
     const escapedUrl = rawUrl.replace(/&/g, '&amp;');
