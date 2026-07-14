@@ -69,9 +69,8 @@ const CONFIG = {
 // Destructure for the rest of your app
 const { URL: SUPABASE_URL, KEY: SUPABASE_KEY } = CONFIG.SUPABASE;
 const { ARTICLE: ARTICLE_KEY, WEATHER: WEATHER_KEY } = CONFIG.API_KEYS;
-
-// Initialize Client
 const supabaseClient = createClient(SUPABASE_URL, SUPABASE_KEY);
+const GEMINI_API_KEY = window.ARTICLE_KEY;
 
 
 // --- Leaflet Marker Fix ---
@@ -359,32 +358,8 @@ function App() {
     }
   }, [isLoggedIn]);
 
-  // --- 1. ICON SYSTEM ---
 
-
-  const WeatherIcon = ({ condition }) => {
-    // Map OpenWeather/Standard conditions to Lucide icons
-    const weatherMap = {
-      'Clear': { icon: 'sun', color: 'text-amber-500' },
-      'Clouds': { icon: 'cloud', color: 'text-slate-400' },
-      'Rain': { icon: 'cloud-rain', color: 'text-blue-500' },
-      'Drizzle': { icon: 'cloud-drizzle', color: 'text-cyan-500' },
-      'Thunderstorm': { icon: 'cloud-lightning', color: 'text-yellow-500' },
-      'Snow': { icon: 'snowflake', color: 'text-sky-300' },
-      'Mist': { icon: 'cloud-fog', color: 'text-slate-300' },
-      'Smoke': { icon: 'cloud-fog', color: 'text-slate-300' },
-      'Haze': { icon: 'cloud-fog', color: 'text-slate-300' },
-      'Dust': { icon: 'wind', color: 'text-orange-300' },
-      'Fog': { icon: 'cloud-fog', color: 'text-slate-300' },
-    };
-
-    const config = weatherMap[condition] || { icon: 'cloud', color: 'text-slate-400' };
-
-    return <Icon name={config.icon} className={`w-3.5 h-3.5 ${config.color}`} />;
-  };
-
-
-  // --- 2. GPS & DATA INITIALIZATION ---
+  // --- 1. GPS & DATA INITIALIZATION ---
 
   // Update Reference Point whenever GPS or Toggle changes
   useEffect(() => {
@@ -412,6 +387,17 @@ function App() {
   React.useEffect(() => {
     refreshAllData();
     initGoogle();
+  }, []);
+
+  // Auto-refresh all dashboard and app data every 10 minutes (600,000 ms)
+  useEffect(() => {
+    const intervalId = setInterval(() => {
+      console.log("Triggering periodic 10-minute database refresh...");
+      refreshAllData();
+    }, 10 * 60 * 1000); // 10 minutes
+
+    // Crucial: Clear the interval on component unmount to prevent memory leaks
+    return () => clearInterval(intervalId);
   }, []);
 
   useEffect(() => {
@@ -464,7 +450,7 @@ function App() {
   }, [selectedTrip, activeTab]);
 
 
-  // --- 3. STEADY ROUTING EFFECT (No More Blinking) ---
+  // --- 2. STEADY ROUTING EFFECT (No More Blinking) ---
 
   React.useEffect(() => {
     // 1. Cleanup: If we aren't on the map tab, safely remove the control
@@ -538,7 +524,7 @@ function App() {
   }, [selectedTrip, activeTab, mapReady]);
 
 
-  // --- 4. MARKER MANAGER EFFECT ---
+  // --- 3. MARKER MANAGER EFFECT ---
   React.useEffect(() => {
     // 1. Guard: Only run if map instance exists
     if (!mapRef.current || !mapReady) return;
@@ -648,7 +634,7 @@ function App() {
   }, [mapReady, activeTab, filteredPlaces, places, savedRoutes, searchTerm]);
 
 
-  // --- 5. SEARCH & FILTER LOGIC ---
+  // --- 4. SEARCH & FILTER LOGIC ---
 
   React.useEffect(() => {
     // 1. Reset to full list if search is empty
@@ -1569,7 +1555,8 @@ function App() {
 
 
   const generateTravelArticle = async (place) => {
-    const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${ARTICLE_KEY}`;
+
+    const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
 
     const contextPrompt = `Write an authentic, first-person travel journal entry for a ${place.category} named "${place.place_name}" located in ${place.locality || 'Sri Lanka'}. 
 
@@ -1641,7 +1628,8 @@ function App() {
   };
 
   const generatePlaceMetadata = async (place) => {
-    const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${window.ARTICLE_KEY}`;
+
+    const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
 
     const metaPrompt = `Act as a Sri Lankan Geography & Environmental Regulation Expert. 
     Analyze the location: "${place.place_name}" (Locality: ${place.locality || 'Not Specified'}, Category: ${place.category}).
@@ -2664,12 +2652,17 @@ function App() {
                 key={t}
                 onClick={() => setActiveTab(t)}
                 className={`px-6 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all flex items-center gap-2 ${activeTab === t
-                  ? 'bg-white text-indigo-600 shadow-sm'
-                  : 'text-slate-400 hover:text-slate-600 hover:bg-slate-200/50'
+                    ? 'bg-white text-indigo-600 shadow-sm'
+                    : 'text-slate-400 hover:text-slate-600 hover:bg-slate-200/50'
                   }`}
               >
-                {/* Optional: Add dynamic icon dots for the social tab to make it stand out */}
-                {t === 'social' && <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'social' ? 'bg-indigo-500 animate-pulse' : 'bg-slate-300'}`} />}
+                {/* Optional: Dynamic icon dots for the social tab to make it stand out */}
+                {t === 'social' && (
+                  <div
+                    className={`w-1.5 h-1.5 rounded-full ${activeTab === 'social' ? 'bg-indigo-500 animate-pulse' : 'bg-slate-300'
+                      }`}
+                  />
+                )}
                 {t}
               </button>
             ))}
@@ -2677,8 +2670,8 @@ function App() {
         </div>
 
         <div className="flex items-center gap-3">
-          {/* Removed border-b from this inner container as well */}
-          <div className="flex flex-wrap items-center gap-3 p-4 bg-white sticky top-0 z-[1000]">
+          {/* Cleaned: Removed duplicate backgrounds, sticky layers, and padding that clashed with the parent header layout */}
+          <div className="flex items-center gap-3">
             {/* 1. Google Maps Search Input */}
             <div className="relative flex items-center">
               <input
