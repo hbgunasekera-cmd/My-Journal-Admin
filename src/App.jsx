@@ -70,7 +70,7 @@ const CONFIG = {
 const { URL: SUPABASE_URL, KEY: SUPABASE_KEY } = CONFIG.SUPABASE;
 const { ARTICLE: ARTICLE_KEY, WEATHER: WEATHER_KEY } = CONFIG.API_KEYS;
 const supabaseClient = createClient(SUPABASE_URL, SUPABASE_KEY);
-const GEMINI_API_KEY = window.ARTICLE_KEY;
+
 
 
 // --- Leaflet Marker Fix ---
@@ -1566,7 +1566,9 @@ function App() {
 
   const generateTravelArticle = async (place) => {
 
-    const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+    // FIX: Dynamically fetch the API key to ensure it captures the populated value after login
+    const currentApiKey = window.ARTICLE_KEY || import.meta.env.VITE_ARTICLE_KEY;
+    const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${currentApiKey}`;
 
     const contextPrompt = `Write an authentic, first-person travel journal entry for a ${place.category} named "${place.place_name}" located in ${place.locality || 'Sri Lanka'}. 
 
@@ -1639,7 +1641,9 @@ function App() {
 
   const generatePlaceMetadata = async (place) => {
 
-    const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+    // FIX: Dynamically fetch the API key to ensure it captures the populated value after login
+    const currentApiKey = window.ARTICLE_KEY || import.meta.env.VITE_ARTICLE_KEY;
+    const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${currentApiKey}`;
 
     const metaPrompt = `Act as a Sri Lankan Geography & Environmental Regulation Expert. 
     Analyze the location: "${place.place_name}" (Locality: ${place.locality || 'Not Specified'}, Category: ${place.category}).
