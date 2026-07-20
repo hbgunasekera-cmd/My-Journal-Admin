@@ -19,6 +19,13 @@ export default async function handler(req, res) {
   // Robust validator to discard corrupt, falsy, or literal text representations of empty values
   const isValidToken = (t) => t && typeof t === 'string' && t.trim() !== '' && t !== 'undefined' && t !== 'null';
 
+  // Dynamic helper to resolve the correct Graph Endpoint target based on Token Architecture
+  const getMetaBaseUrl = (token) => {
+    return token && token.trim().startsWith('EAA') 
+      ? 'https://graph.facebook.com' 
+      : 'https://graph.instagram.com';
+  };
+
   try {
     if (!imageUrl) {
       return res.status(400).json({ error: "Missing required imageUrl payload attribute." });
@@ -29,7 +36,7 @@ export default async function handler(req, res) {
     const unblockableImageUrl = `${hostDomain}/api/ig-image-proxy?url=${encodeURIComponent(imageUrl)}&ignore=/image.jpg`;
 
     // ==========================================
-    // INSTAGRAM ROUTE (Standalone Graph Engine)
+    // INSTAGRAM ROUTE (Dynamic Architecture Router)
     // ==========================================
     if (platform === 'instagram') {
       let tokenSource = "vercel";
@@ -56,8 +63,10 @@ export default async function handler(req, res) {
       if (!ACCESS_TOKEN) return res.status(400).json({ error: "Missing or invalid Instagram token across Vercel and Supabase vaults." });
       if (!IG_USER_ID) return res.status(400).json({ error: "Missing IG_USER_ID environment configuration." });
 
-      // Step 1: Create Instagram Media Container
-      const igCreateUrl = `https://graph.instagram.com/v21.0/${IG_USER_ID}/media`;
+      // Step 1: Create Instagram Media Container using token-aware routing
+      let metaBaseUrl = getMetaBaseUrl(ACCESS_TOKEN);
+      let igCreateUrl = `${metaBaseUrl}/v21.0/${IG_USER_ID}/media`;
+
       let createRes = await fetch(igCreateUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -87,6 +96,10 @@ export default async function handler(req, res) {
             ACCESS_TOKEN = data.value.trim();
             tokenSource = "supabase";
             
+            // Recalculate dynamic destination based on the fresh database token
+            metaBaseUrl = getMetaBaseUrl(ACCESS_TOKEN);
+            igCreateUrl = `${metaBaseUrl}/v21.0/${IG_USER_ID}/media`;
+
             // Retry original API container initialization with the fresh token
             createRes = await fetch(igCreateUrl, {
               method: 'POST',
@@ -109,7 +122,7 @@ export default async function handler(req, res) {
           : "NULL";
 
         return res.status(400).json({
-          error: `Meta rejected container creation: ${createData.error.message} (Vault Token Source: ${tokenSource} | Preview: ${tokenPreview})`,
+          error: `Meta rejected container creation: ${createData.error.message} (Vault Token Source: ${tokenSource} | Routing Endpoint: ${metaBaseUrl} | Preview: ${tokenPreview})`,
           code: createData.error.code,
           subcode: createData.error.error_subcode
         });
@@ -122,8 +135,8 @@ export default async function handler(req, res) {
       // Meta CDN synchronization delay window for image processing
       await new Promise(resolve => setTimeout(resolve, 8000));
       
-      // Step 2: Publish the Container live
-      const igPublishUrl = `https://graph.instagram.com/v21.0/${IG_USER_ID}/media_publish`;
+      // Step 2: Publish the Container live using matching base URL routing
+      const igPublishUrl = `${metaBaseUrl}/v21.0/${IG_USER_ID}/media_publish`;
       const publishRes = await fetch(igPublishUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
