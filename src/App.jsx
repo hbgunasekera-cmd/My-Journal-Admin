@@ -1353,7 +1353,7 @@ function App() {
       const [p, sr, v, a, c, l, sub] = await Promise.all([
         supabaseClient.from('travel_bucket_list').select('*').order('created_at', { ascending: false }),
         supabaseClient.from('saved_travel_routes').select('*').order('created_at', { ascending: false }),
-        supabaseClient.from('page_visits').select('*'),
+        supabaseClient.from('page_visits').select('*').limit(20000),
         supabaseClient.from('pending_approvals').select('*').order('created_at', { ascending: false }),
         supabaseClient.from('location_comments').select('*, travel_bucket_list(place_name)').order('created_at', { ascending: false }),
         supabaseClient.from('location_likes').select('*, travel_bucket_list(place_name)'),
