@@ -949,11 +949,8 @@ function App() {
       setTimeout(() => setToast?.({ show: false, msg: "" }), 3000);
     } catch (err) {
       console.error(`${platform} Integration Error:`, err);
-      let cleanMessage = err.message || "Unknown error occurred.";
-      if (/access token|session|logged out|190/i.test(err.message)) {
-        cleanMessage = "Session expired! Please re-authenticate your 60-day token.";
-      }
-      setToast?.({ show: true, msg: cleanMessage });
+      // Display the exact error message from the backend to identify configuration issues
+      setToast?.({ show: true, msg: err.message || "Unknown error occurred." });
       setTimeout(() => setToast?.({ show: false, msg: "" }), 6000);
     }
   };
