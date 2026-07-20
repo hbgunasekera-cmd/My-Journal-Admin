@@ -900,6 +900,11 @@ function App() {
       return;
     }
 
+    console.log(`[DEBUG] Platform: ${platform}`);
+    console.log(`[DEBUG] Token Value:`, accessToken);
+    console.log(`[DEBUG] Token Length:`, accessToken ? accessToken.length : 'N/A');
+    
+
     const locationName = p.place_name || "Island Vignette";
     const shareLink = generateShareLink(locationName);
     const coreTags = "#MyJournal #SriLanka #TravelSriLanka #TravelPhotography";
