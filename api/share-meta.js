@@ -16,6 +16,9 @@ export default async function handler(req, res) {
     process.env.VITE_SUPABASE_KEY
   );
 
+  // Robust validator to discard corrupt, falsy, or literal text representations of empty values
+  const isValidToken = (t) => t && typeof t === 'string' && t.trim() !== '' && t !== 'undefined' && t !== 'null';
+
   try {
     if (!imageUrl) {
       return res.status(400).json({ error: "Missing required imageUrl payload attribute." });
@@ -31,24 +34,26 @@ export default async function handler(req, res) {
     if (platform === 'instagram') {
       let tokenSource = "vercel";
       
-      // 1. Sanitize the frontend token (rejects objects/events)
-      let cleanFbToken = (typeof fbAccessToken === 'string') ? fbAccessToken.trim() : null;
+      // 1. Sanitize the frontend token
+      let cleanFbToken = isValidToken(fbAccessToken) ? fbAccessToken.trim() : null;
       
-      // 2. Sanitize the Vercel environment token (removes accidental quotes and spaces)
-      let envFbToken = process.env.META_ACCESS_TOKEN 
+      // 2. Sanitize the Vercel environment token
+      let envFbToken = process.env.META_ACCESS_TOKEN && isValidToken(process.env.META_ACCESS_TOKEN)
         ? process.env.META_ACCESS_TOKEN.replace(/['"]/g, '').trim() 
         : null;
 
       let ACCESS_TOKEN = cleanFbToken || envFbToken;
       
-      // Pre-flight Fallback: If Vercel variables are completely missing, query Supabase
+      // Pre-flight Fallback: If Vercel variables are missing or invalid, query Supabase
       if (!ACCESS_TOKEN) {
         const { data } = await supabase.from('system_credentials').select('value').eq('key', 'instagram_access_token').single();
-        ACCESS_TOKEN = data?.value?.trim();
-        tokenSource = "supabase";
+        if (isValidToken(data?.value)) {
+          ACCESS_TOKEN = data.value.trim();
+          tokenSource = "supabase";
+        }
       }
 
-      if (!ACCESS_TOKEN) return res.status(400).json({ error: "Missing Instagram token across Vercel and Supabase vaults." });
+      if (!ACCESS_TOKEN) return res.status(400).json({ error: "Missing or invalid Instagram token across Vercel and Supabase vaults." });
       if (!IG_USER_ID) return res.status(400).json({ error: "Missing IG_USER_ID environment configuration." });
 
       // Step 1: Create Instagram Media Container
@@ -78,7 +83,7 @@ export default async function handler(req, res) {
         if (isAuthError) {
           console.warn("Instagram Vercel token failed or expired. Initiating Supabase vault recovery fallback...");
           const { data } = await supabase.from('system_credentials').select('value').eq('key', 'instagram_access_token').single();
-          if (data?.value) {
+          if (isValidToken(data?.value)) {
             ACCESS_TOKEN = data.value.trim();
             tokenSource = "supabase";
             
@@ -133,23 +138,25 @@ export default async function handler(req, res) {
       let tokenSource = "vercel";
       
       // 1. Sanitize the frontend token
-      let cleanThreadsToken = (typeof threadsAccessToken === 'string') ? threadsAccessToken.trim() : null;
+      let cleanThreadsToken = isValidToken(threadsAccessToken) ? threadsAccessToken.trim() : null;
       
       // 2. Sanitize the Vercel environment token
-      let envThreadsToken = process.env.THREADS_ACCESS_TOKEN 
+      let envThreadsToken = process.env.THREADS_ACCESS_TOKEN && isValidToken(process.env.THREADS_ACCESS_TOKEN)
         ? process.env.THREADS_ACCESS_TOKEN.replace(/['"]/g, '').trim() 
         : null;
 
       let ACCESS_TOKEN = cleanThreadsToken || envThreadsToken;
 
-      // Pre-flight Fallback: If Vercel variables are completely missing, query Supabase
+      // Pre-flight Fallback: If Vercel variables are missing or invalid, query Supabase
       if (!ACCESS_TOKEN) {
         const { data } = await supabase.from('system_credentials').select('value').eq('key', 'threads_access_token').single();
-        ACCESS_TOKEN = data?.value?.trim();
-        tokenSource = "supabase";
+        if (isValidToken(data?.value)) {
+          ACCESS_TOKEN = data.value.trim();
+          tokenSource = "supabase";
+        }
       }
 
-      if (!ACCESS_TOKEN) return res.status(400).json({ error: "Authorization failed: Missing Threads token across Vercel and Supabase vaults." });
+      if (!ACCESS_TOKEN) return res.status(400).json({ error: "Authorization failed: Missing or invalid Threads token across Vercel and Supabase vaults." });
 
       // Step 1: Create Threads Media Container
       const threadsCreateUrl = `https://graph.threads.net/v1.0/me/threads`;
@@ -178,7 +185,7 @@ export default async function handler(req, res) {
         if (isAuthError) {
           console.warn("Threads Vercel token failed or expired. Initiating Supabase vault recovery fallback...");
           const { data } = await supabase.from('system_credentials').select('value').eq('key', 'threads_access_token').single();
-          if (data?.value) {
+          if (isValidToken(data?.value)) {
             ACCESS_TOKEN = data.value.trim();
             tokenSource = "supabase";
             
