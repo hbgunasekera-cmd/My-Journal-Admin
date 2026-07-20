@@ -295,7 +295,7 @@ function App() {
   const [sortCenter, setSortCenter] = useState(HomePoint);
   const [locationSource, setLocationSource] = useState('device');
   const [activePinHubId, setActivePinHubId] = useState(null);
-  const [fbToken, setFbToken] = useState("");
+  const [igToken, setIgToken] = useState("");
   const [threadsToken, setThreadsToken] = useState("");
 
 
@@ -903,7 +903,6 @@ function App() {
     console.log(`[DEBUG] Platform: ${platform}`);
     console.log(`[DEBUG] Token Value:`, accessToken);
     console.log(`[DEBUG] Token Length:`, accessToken ? accessToken.length : 'N/A');
-    
 
     const locationName = p.place_name || "Island Vignette";
     const shareLink = generateShareLink(locationName);
@@ -948,8 +947,8 @@ function App() {
           text: socialText,
           imageUrl: p.cover_photo_url,
           link: shareLink,
-          // Only send the exact string payload expected by the specific platform
-          ...(platform === 'threads' ? { threadsAccessToken: accessToken } : { fbAccessToken: accessToken })
+          // Updated: Sending igAccessToken for Instagram to decouple from the Facebook Page token logic
+          ...(platform === 'threads' ? { threadsAccessToken: accessToken } : { igAccessToken: accessToken })
         }),
       });
 
@@ -3216,7 +3215,8 @@ function App() {
                           onClick={(e) => {
                             e.preventDefault();
                             e.stopPropagation();
-                            checkAndPost(p, 'instagram', () => handleMetaShare(p, 'instagram', fbToken));
+                            // Updated: Passing igToken instead of fbToken to decouple from Facebook Page logic
+                            checkAndPost(p, 'instagram', () => handleMetaShare(p, 'instagram', igToken));
                           }}
                           className={`flex flex-col items-center justify-center gap-1 py-2 text-black border rounded-xl hover:bg-gradient-to-tr hover:from-amber-400 hover:via-rose-500 hover:to-fuchsia-600 hover:text-white transition-all shadow-sm relative ${p.published_instagram_at
                             ? 'border-emerald-500 bg-emerald-50/50 shadow-sm shadow-emerald-100'

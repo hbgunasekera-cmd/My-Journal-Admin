@@ -5,7 +5,8 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).send('Method Not Allowed');
 
   // 1. Unpack data payloads sent by your React client or automation engine
-  const { platform, text, imageUrl, fbAccessToken, threadsAccessToken } = req.body;
+  // Updated: Replaced fbAccessToken with igAccessToken to match the decoupled architecture
+  const { platform, text, imageUrl, igAccessToken, threadsAccessToken } = req.body;
   
   // 2. Read global environment variables from Vercel
   const IG_USER_ID = process.env.IG_USER_ID;
@@ -20,6 +21,7 @@ export default async function handler(req, res) {
   const isValidToken = (t) => t && typeof t === 'string' && t.trim() !== '' && t !== 'undefined' && t !== 'null';
 
   // Dynamic helper to resolve the correct Graph Endpoint target based on Token Architecture
+  // Standalone Instagram Tokens (IGQ...) bypass facebook.com and hit instagram.com
   const getMetaBaseUrl = (token) => {
     return token && token.trim().startsWith('EAA') 
       ? 'https://graph.facebook.com' 
@@ -42,14 +44,15 @@ export default async function handler(req, res) {
       let tokenSource = "vercel";
       
       // 1. Sanitize the frontend token
-      let cleanFbToken = isValidToken(fbAccessToken) ? fbAccessToken.trim() : null;
+      let cleanIgToken = isValidToken(igAccessToken) ? igAccessToken.trim() : null;
       
-      // 2. Sanitize the Vercel environment token
-      let envFbToken = process.env.META_ACCESS_TOKEN && isValidToken(process.env.META_ACCESS_TOKEN)
-        ? process.env.META_ACCESS_TOKEN.replace(/['"]/g, '').trim() 
+      // 2. Sanitize the Vercel environment token (checks for dedicated IG token or legacy Meta token)
+      const rawEnvToken = process.env.IG_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN;
+      let envIgToken = rawEnvToken && isValidToken(rawEnvToken)
+        ? rawEnvToken.replace(/['"]/g, '').trim() 
         : null;
 
-      let ACCESS_TOKEN = cleanFbToken || envFbToken;
+      let ACCESS_TOKEN = cleanIgToken || envIgToken;
       
       // Pre-flight Fallback: If Vercel variables are missing or invalid, query Supabase
       if (!ACCESS_TOKEN) {
