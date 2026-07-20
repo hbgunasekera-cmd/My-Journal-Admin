@@ -1346,12 +1346,65 @@ function App() {
     }
   };
 
+  /**
+ * Helper function to bypass Supabase's default 1000-row limit.
+ * Fetches all records from a specified table in chunks.
+ *
+ * @param {string} tableName - The name of the Supabase table.
+ * @param {string} orderByColumn - The column to sort by (default: 'created_at').
+ * @param {boolean} ascending - Sort order (default: false).
+ * @returns {Promise<Array>} - A promise that resolves to the complete array of records.
+ */
+  const fetchAllRecords = async (tableName, orderByColumn = 'created_at', ascending = false) => {
+    let allData = [];
+    let from = 0;
+    const step = 1000;
+    let hasMore = true;
+
+    while (hasMore) {
+      const { data, error } = await supabaseClient
+        .from(tableName)
+        .select('*')
+        .order(orderByColumn, { ascending })
+        .range(from, from + step - 1);
+
+      // Throw error to be caught by the try-catch block in refreshAllData
+      if (error) throw error;
+
+      if (data && data.length > 0) {
+        allData = [...allData, ...data];
+        from += step;
+      }
+
+      // Stop fetching if the returned data is less than the chunk size (meaning we hit the end)
+      if (!data || data.length < step) {
+        hasMore = false;
+      }
+    }
+
+    return allData;
+  };
+
+  /**
+   * Synchronizes all application data from Supabase.
+   * Uses the pagination helper for the large 'travel_bucket_list' table 
+   * and concurrent requests for everything else to optimize loading time.
+   */
   const refreshAllData = async () => {
-
     try {
-
-      const [p, sr, v, a, c, l, sub] = await Promise.all([
-        supabaseClient.from('travel_bucket_list').select('*').order('created_at', { ascending: false }),
+      // Fetch all data concurrently. 
+      // Note: fetchAllRecords returns the data array directly, 
+      // while standard Supabase queries return an object: { data, error }
+      const [
+        placesData,
+        sr,
+        v,
+        a,
+        c,
+        l,
+        sub
+      ] = await Promise.all([
+        fetchAllRecords('travel_bucket_list'), // Uses helper for >1000 records
         supabaseClient.from('saved_travel_routes').select('*').order('created_at', { ascending: false }),
         supabaseClient.from('page_visits').select('*').limit(20000),
         supabaseClient.from('pending_approvals').select('*').order('created_at', { ascending: false }),
@@ -1360,10 +1413,12 @@ function App() {
         supabaseClient.from('subscribers').select('*').order('subscribed_at', { ascending: false })
       ]);
 
-      if (p.error) throw p.error;
+      // Handle specific non-fatal errors for standard queries
       if (sub.error) console.error("Subscribers fetch error:", sub.error);
+      if (sr.error) console.error("Saved routes fetch error:", sr.error);
 
-      setPlaces(p.data || []);
+      // Update state with fetched data, falling back to empty arrays if undefined
+      setPlaces(placesData || []);
       setSavedRoutes(sr.data || []);
       setAnalyticsData(v.data || []);
       setPendingApprovals(a.data || []);
@@ -1372,7 +1427,9 @@ function App() {
       setSubscribersData(sub.data || []);
 
       console.log("Fetched subscribers:", sub.data);
+
     } catch (error) {
+      // Catch and log any fatal errors (including those thrown by fetchAllRecords)
       console.error("Data sync error:", error);
       triggerToast("Failed to sync database.");
     }
