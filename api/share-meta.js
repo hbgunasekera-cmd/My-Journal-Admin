@@ -102,10 +102,14 @@ export default async function handler(req, res) {
         }
       }
       
-      // Diagnostic check post-fallback execution
+      // Diagnostic check post-fallback execution (Exposes the malformed token metrics safely)
       if (createData.error) {
+        const tokenPreview = ACCESS_TOKEN 
+          ? `${ACCESS_TOKEN.substring(0, 15)}... [Length: ${ACCESS_TOKEN.length}]` 
+          : "NULL";
+
         return res.status(400).json({
-          error: `Meta rejected container creation: ${createData.error.message}`,
+          error: `Meta rejected container creation: ${createData.error.message} (Vault Token Source: ${tokenSource} | Preview: ${tokenPreview})`,
           code: createData.error.code,
           subcode: createData.error.error_subcode
         });
@@ -205,7 +209,19 @@ export default async function handler(req, res) {
         }
       }
 
-      if (createData.error) return res.status(400).json({ error: createData.error.message });
+      // Diagnostic check post-fallback execution for Threads
+      if (createData.error) {
+        const tokenPreview = ACCESS_TOKEN 
+          ? `${ACCESS_TOKEN.substring(0, 15)}... [Length: ${ACCESS_TOKEN.length}]` 
+          : "NULL";
+
+        return res.status(400).json({
+          error: `Meta rejected container creation: ${createData.error.message} (Vault Token Source: ${tokenSource} | Preview: ${tokenPreview})`,
+          code: createData.error.code,
+          subcode: createData.error.error_subcode
+        });
+      }
+      
       if (!createData.id) return res.status(500).json({ error: "Failed creating Threads post container allocation." });
 
       // Meta CDN synchronization delay window
