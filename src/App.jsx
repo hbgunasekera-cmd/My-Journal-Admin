@@ -892,6 +892,14 @@ function App() {
   // ==========================================
 
   const handleMetaShare = async (p, platform, accessToken) => {
+    // Defensive Guard: Strictly prevent React Event objects from reaching the backend
+    if (accessToken && typeof accessToken !== 'string') {
+      console.error(`Blocked invalid token payload for ${platform}. Expected string, got:`, typeof accessToken);
+      setToast?.({ show: true, msg: "System Error: Invalid token format detected." });
+      setTimeout(() => setToast?.({ show: false, msg: "" }), 4000);
+      return;
+    }
+
     const locationName = p.place_name || "Island Vignette";
     const shareLink = generateShareLink(locationName);
     const coreTags = "#MyJournal #SriLanka #TravelSriLanka #TravelPhotography";
@@ -935,6 +943,7 @@ function App() {
           text: socialText,
           imageUrl: p.cover_photo_url,
           link: shareLink,
+          // Only send the exact string payload expected by the specific platform
           ...(platform === 'threads' ? { threadsAccessToken: accessToken } : { fbAccessToken: accessToken })
         }),
       });
@@ -947,6 +956,7 @@ function App() {
       await updateSupabasePostStatus(p.id, platform);
       setToast?.({ show: true, msg: `Live on ${platformName}!` });
       setTimeout(() => setToast?.({ show: false, msg: "" }), 3000);
+
     } catch (err) {
       console.error(`${platform} Integration Error:`, err);
       // Display the exact error message from the backend to identify configuration issues

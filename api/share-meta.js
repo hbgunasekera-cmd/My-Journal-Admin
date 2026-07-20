@@ -30,12 +30,21 @@ export default async function handler(req, res) {
     // ==========================================
     if (platform === 'instagram') {
       let tokenSource = "vercel";
-      let ACCESS_TOKEN = fbAccessToken || process.env.META_ACCESS_TOKEN;
+      
+      // 1. Sanitize the frontend token (rejects objects/events)
+      let cleanFbToken = (typeof fbAccessToken === 'string') ? fbAccessToken.trim() : null;
+      
+      // 2. Sanitize the Vercel environment token (removes accidental quotes and spaces)
+      let envFbToken = process.env.META_ACCESS_TOKEN 
+        ? process.env.META_ACCESS_TOKEN.replace(/['"]/g, '').trim() 
+        : null;
+
+      let ACCESS_TOKEN = cleanFbToken || envFbToken;
       
       // Pre-flight Fallback: If Vercel variables are completely missing, query Supabase
       if (!ACCESS_TOKEN) {
         const { data } = await supabase.from('system_credentials').select('value').eq('key', 'instagram_access_token').single();
-        ACCESS_TOKEN = data?.value;
+        ACCESS_TOKEN = data?.value?.trim();
         tokenSource = "supabase";
       }
 
@@ -56,20 +65,21 @@ export default async function handler(req, res) {
       
       let createData = await createRes.json();
       
-      // Mid-flight Recovery: If the Vercel variable failed due to auth/expiry, fall back to Supabase and retry
-      if (createData.error && tokenSource === "vercel" && !fbAccessToken) {
+      // Mid-flight Recovery: If the Vercel variable failed due to auth/expiry/parsing, fall back to Supabase and retry
+      if (createData.error && tokenSource === "vercel") {
         const errMsg = createData.error.message ? createData.error.message.toLowerCase() : "";
         const isAuthError = createData.error.code === 190 || 
                             createData.error.type === 'OAuthException' || 
                             errMsg.includes('token') || 
                             errMsg.includes('session') || 
+                            errMsg.includes('parse') ||
                             errMsg.includes('auth');
         
         if (isAuthError) {
           console.warn("Instagram Vercel token failed or expired. Initiating Supabase vault recovery fallback...");
           const { data } = await supabase.from('system_credentials').select('value').eq('key', 'instagram_access_token').single();
           if (data?.value) {
-            ACCESS_TOKEN = data.value;
+            ACCESS_TOKEN = data.value.trim();
             tokenSource = "supabase";
             
             // Retry original API container initialization with the fresh token
@@ -121,12 +131,21 @@ export default async function handler(req, res) {
     // ==========================================
     } else if (platform === 'threads') {
       let tokenSource = "vercel";
-      let ACCESS_TOKEN = threadsAccessToken || process.env.THREADS_ACCESS_TOKEN;
+      
+      // 1. Sanitize the frontend token
+      let cleanThreadsToken = (typeof threadsAccessToken === 'string') ? threadsAccessToken.trim() : null;
+      
+      // 2. Sanitize the Vercel environment token
+      let envThreadsToken = process.env.THREADS_ACCESS_TOKEN 
+        ? process.env.THREADS_ACCESS_TOKEN.replace(/['"]/g, '').trim() 
+        : null;
+
+      let ACCESS_TOKEN = cleanThreadsToken || envThreadsToken;
 
       // Pre-flight Fallback: If Vercel variables are completely missing, query Supabase
       if (!ACCESS_TOKEN) {
         const { data } = await supabase.from('system_credentials').select('value').eq('key', 'threads_access_token').single();
-        ACCESS_TOKEN = data?.value;
+        ACCESS_TOKEN = data?.value?.trim();
         tokenSource = "supabase";
       }
 
@@ -147,19 +166,20 @@ export default async function handler(req, res) {
 
       let createData = await createRes.json();
       
-      // Mid-flight Recovery: If the Vercel variable failed due to auth/expiry, fall back to Supabase and retry
-      if (createData.error && tokenSource === "vercel" && !threadsAccessToken) {
+      // Mid-flight Recovery: If the Vercel variable failed due to auth/expiry/parsing, fall back to Supabase and retry
+      if (createData.error && tokenSource === "vercel") {
         const errMsg = createData.error.message ? createData.error.message.toLowerCase() : "";
         const isAuthError = createData.error.code === 190 || 
                             errMsg.includes('token') || 
                             errMsg.includes('session') || 
+                            errMsg.includes('parse') ||
                             errMsg.includes('auth');
         
         if (isAuthError) {
           console.warn("Threads Vercel token failed or expired. Initiating Supabase vault recovery fallback...");
           const { data } = await supabase.from('system_credentials').select('value').eq('key', 'threads_access_token').single();
           if (data?.value) {
-            ACCESS_TOKEN = data.value;
+            ACCESS_TOKEN = data.value.trim();
             tokenSource = "supabase";
             
             // Retry original Threads container initialization with the fresh token
@@ -206,7 +226,7 @@ export default async function handler(req, res) {
     console.error("Serverless Function Runtime Exception:", error);
     
     let clientErrorMessage = error.message;
-    if (clientErrorMessage.includes("access token") || clientErrorMessage.includes("session")) {
+    if (clientErrorMessage.includes("access token") || clientErrorMessage.includes("session") || clientErrorMessage.includes("parse")) {
       clientErrorMessage = "The session has invalidated. Please check or renew your 60-day authorization tokens.";
     }
     
