@@ -339,6 +339,7 @@ function App() {
   const lastDrawnCoords = useRef(null);
   const knownUsers = new Set();
   const downloadedImagesRef = useRef(new Set());
+  const activeSharesRef = useRef(new Set());
 
 
   useEffect(() => {
@@ -724,34 +725,44 @@ function App() {
   const checkAndPost = async (p, platform, shareAction) => {
     if (!p) return;
 
-    // Trigger the background download using the proxy
-    if (p.cover_photo_url) {
-      downloadCoverImage(p.cover_photo_url, p.place_name);
-    }
+    const shareKey = `${p.id}-${platform}`;
 
-    const targetColumn = PLATFORM_COLUMNS[platform];
-
-    const { data } = await supabaseClient
-      .from('travel_bucket_list')
-      .select(targetColumn)
-      .eq('id', p.id)
-      .single();
-
-    if (data?.[targetColumn]) {
-      const name = platform.charAt(0).toUpperCase() + platform.slice(1);
-
-      // Set the message
-      setToast?.({ show: true, msg: `Already shared to ${name}!` });
-
-      // Automatically hide after 3 seconds
-      setTimeout(() => {
-        setToast?.({ show: false, msg: "" });
-      }, 3000);
-
+    // 1. Guard against concurrent clicks during the 8-second API wait window
+    if (activeSharesRef.current.has(shareKey)) {
+      setToast?.({ show: true, msg: `Publishing to ${platform} in progress, please wait...` });
       return;
     }
 
-    await shareAction();
+    // 2. Lock the operation
+    activeSharesRef.current.add(shareKey);
+
+    try {
+      // Trigger the background download using the proxy
+      if (p.cover_photo_url) {
+        downloadCoverImage(p.cover_photo_url, p.place_name);
+      }
+
+      const targetColumn = PLATFORM_COLUMNS[platform];
+
+      const { data } = await supabaseClient
+        .from('travel_bucket_list')
+        .select(targetColumn)
+        .eq('id', p.id)
+        .single();
+
+      if (data?.[targetColumn]) {
+        const name = platform.charAt(0).toUpperCase() + platform.slice(1);
+        setToast?.({ show: true, msg: `Already shared to ${name}!` });
+        setTimeout(() => { setToast?.({ show: false, msg: "" }); }, 3000);
+        return;
+      }
+
+      await shareAction();
+
+    } finally {
+      // 3. Release the lock regardless of a success or error
+      activeSharesRef.current.delete(shareKey);
+    }
   };
 
   // ==========================================
