@@ -2532,6 +2532,27 @@ function App() {
     };
   }, [analyticsData, likesData, subscribersData]);
 
+  const handleClearDashboardData = async () => {
+    if (window.confirm("⚠️ Are you sure you want to delete all analytics records (page_visits)? This operation cannot be undone.")) {
+      try {
+        // Deletes all rows from page_visits table where created_at is not null
+        const { error } = await supabaseClient
+          .from('page_visits')
+          .delete()
+          .neq('created_at', '1970-01-01T00:00:00Z');
+
+        if (error) throw error;
+
+        setAnalyticsData([]); // Clear local state instantly
+        triggerToast("Dashboard page visits data cleared successfully.");
+        refreshAllData();
+      } catch (err) {
+        console.error("Error clearing page_visits:", err);
+        triggerToast("Failed to clear analytics data: " + err.message);
+      }
+    }
+  };
+
 
   // --- DASHBOARD ACTIONS (Comments & Suggestions) ---
 
@@ -3675,22 +3696,36 @@ function App() {
                     : 0;
 
                   return (
-                    <div className="flex justify-between items-end mb-10 relative z-10">
-                      <div>
-                        <p className="text-[10px] font-black uppercase text-indigo-400 mb-1 tracking-widest">Traffic Intelligence</p>
-                        <p className="text-6xl font-black italic tracking-tighter">{calculatedTotal}</p>
-                      </div>
-                      <div className="text-right flex flex-col items-end">
-                        <p className="text-[9px] font-bold text-slate-500 uppercase mb-1">Human Verification</p>
-                        <div className="flex items-center gap-2 bg-white/5 px-3 py-1 rounded-full border border-white/10">
-                          <span className="text-emerald-400 font-black italic text-sm">
-                            {verifiedPercentage}%
-                          </span>
-                          <span className="text-[8px] text-slate-400 uppercase font-bold tracking-tighter">Verified Person</span>
-                        </div>
-                      </div>
-                    </div>
-                  );
+  <div className="flex justify-between items-start mb-10 relative z-10">
+    <div>
+      <p className="text-[10px] font-black uppercase text-indigo-400 mb-1 tracking-widest">Traffic Intelligence</p>
+      <p className="text-6xl font-black italic tracking-tighter">{calculatedTotal}</p>
+    </div>
+
+    <div className="text-right flex flex-col items-end gap-2">
+      {/* Container grouping Human Verification badge and Clear Data button shifted to top */}
+      <div className="flex items-center gap-2">
+        {/* Human Verification Badge */}
+        <div className="flex items-center gap-2 bg-white/5 px-3 py-1.5 rounded-full border border-white/10">
+          <span className="text-emerald-400 font-black italic text-sm">
+            {verifiedPercentage}%
+          </span>
+          <span className="text-[8px] text-slate-400 uppercase font-bold tracking-tighter">Verified Person</span>
+        </div>
+
+        {/* Clear/Delete Dashboard Data Button */}
+        <button
+          onClick={handleClearDashboardData}
+          title="Clear all page visits history"
+          className="flex items-center gap-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 px-3 py-1.5 rounded-full text-[9px] font-bold uppercase tracking-wider transition-all duration-150 active:scale-95"
+        >
+          <Icon name="trash-2" className="w-3 h-3 text-rose-400" />
+          <span>Clear Visits</span>
+        </button>
+      </div>
+    </div>
+  </div>
+);
                 })()}
 
                 {/* Metrics Grid */}
