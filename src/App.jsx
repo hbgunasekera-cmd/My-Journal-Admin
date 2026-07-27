@@ -1089,8 +1089,17 @@ function App() {
     }
   };
 
-  const pinIndividualImage = async (imageUrl, index, p) => {
+  const handlePinterestShare = async (p) => {
     if (!p) return;
+
+    // Guard: Ensure a cover photo exists before attempting to pin
+    if (!p.cover_photo_url) {
+      if (typeof setToast === 'function') {
+        setToast({ show: true, msg: "No cover photo available to share!" });
+        setTimeout(() => setToast({ show: false, msg: "" }), 3000);
+      }
+      return;
+    }
 
     const locationName = p.place_name || "Island Vignette";
     const shareUrl = generateShareLink(locationName, 'pinterest');
@@ -1116,19 +1125,15 @@ function App() {
         shortDesc += "...";
       }
     } else {
-      const fallbacks = [
-        `Breathtaking views at ${locationName}. A stunning escape in Sri Lanka.`,
-        `Capturing the raw beauty of ${locationName}. Island secrets revealed.`,
-        `Serene vibes and hidden landscapes. Discovering ${locationName}.`,
-        `The unique soul of ${locationName}, Sri Lanka. A visual journal.`
-      ];
-      shortDesc = fallbacks[index % fallbacks.length];
+      // Replaced the array-based index fallback with a single static fallback
+      shortDesc = `Breathtaking views at ${locationName}. A stunning escape in Sri Lanka.`;
     }
 
     // --- NEW STRUCTURED DESCRIPTION WITH LOCATION HEADER ---
     const finalDescription = `${locationName} \n\n${shortDesc}\n\n📍Location: ${locationName}\n© Hasitha Gunasekera\n\n${dynamicHashtags}`;
 
-    const pinterestUrl = `https://www.pinterest.com/pin/create/button/?url=${encodeURIComponent(shareUrl)}&media=${encodeURIComponent(imageUrl)}&description=${encodeURIComponent(finalDescription)}`;
+    // Pass p.cover_photo_url directly to the media parameter
+    const pinterestUrl = `https://www.pinterest.com/pin/create/button/?url=${encodeURIComponent(shareUrl)}&media=${encodeURIComponent(p.cover_photo_url)}&description=${encodeURIComponent(finalDescription)}`;
 
     // Open Pinterest sharing popup window
     const popup = window.open(pinterestUrl, '_blank', 'width=750,height=600');
@@ -3180,267 +3185,272 @@ function App() {
               </div>
             </div>
 
-            {/* Social Grid */}
+            {/* Social Grid Container */}
             <div className="flex-1 overflow-y-auto p-8 no-scrollbar bg-slate-50/50">
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-6 pb-20">
-                {processedPlaces.filter(p => p.status === 'done').map(p => {
-                  // Data extraction from AI Article
-                  const hasArticle = p.ai_article && Object.keys(p.ai_article).length > 0;
-                  const artisticTitle = `✨ ${p.place_name} — Island Vignettes: A Sri Lankan Journal`;
-                  const description = p.ai_article?.story || "Capturing the essence of Sri Lanka's hidden gems through the lens of adventure.";
+                {processedPlaces
+                  .filter((p) => p.status === "done")
+                  .map((p) => {
+                    // Data extraction from AI Article
+                    const hasArticle = p.ai_article && Object.keys(p.ai_article).length > 0;
+                    const artisticTitle = `✨ ${p.place_name} — Island Vignettes: A Sri Lankan Journal`;
+                    const description =
+                      p.ai_article?.story ||
+                      "Capturing the essence of Sri Lanka's hidden gems through the lens of adventure.";
 
-                  return (
-                    <div key={p.id} className="bg-white rounded-[1.5rem] border border-slate-200 shadow-sm overflow-hidden flex flex-col group relative hover:shadow-md transition-all">
-
-                      {/* Image Section with Pinterest Hub Overlay */}
-                      <div className="aspect-video bg-slate-100 relative shrink-0 overflow-hidden">
-                        {p.cover_photo_url ? (
-                          <img src={p.cover_photo_url} alt={p.place_name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
-                        ) : (
-                          <div className="w-full h-full flex flex-col items-center justify-center text-slate-300 gap-2">
-                            <Icon name="image" className="w-6 h-6" />
-                            <span className="text-[8px] font-black uppercase tracking-widest">No Visuals</span>
-                          </div>
-                        )}
-
-                        {/* Pinterest Pin Hub Overlay - UPDATED FOR 4 IMAGES */}
-                        {activePinHubId === p.id && (
-                          <div className="absolute inset-0 bg-white/95 backdrop-blur-sm z-20 p-4 flex flex-col items-center justify-center text-center animate-in fade-in zoom-in duration-200">
-                            <button onClick={() => setActivePinHubId(null)} className="absolute top-2 right-2 p-1 text-slate-400 hover:text-slate-600">
-                              <Icon name="x" className="w-4 h-4" />
-                            </button>
-
-                            <div className="bg-rose-50 p-2 rounded-full mb-2">
-                              <Icon name="heart" className="w-5 h-5 text-rose-500" />
+                    return (
+                      <div
+                        key={p.id}
+                        className="bg-white rounded-[1.5rem] border border-slate-200 shadow-sm overflow-hidden flex flex-col group relative hover:shadow-md transition-all"
+                      >
+                        {/* Image Section */}
+                        <div className="aspect-video bg-slate-100 relative shrink-0 overflow-hidden">
+                          {p.cover_photo_url ? (
+                            <img
+                              src={p.cover_photo_url}
+                              alt={p.place_name || "Location Visual"}
+                              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                            />
+                          ) : (
+                            <div className="w-full h-full flex flex-col items-center justify-center text-slate-300 gap-2">
+                              <Icon name="image" className="w-6 h-6" />
+                              <span className="text-[8px] font-black uppercase tracking-widest">
+                                No Visuals
+                              </span>
                             </div>
-
-                            <p className="text-[10px] font-black uppercase text-slate-800 mb-1 text-center">Pinterest Amplify</p>
-
-                            {/* 4-Image Grid for Pinterest selection */}
-                            <div className="grid grid-cols-2 gap-2 w-full max-w-[160px]">
-                              {/* 1. Cover Image Slot (Index 0) */}
-                              {p.cover_photo_url && (
-                                <button
-                                  onClick={() => pinIndividualImage(p.cover_photo_url, 0, p)}
-                                  className="py-2 bg-rose-600 text-white text-[7px] font-black uppercase rounded-lg shadow-md hover:bg-rose-700 active:scale-95 transition-all"
-                                >
-                                  Cover Pin
-                                </button>
-                              )}
-
-                              {/* 2-4. Gallery Image Slots (Indices 1, 2, 3) */}
-                              {(Array.isArray(p.album_photos) ? p.album_photos : []).slice(0, 3).map((img, idx) => (
-                                <button
-                                  key={`${p.id}-pin-${idx}`}
-                                  onClick={() => pinIndividualImage(img, idx + 1, p)}
-                                  className="py-2 bg-slate-800 text-white text-[7px] font-black uppercase rounded-lg hover:bg-slate-900 active:scale-95 transition-all"
-                                >
-                                  Asset {idx + 1}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Body: Artistic Details */}
-                      <div className="p-4 flex-1 flex flex-col gap-2">
-                        <div className="flex items-center gap-2">
-                          <span className="text-[8px] font-black uppercase text-indigo-500 tracking-widest px-2 py-0.5 bg-indigo-50 rounded-md">
-                            {p.category}
-                          </span>
-                          {hasArticle && <Icon name="sparkles" className="w-2.5 h-2.5 text-amber-400" />}
+                          )}
                         </div>
 
-                        <h3 className="text-[11px] font-black uppercase text-slate-800 leading-tight">
-                          {artisticTitle}
-                        </h3>
-                        <p className="text-[10px] font-bold text-slate-400 line-clamp-3 leading-relaxed italic">
-                          "{description}"
-                        </p>
-                      </div>
-
-                      {/* Action Footer: Social Share Buttons (2 Rows x 4 Columns) */}
-                      <div className="p-3 border-t border-slate-50 bg-slate-50/50 grid grid-cols-4 gap-1.5">
-
-                        {/* Instagram */}
-                        <button
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            // Updated: Passing igToken instead of fbToken to decouple from Facebook Page logic
-                            checkAndPost(p, 'instagram', () => handleMetaShare(p, 'instagram', igToken));
-                          }}
-                          className={`flex flex-col items-center justify-center gap-1 py-2 text-black border rounded-xl hover:bg-gradient-to-tr hover:from-amber-400 hover:via-rose-500 hover:to-fuchsia-600 hover:text-white transition-all shadow-sm relative ${p.published_instagram_at
-                            ? 'border-emerald-500 bg-emerald-50/50 shadow-sm shadow-emerald-100'
-                            : 'border-slate-200 bg-white'
-                            }`}
-                        >
-                          {p.published_instagram_at && (
-                            <span className="absolute top-1 right-1 flex h-1.5 w-1.5">
-                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                        {/* Body: Artistic Details */}
+                        <div className="p-4 flex-1 flex flex-col gap-2">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[8px] font-black uppercase text-indigo-500 tracking-widest px-2 py-0.5 bg-indigo-50 rounded-md">
+                              {p.category}
                             </span>
-                          )}
-                          <Icon name="instagram" className="w-3.5 h-3.5" />
-                          <span className="text-[7px] font-black uppercase tracking-tighter">Insta</span>
-                        </button>
+                            {hasArticle && (
+                              <Icon name="sparkles" className="w-2.5 h-2.5 text-amber-400" />
+                            )}
+                          </div>
 
-                        {/* Threads */}
-                        <button
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            checkAndPost(p, 'threads', () => handleMetaShare(p, 'threads', threadsToken));
-                          }}
-                          className={`flex flex-col items-center justify-center gap-1 py-2 text-black border rounded-xl hover:bg-black hover:text-white transition-all shadow-sm relative ${p.published_threads_at
-                            ? 'border-emerald-500 bg-emerald-50/50 shadow-sm shadow-emerald-100'
-                            : 'border-slate-200 bg-white'
-                            }`}
-                        >
-                          {p.published_threads_at && (
-                            <span className="absolute top-1 right-1 flex h-1.5 w-1.5">
-                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
-                            </span>
-                          )}
-                          <Icon name="threads" className="w-3.5 h-3.5" />
-                          <span className="text-[7px] font-black uppercase tracking-tighter">Threads</span>
-                        </button>
+                          <h3 className="text-[11px] font-black uppercase text-slate-800 leading-tight">
+                            {artisticTitle}
+                          </h3>
+                          <p className="text-[10px] font-bold text-slate-400 line-clamp-3 leading-relaxed italic">
+                            "{description}"
+                          </p>
+                        </div>
 
-                        {/* Mastodon */}
-                        <button
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            checkAndPost(p, 'mastodon', () => handleMastodonShare(p));
-                          }}
-                          className={`flex flex-col items-center justify-center gap-1 py-2 text-black border rounded-xl hover:bg-indigo-600 hover:text-white transition-all shadow-sm group relative ${p.published_masto_at
-                            ? 'border-emerald-500 bg-emerald-50/50 shadow-sm shadow-emerald-100'
-                            : 'border-slate-200 bg-white'
-                            }`}
-                        >
-                          {p.published_masto_at && (
-                            <span className="absolute top-1 right-1 flex h-1.5 w-1.5">
-                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
-                            </span>
-                          )}
-                          <span className="text-sm">🐘</span>
-                          <span className="text-[7px] font-black uppercase tracking-tighter">Masto</span>
-                        </button>
-
-                        {/* Bluesky */}
-                        <button
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            checkAndPost(p, 'bluesky', () => handleBlueskyShare(p));
-                          }}
-                          className={`flex flex-col items-center justify-center gap-1 py-2 text-black border rounded-xl hover:bg-[#0085ff] hover:text-white transition-all shadow-sm group relative ${p.published_bsky_at
-                            ? 'border-emerald-500 bg-emerald-50/50 shadow-sm shadow-emerald-100'
-                            : 'border-slate-200 bg-white'
-                            }`}
-                        >
-                          {p.published_bsky_at && (
-                            <span className="absolute top-1 right-1 flex h-1.5 w-1.5">
-                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
-                            </span>
-                          )}
-                          <svg className="w-4 h-4 fill-current text-blue-500 group-hover:text-white transition-colors" viewBox="0 0 24 24">
-                            <path d="M12,2C9,2 7,4 7,7C7,10 9,12 12,12C15,12 17,10 17,7C17,4 15,2 12,2M12,14C9,14 7,16 7,19C7,22 9,24 12,24C15,24 17,22 17,19C17,16 15,14 12,14Z" transform="rotate(90 12 12)" />
-                          </svg>
-                          <span className="text-[7px] font-black uppercase tracking-tighter">Bsky</span>
-                        </button>
-
-                        {/* Pinterest */}
-                        <button
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            checkAndPost(p, 'pinterest', () => setActivePinHubId(p.id));
-                          }}
-                          className={`flex flex-col items-center justify-center gap-1 py-2 text-black border rounded-xl hover:bg-rose-600 hover:text-white transition-all shadow-sm group relative ${p.published_pinterest_at
-                            ? 'border-emerald-500 bg-emerald-50/50 shadow-sm shadow-emerald-100'
-                            : 'border-slate-200 bg-white'
-                            }`}
-                        >
-                          {p.published_pinterest_at && (
-                            <span className="absolute top-1 right-1 flex h-1.5 w-1.5">
-                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
-                            </span>
-                          )}
-                          <Icon name="heart" className="w-3.5 h-3.5 group-hover:scale-105 transition-transform" />
-                          <span className="text-[7px] font-black uppercase tracking-tighter">Pin</span>
-                        </button>
-
-                        {/* Flipboard */}
-                        <button
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            checkAndPost(p, 'flipboard', () => handleFlipboardShare(p));
-                          }}
-                          className={`flex flex-col items-center justify-center gap-1 py-2 text-black border rounded-xl hover:bg-red-500 hover:text-white transition-all shadow-sm group relative ${p.published_flipboard_at
-                            ? 'border-emerald-500 bg-emerald-50/50 shadow-sm shadow-emerald-100'
-                            : 'border-slate-200 bg-white'
-                            }`}
-                        >
-                          {p.published_flipboard_at && (
-                            <span className="absolute top-1 right-1 flex h-1.5 w-1.5">
-                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
-                            </span>
-                          )}
-                          <Icon name="refresh-cw" className="w-3.5 h-3.5 group-hover:scale-105 transition-transform" />
-                          <span className="text-[7px] font-black uppercase tracking-tighter">Flip</span>
-                        </button>
-
-                        {/* Unplash */}
-                        <button
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            handleUnsplashExport(p);
-                          }}
-                          className="flex flex-col items-center justify-center gap-1 py-2 text-black border border-slate-200 bg-white rounded-xl hover:bg-zinc-900 hover:text-white transition-all shadow-sm group relative"
-                        >
-                          <svg
-                            className="w-3.5 h-3.5 fill-current text-zinc-800 group-hover:text-white transition-colors"
-                            viewBox="0 0 24 24"
+                        {/* Action Footer: Social Share Buttons (2 Rows x 4 Columns) */}
+                        <div className="p-3 border-t border-slate-50 bg-slate-50/50 grid grid-cols-4 gap-1.5">
+                          {/* 1. Instagram */}
+                          <button
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              checkAndPost(p, "instagram", () =>
+                                handleMetaShare(p, "instagram", igToken)
+                              );
+                            }}
+                            className={`flex flex-col items-center justify-center gap-1 py-2 text-black border rounded-xl hover:bg-gradient-to-tr hover:from-amber-400 hover:via-rose-500 hover:to-fuchsia-600 hover:text-white transition-all shadow-sm relative ${p.published_instagram_at
+                              ? "border-emerald-500 bg-emerald-50/50 shadow-sm shadow-emerald-100"
+                              : "border-slate-200 bg-white"
+                              }`}
                           >
-                            <path d="M12 9c1.657 0 3 1.343 3 3s-1.343 3-3 3-3-1.343-3-3 1.343-3 3-3zm9-2h-2.586l-1.707-1.707A.996.996 0 0 0 16 5h-8a.996.996 0 0 0-.707.293L5.586 7H3c-1.103 0-2 .897-2 2v11c0 1.103.897 2 2 2h18c1.103 0 2-.897 2-2V9c0-1.103-.897-2-2-2zM12 17c-2.761 0-5-2.239-5-5s2.239-5 5-5 5 2.239 5 5-2.239 5-5 5z" />
-                          </svg>
-                          <span className="text-[7px] font-black uppercase tracking-tighter">Unsplash</span>
-                        </button>
-
-                        {/* Twitter (X) */}
-                        <button
-                          type="button"
-                          onClick={(e) => handleTwitterPush(p, e)}
-                          className={`flex flex-col items-center justify-center gap-1 py-2 text-black border rounded-xl hover:bg-slate-900 hover:text-white transition-all shadow-sm group relative ${p.published_twitter_at
-                            ? 'border-emerald-500 bg-emerald-50/50 shadow-sm shadow-emerald-100'
-                            : 'border-slate-200 bg-white'
-                            }`}
-                        >
-                          {p.published_twitter_at && (
-                            <span className="absolute top-1 right-1 flex h-1.5 w-1.5">
-                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                            {p.published_instagram_at && (
+                              <span className="absolute top-1 right-1 flex h-1.5 w-1.5">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                              </span>
+                            )}
+                            <Icon name="instagram" className="w-3.5 h-3.5" />
+                            <span className="text-[7px] font-black uppercase tracking-tighter">
+                              Insta
                             </span>
-                          )}
-                          <Icon name="twitter" className="w-3.5 h-3.5 text-sky-500 group-hover:text-white transition-colors" />
-                          <span className="text-[7px] font-black uppercase tracking-tighter">X / Twt</span>
-                        </button>
+                          </button>
 
+                          {/* 2. Threads */}
+                          <button
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              checkAndPost(p, "threads", () =>
+                                handleMetaShare(p, "threads", threadsToken)
+                              );
+                            }}
+                            className={`flex flex-col items-center justify-center gap-1 py-2 text-black border rounded-xl hover:bg-black hover:text-white transition-all shadow-sm relative ${p.published_threads_at
+                              ? "border-emerald-500 bg-emerald-50/50 shadow-sm shadow-emerald-100"
+                              : "border-slate-200 bg-white"
+                              }`}
+                          >
+                            {p.published_threads_at && (
+                              <span className="absolute top-1 right-1 flex h-1.5 w-1.5">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                              </span>
+                            )}
+                            <Icon name="threads" className="w-3.5 h-3.5" />
+                            <span className="text-[7px] font-black uppercase tracking-tighter">
+                              Threads
+                            </span>
+                          </button>
+
+                          {/* 3. Mastodon */}
+                          <button
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              checkAndPost(p, "mastodon", () => handleMastodonShare(p));
+                            }}
+                            className={`flex flex-col items-center justify-center gap-1 py-2 text-black border rounded-xl hover:bg-indigo-600 hover:text-white transition-all shadow-sm group relative ${p.published_masto_at
+                              ? "border-emerald-500 bg-emerald-50/50 shadow-sm shadow-emerald-100"
+                              : "border-slate-200 bg-white"
+                              }`}
+                          >
+                            {p.published_masto_at && (
+                              <span className="absolute top-1 right-1 flex h-1.5 w-1.5">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                              </span>
+                            )}
+                            <span className="text-sm">🐘</span>
+                            <span className="text-[7px] font-black uppercase tracking-tighter">
+                              Masto
+                            </span>
+                          </button>
+
+                          {/* 4. Bluesky */}
+                          <button
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              checkAndPost(p, "bluesky", () => handleBlueskyShare(p));
+                            }}
+                            className={`flex flex-col items-center justify-center gap-1 py-2 text-black border rounded-xl hover:bg-[#0085ff] hover:text-white transition-all shadow-sm group relative ${p.published_bsky_at
+                              ? "border-emerald-500 bg-emerald-50/50 shadow-sm shadow-emerald-100"
+                              : "border-slate-200 bg-white"
+                              }`}
+                          >
+                            {p.published_bsky_at && (
+                              <span className="absolute top-1 right-1 flex h-1.5 w-1.5">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                              </span>
+                            )}
+                            <svg
+                              className="w-4 h-4 fill-current text-blue-500 group-hover:text-white transition-colors"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                d="M12,2C9,2 7,4 7,7C7,10 9,12 12,12C15,12 17,10 17,7C17,4 15,2 12,2M12,14C9,14 7,16 7,19C7,22 9,24 12,24C15,24 17,22 17,19C17,16 15,14 12,14Z"
+                                transform="rotate(90 12 12)"
+                              />
+                            </svg>
+                            <span className="text-[7px] font-black uppercase tracking-tighter">
+                              Bsky
+                            </span>
+                          </button>
+
+                          {/* 5. Pinterest (Updated to Direct Share) */}
+                          <button
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              checkAndPost(p, "pinterest", () => handlePinterestShare(p));
+                            }}
+                            className={`flex flex-col items-center justify-center gap-1 py-2 text-black border rounded-xl hover:bg-rose-600 hover:text-white transition-all shadow-sm group relative ${p.published_pinterest_at
+                              ? "border-emerald-500 bg-emerald-50/50 shadow-sm shadow-emerald-100"
+                              : "border-slate-200 bg-white"
+                              }`}
+                          >
+                            {p.published_pinterest_at && (
+                              <span className="absolute top-1 right-1 flex h-1.5 w-1.5">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                              </span>
+                            )}
+                            <Icon
+                              name="heart"
+                              className="w-3.5 h-3.5 group-hover:scale-105 transition-transform"
+                            />
+                            <span className="text-[7px] font-black uppercase tracking-tighter">
+                              Pin
+                            </span>
+                          </button>
+
+                          {/* 6. Flipboard */}
+                          <button
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              checkAndPost(p, "flipboard", () => handleFlipboardShare(p));
+                            }}
+                            className={`flex flex-col items-center justify-center gap-1 py-2 text-black border rounded-xl hover:bg-red-500 hover:text-white transition-all shadow-sm group relative ${p.published_flipboard_at
+                              ? "border-emerald-500 bg-emerald-50/50 shadow-sm shadow-emerald-100"
+                              : "border-slate-200 bg-white"
+                              }`}
+                          >
+                            {p.published_flipboard_at && (
+                              <span className="absolute top-1 right-1 flex h-1.5 w-1.5">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                              </span>
+                            )}
+                            <Icon
+                              name="refresh-cw"
+                              className="w-3.5 h-3.5 group-hover:scale-105 transition-transform"
+                            />
+                            <span className="text-[7px] font-black uppercase tracking-tighter">
+                              Flip
+                            </span>
+                          </button>
+
+                          {/* 7. Unsplash */}
+                          <button
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              handleUnsplashExport(p);
+                            }}
+                            className="flex flex-col items-center justify-center gap-1 py-2 text-black border border-slate-200 bg-white rounded-xl hover:bg-zinc-900 hover:text-white transition-all shadow-sm group relative"
+                          >
+                            <svg
+                              className="w-3.5 h-3.5 fill-current text-zinc-800 group-hover:text-white transition-colors"
+                              viewBox="0 0 24 24"
+                            >
+                              <path d="M12 9c1.657 0 3 1.343 3 3s-1.343 3-3 3-3-1.343-3-3 1.343-3 3-3zm9-2h-2.586l-1.707-1.707A.996.996 0 0 0 16 5h-8a.996.996 0 0 0-.707.293L5.586 7H3c-1.103 0-2 .897-2 2v11c0 1.103.897 2 2 2h18c1.103 0 2-.897 2-2V9c0-1.103-.897-2-2-2zM12 17c-2.761 0-5-2.239-5-5s2.239-5 5-5 5 2.239 5 5-2.239 5-5 5z" />
+                            </svg>
+                            <span className="text-[7px] font-black uppercase tracking-tighter">
+                              Unsplash
+                            </span>
+                          </button>
+
+                          {/* 8. Twitter (X) */}
+                          <button
+                            type="button"
+                            onClick={(e) => handleTwitterPush(p, e)}
+                            className={`flex flex-col items-center justify-center gap-1 py-2 text-black border rounded-xl hover:bg-slate-900 hover:text-white transition-all shadow-sm group relative ${p.published_twitter_at
+                              ? "border-emerald-500 bg-emerald-50/50 shadow-sm shadow-emerald-100"
+                              : "border-slate-200 bg-white"
+                              }`}
+                          >
+                            {p.published_twitter_at && (
+                              <span className="absolute top-1 right-1 flex h-1.5 w-1.5">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                              </span>
+                            )}
+                            <Icon
+                              name="twitter"
+                              className="w-3.5 h-3.5 text-sky-500 group-hover:text-white transition-colors"
+                            />
+                            <span className="text-[7px] font-black uppercase tracking-tighter">
+                              X / Twt
+                            </span>
+                          </button>
+                        </div>
                       </div>
-
-
-                    </div>
-                  );
-                })}
+                    );
+                  })}
               </div>
             </div>
           </div>
