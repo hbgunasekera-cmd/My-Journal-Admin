@@ -3474,22 +3474,25 @@ function App() {
                               handleUnsplashExport(p);
                             }}
                             title={p?.published_unplash_at ? "Exported to Unsplash" : "Export to Unsplash"}
-                            className={`flex flex-col items-center justify-center gap-1 py-2 rounded-xl border transition-all shadow-sm group relative ${p?.published_unplash_at
-                              ? "bg-emerald-600 border-emerald-600 text-white shadow-emerald-100"
-                              : "bg-white border-slate-200 text-black hover:bg-zinc-900 hover:text-white"
+                            className={`flex flex-col items-center justify-center gap-1 py-2 text-black border rounded-xl hover:bg-slate-900 hover:text-white transition-all shadow-sm group relative ${p?.published_unplash_at
+                                ? "border-emerald-500 bg-emerald-50/50 shadow-sm shadow-emerald-100"
+                                : "border-slate-200 bg-white"
                               }`}
                           >
+                            {p?.published_unplash_at && (
+                              <span className="absolute top-1 right-1 flex h-1.5 w-1.5">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                              </span>
+                            )}
                             <svg
-                              className={`w-3.5 h-3.5 fill-current transition-colors ${p?.published_unplash_at
-                                ? "text-white"
-                                : "text-zinc-800 group-hover:text-white"
-                                }`}
+                              className="w-3.5 h-3.5 fill-current text-zinc-800 group-hover:text-white transition-colors"
                               viewBox="0 0 24 24"
                             >
                               <path d="M12 9c1.657 0 3 1.343 3 3s-1.343 3-3 3-3-1.343-3-3 1.343-3 3-3zm9-2h-2.586l-1.707-1.707A.996.996 0 0 0 16 5h-8a.996.996 0 0 0-.707.293L5.586 7H3c-1.103 0-2 .897-2 2v11c0 1.103.897 2 2 2h18c1.103 0 2-.897 2-2V9c0-1.103-.897-2-2-2zM12 17c-2.761 0-5-2.239-5-5s2.239-5 5-5 5 2.239 5 5-2.239 5-5 5z" />
                             </svg>
                             <span className="text-[7px] font-black uppercase tracking-tighter">
-                              {p?.published_unplash_at ? "Shared" : "Unsplash"}
+                              Unsplash
                             </span>
                           </button>
 
@@ -3516,6 +3519,7 @@ function App() {
                               X / Twt
                             </span>
                           </button>
+
                         </div>
                       </div>
                     );
