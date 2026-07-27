@@ -63,6 +63,7 @@ const CONFIG = {
   API_KEYS: {
     ARTICLE: import.meta.env.VITE_ARTICLE_KEY,
     WEATHER: import.meta.env.VITE_WEATHER_KEY,
+
   }
 };
 
@@ -308,7 +309,7 @@ function App() {
     pinterest: 'published_pinterest_at',
     flipboard: 'published_flipboard_at',
     twitter: 'published_twitter_at',
-    reddit: 'published_reddit_at'
+    unplash: 'published_unplash_at'
   };
 
   // --- Auth & UI States ---
@@ -1291,33 +1292,50 @@ function App() {
     }
   };
 
-  const handleRedditShare = async (p) => {
-    if (!p) return;
+  const handleUnsplashExport = async (p) => {
+    if (!p || !p.cover_photo_url) {
+      setToast?.({ show: true, msg: "No cover photo available to export!" });
+      setTimeout(() => setToast?.({ show: false, msg: "" }), 3000);
+      return;
+    }
 
-    const locationName = p.place_name || "Island Vignette";
+    try {
+      // 1. Prepare caption and tags text payload
+      const locationName = p.place_name || "Travel Spot";
+      const description = p.description || p.journal_entry || "";
+      const tags = p.tags ? (Array.isArray(p.tags) ? p.tags.join(", ") : p.tags) : "travel, nature, photography";
 
-    // 1. Construct a "Scraper-Friendly" Path Link
-    const shareLink = generateShareLink(locationName, 'reddit');
+      const clipboardText = `${locationName}\n\n${description}\n\nTags: ${tags}, travel, landscape`;
 
-    // 2. Prepare Content
-    const storyText = p.ai_article?.story || p.ai_article?.description || "";
-    const cleanText = storyText.replace(/[#*]/g, '').trim();
-    const redditDescription = `${cleanText.substring(0, 400)}...\n\nRead more at: ${shareLink}`;
+      // Copy formatted text to clipboard
+      await navigator.clipboard.writeText(clipboardText);
 
-    setToast?.({ show: true, msg: "Opening Reddit Submission..." });
+      // 2. Fetch and download the cover photo locally for quick upload
+      const response = await fetch(p.cover_photo_url);
+      const blob = await response.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
 
-    // 3. Open Reddit Submission
-    const redditUrl = `https://www.reddit.com/submit?url=${encodeURIComponent(shareLink)}&title=${encodeURIComponent(locationName.replace(/\s+/g, '-'))}&text=${encodeURIComponent(redditDescription)}`;
-    const popup = window.open(redditUrl, '_blank', 'width=800,height=600');
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = `${locationName.toLowerCase().replace(/\s+/g, '-')}-cover.jpg`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(blobUrl);
 
-    if (popup) {
-      try {
-        await updateSupabasePostStatus(p.id, 'reddit');
-        setToast?.({ show: true, msg: "Shared to Reddit!" });
-        setTimeout(() => setToast?.({ show: false, msg: "" }), 3000);
-      } catch (err) {
-        console.error("Reddit DB sync failed:", err);
-      }
+      // 3. Open Unsplash submission dashboard in a new tab
+      window.open('https://unsplash.com/submit', '_blank');
+
+      setToast?.({
+        show: true,
+        msg: "Caption copied, image downloaded, and Unsplash opened!"
+      });
+      setTimeout(() => setToast?.({ show: false, msg: "" }), 4000);
+
+    } catch (err) {
+      console.error("Unsplash Export Error:", err);
+      setToast?.({ show: true, msg: "Failed to prepare Unsplash export." });
+      setTimeout(() => setToast?.({ show: false, msg: "" }), 3000);
     }
   };
 
@@ -2447,6 +2465,7 @@ function App() {
         else if (lowerUA.includes('surf.social')) finalSource = 'Surf.Social';
         else if (lowerUA.includes('youtube') || lowerUA.includes('com.google.android.youtube')) finalSource = 'YouTube';
         else if (lowerUA.includes('reddit')) finalSource = 'Reddit';
+        else if (lowerUA.includes('unsplash')) finalSource = 'Unsplash';
         else if (lowerUA.includes('elakiri')) finalSource = 'Elakiri';
         else if (lowerUA.includes('pinterest')) finalSource = 'Pinterest';
         else if (lowerUA.includes('flipboard')) finalSource = 'Flipboard';
@@ -2531,6 +2550,8 @@ function App() {
       }, []).sort((a, b) => b.hits - a.hits)
     };
   }, [analyticsData, likesData, subscribersData]);
+
+
 
   const handleClearDashboardData = async () => {
     if (window.confirm("⚠️ Are you sure you want to delete all analytics records (page_visits)? This operation cannot be undone.")) {
@@ -3377,31 +3398,22 @@ function App() {
                           <span className="text-[7px] font-black uppercase tracking-tighter">Flip</span>
                         </button>
 
-                        {/* Reddit */}
+                        {/* Unplash */}
                         <button
                           onClick={(e) => {
                             e.preventDefault();
                             e.stopPropagation();
-                            checkAndPost(p, 'reddit', () => handleRedditShare(p));
+                            handleUnsplashExport(p);
                           }}
-                          className={`flex flex-col items-center justify-center gap-1 py-2 text-black border rounded-xl hover:bg-orange-600 hover:text-white transition-all shadow-sm group relative ${p.published_reddit_at
-                            ? 'border-emerald-500 bg-emerald-50/50 shadow-sm shadow-emerald-100'
-                            : 'border-slate-200 bg-white'
-                            }`}
+                          className="flex flex-col items-center justify-center gap-1 py-2 text-black border border-slate-200 bg-white rounded-xl hover:bg-zinc-900 hover:text-white transition-all shadow-sm group relative"
                         >
-                          {p.published_reddit_at && (
-                            <span className="absolute top-1 right-1 flex h-1.5 w-1.5">
-                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
-                            </span>
-                          )}
                           <svg
-                            className="w-3.5 h-3.5 fill-current text-orange-600 group-hover:text-white transition-colors"
+                            className="w-3.5 h-3.5 fill-current text-zinc-800 group-hover:text-white transition-colors"
                             viewBox="0 0 24 24"
                           >
-                            <path d="M12 0C5.373 0 0 5.373 0 12c0 6.627 5.373 12 12 12s12-5.373 12-12C24 5.373 18.627 0 12 0zm5.347 17.518c-1.424 1.424-5.347 1.424-5.347 1.424s-3.923 0-5.347-1.424c-.29-.29-.29-.76 0-1.05.29-.29.76-.29 1.05 0 .977.977 3.518 1.05 4.297 1.05.779 0 3.32-.073 4.297-1.05.29-.29.76-.29 1.05 0 .29.29.29.76 0 1.05zm-6.84-4.526c0-.853-.692-1.545-1.545-1.545-.853 0-1.545.692-1.545 1.545 0 .853.692 1.545 1.545 1.545.853 0 1.545-.692 1.545-1.545zm6.182 0c0-.853-.692-1.545-1.545-1.545-.853 0-1.545.692-1.545 1.545 0 .853.692 1.545 1.545 1.545.853 0 1.545-.692 1.545-1.545z" />
+                            <path d="M12 9c1.657 0 3 1.343 3 3s-1.343 3-3 3-3-1.343-3-3 1.343-3 3-3zm9-2h-2.586l-1.707-1.707A.996.996 0 0 0 16 5h-8a.996.996 0 0 0-.707.293L5.586 7H3c-1.103 0-2 .897-2 2v11c0 1.103.897 2 2 2h18c1.103 0 2-.897 2-2V9c0-1.103-.897-2-2-2zM12 17c-2.761 0-5-2.239-5-5s2.239-5 5-5 5 2.239 5 5-2.239 5-5 5z" />
                           </svg>
-                          <span className="text-[7px] font-black uppercase tracking-tighter">Reddit</span>
+                          <span className="text-[7px] font-black uppercase tracking-tighter">Unsplash</span>
                         </button>
 
                         {/* Twitter (X) */}
