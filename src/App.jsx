@@ -1298,6 +1298,13 @@ function App() {
   };
 
   const handleUnsplashExport = async (p) => {
+    // Local Cache Guard (Bypasses the action if already shared)
+    if (p.published_unplash_at) {
+      setToast?.({ show: true, msg: "Already exported to Unsplash!" });
+      setTimeout(() => setToast?.({ show: false, msg: "" }), 3000);
+      return;
+    }
+
     if (!p || !p.cover_photo_url) {
       setToast?.({ show: true, msg: "No cover photo available to export!" });
       setTimeout(() => setToast?.({ show: false, msg: "" }), 3000);
@@ -1317,26 +1324,26 @@ function App() {
 
       // 2. Exact 20 tags including #MyJournal
       const tagsList = [
-        "#MyJournal",
-        "#SriLanka",
-        "#VisitSriLanka",
-        "#TravelSriLanka",
-        "#WanderlustSriLanka",
-        "#BeautifulSriLanka",
-        "#HiddenGemsSriLanka",
-        "#SriLankaDiaries",
-        "#ChasingWaterfalls",
-        "#HikingAdventures",
-        "#CampingLife",
-        "#MountainViews",
-        "#NatureSeekers",
-        "#AdventureSriLanka",
-        "#ExploreSriLanka",
-        "#TravelPhotography",
-        "#TravelDiaries",
-        "#IslandParadise",
-        "#ProtectNature",
-        "#CeylonVibes"
+        "MyJournal",
+        "SriLanka",
+        "VisitSriLanka",
+        "TravelSriLanka",
+        "WanderlustSriLanka",
+        "BeautifulSriLanka",
+        "HiddenGemsSriLanka",
+        "SriLankaDiaries",
+        "ChasingWaterfalls",
+        "HikingAdventures",
+        "CampingLife",
+        "MountainViews",
+        "NatureSeekers",
+        "AdventureSriLanka",
+        "ExploreSriLanka",
+        "TravelPhotography",
+        "TravelDiaries",
+        "IslandParadise",
+        "ProtectNature",
+        "CeylonVibes"
       ].join(" ");
 
       const description = p.description || p.journal_entry || "";
@@ -1366,8 +1373,22 @@ function App() {
       document.body.removeChild(link);
       window.URL.revokeObjectURL(blobUrl);
 
-      // 4. Open Unsplash submission page
-      window.open('https://unsplash.com/submit', '_blank');
+      // 4. Open Unsplash submission page in a separate popup window
+      const popup = window.open(
+        'https://unsplash.com/submit',
+        'unsplash_submit',
+        'width=800,height=750,scrollbars=yes,resizable=yes'
+      );
+
+      // 5. Sync Database Status
+      if (popup) {
+        try {
+          // Note: Using 'unplash' to perfectly match your PLATFORM_COLUMNS key
+          await updateSupabasePostStatus(p.id, 'unplash');
+        } catch (err) {
+          console.error("Unsplash DB sync failed:", err);
+        }
+      }
 
       setToast?.({
         show: true,
