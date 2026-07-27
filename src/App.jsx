@@ -1305,17 +1305,49 @@ function App() {
     }
 
     try {
-      // 1. Prepare caption and tags text payload
+      // 1. Prepare location, URL slug, and gallery link
       const locationName = p.place_name || "Travel Spot";
+      const slug = locationName
+        .toLowerCase()
+        .trim()
+        .replace(/[^a-z0-9\s-]/g, "")
+        .replace(/\s+/g, "-");
+
+      const galleryLink = `🌐: https://www.myjournalview.com/gallery/${slug}`;
+
+      // 2. Exact 20 tags including #MyJournal
+      const tagsList = [
+        "#MyJournal",
+        "#SriLanka",
+        "#VisitSriLanka",
+        "#TravelSriLanka",
+        "#WanderlustSriLanka",
+        "#BeautifulSriLanka",
+        "#HiddenGemsSriLanka",
+        "#SriLankaDiaries",
+        "#ChasingWaterfalls",
+        "#HikingAdventures",
+        "#CampingLife",
+        "#MountainViews",
+        "#NatureSeekers",
+        "#AdventureSriLanka",
+        "#ExploreSriLanka",
+        "#TravelPhotography",
+        "#TravelDiaries",
+        "#IslandParadise",
+        "#ProtectNature",
+        "#CeylonVibes"
+      ].join(" ");
+
       const description = p.description || p.journal_entry || "";
-      const tags = p.tags ? (Array.isArray(p.tags) ? p.tags.join(", ") : p.tags) : "travel, nature, photography";
 
-      const clipboardText = `${locationName}\n\n${description}\n\nTags: ${tags}, travel, landscape`;
+      // Format clipboard content cleanly
+      const clipboardText = `${locationName}\n${galleryLink}\n\n${description}\n\n${tagsList}`.trim();
 
-      // Copy formatted text to clipboard
+      // Copy text to clipboard
       await navigator.clipboard.writeText(clipboardText);
 
-      // 2. Fetch and download the cover photo locally via the server proxy to bypass CORS
+      // 3. Fetch cover photo through local API proxy to bypass CORS
       const proxyUrl = `/api/cover-image-proxy?url=${encodeURIComponent(p.cover_photo_url)}`;
       const response = await fetch(proxyUrl);
 
@@ -1328,18 +1360,18 @@ function App() {
 
       const link = document.createElement('a');
       link.href = blobUrl;
-      link.download = `${locationName.toLowerCase().replace(/\s+/g, '-')}-cover.jpg`;
+      link.download = `${slug}-cover.jpg`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       window.URL.revokeObjectURL(blobUrl);
 
-      // 3. Open Unsplash submission dashboard in a new tab
+      // 4. Open Unsplash submission page
       window.open('https://unsplash.com/submit', '_blank');
 
       setToast?.({
         show: true,
-        msg: "Caption copied, image downloaded, and Unsplash opened!"
+        msg: "Caption & tags copied, image downloaded, and Unsplash opened!"
       });
       setTimeout(() => setToast?.({ show: false, msg: "" }), 4000);
 
