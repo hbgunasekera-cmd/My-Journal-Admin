@@ -1315,8 +1315,14 @@ function App() {
       // Copy formatted text to clipboard
       await navigator.clipboard.writeText(clipboardText);
 
-      // 2. Fetch and download the cover photo locally for quick upload
-      const response = await fetch(p.cover_photo_url);
+      // 2. Fetch and download the cover photo locally via the server proxy to bypass CORS
+      const proxyUrl = `/api/cover-image-proxy?url=${encodeURIComponent(p.cover_photo_url)}`;
+      const response = await fetch(proxyUrl);
+
+      if (!response.ok) {
+        throw new Error(`Proxy fetch failed with status ${response.status}`);
+      }
+
       const blob = await response.blob();
       const blobUrl = window.URL.createObjectURL(blob);
 
