@@ -1298,21 +1298,22 @@ function App() {
   };
 
   const handleUnsplashExport = async (p) => {
-    // Local Cache Guard (Bypasses the action if already shared)
-    if (p.published_unplash_at) {
-      setToast?.({ show: true, msg: "Already exported to Unsplash!" });
-      setTimeout(() => setToast?.({ show: false, msg: "" }), 3000);
-      return;
-    }
-
+    // 1. Guard against invalid post object or missing photo
     if (!p || !p.cover_photo_url) {
       setToast?.({ show: true, msg: "No cover photo available to export!" });
       setTimeout(() => setToast?.({ show: false, msg: "" }), 3000);
       return;
     }
 
+    // 2. Cache Guard: Stop if already exported
+    if (p.published_unplash_at) {
+      setToast?.({ show: true, msg: "Already exported to Unsplash!" });
+      setTimeout(() => setToast?.({ show: false, msg: "" }), 3000);
+      return;
+    }
+
     try {
-      // 1. Prepare location, URL slug, and gallery link
+      // Prepare location, URL slug, and gallery link
       const locationName = p.place_name || "Travel Spot";
       const slug = locationName
         .toLowerCase()
@@ -1322,28 +1323,28 @@ function App() {
 
       const galleryLink = `🌐: https://www.myjournalview.com/gallery/${slug}`;
 
-      // 2. Exact 20 tags including #MyJournal
+      // Clean 20 tags with '#' prefix
       const tagsList = [
-        "MyJournal",
-        "SriLanka",
-        "VisitSriLanka",
-        "TravelSriLanka",
-        "WanderlustSriLanka",
-        "BeautifulSriLanka",
-        "HiddenGemsSriLanka",
-        "SriLankaDiaries",
-        "ChasingWaterfalls",
-        "HikingAdventures",
-        "CampingLife",
-        "MountainViews",
-        "NatureSeekers",
-        "AdventureSriLanka",
-        "ExploreSriLanka",
-        "TravelPhotography",
-        "TravelDiaries",
-        "IslandParadise",
-        "ProtectNature",
-        "CeylonVibes"
+        "MyJournal,",
+        "SriLanka,",
+        "VisitSriLanka,",
+        "TravelSriLanka,",
+        "WanderlustSriLanka,",
+        "BeautifulSriLanka,",
+        "HiddenGemsSriLanka,",
+        "SriLankaDiaries,",
+        "ChasingWaterfalls,",
+        "HikingAdventures,",
+        "CampingLife,",
+        "MountainViews,",
+        "NatureSeekers,",
+        "AdventureSriLanka,",
+        "ExploreSriLanka,",
+        "TravelPhotography,",
+        "TravelDiaries,",
+        "IslandParadise,",
+        "ProtectNature,",
+        "CeylonVibes,"
       ].join(" ");
 
       const description = p.description || p.journal_entry || "";
@@ -1354,7 +1355,7 @@ function App() {
       // Copy text to clipboard
       await navigator.clipboard.writeText(clipboardText);
 
-      // 3. Fetch cover photo through local API proxy to bypass CORS
+      // Fetch cover photo through local API proxy to bypass CORS
       const proxyUrl = `/api/cover-image-proxy?url=${encodeURIComponent(p.cover_photo_url)}`;
       const response = await fetch(proxyUrl);
 
@@ -1373,18 +1374,20 @@ function App() {
       document.body.removeChild(link);
       window.URL.revokeObjectURL(blobUrl);
 
-      // 4. Open Unsplash submission page in a separate popup window
+      // Open Unsplash submission page in a separate popup window
       const popup = window.open(
         'https://unsplash.com/submit',
         'unsplash_submit',
         'width=800,height=750,scrollbars=yes,resizable=yes'
       );
 
-      // 5. Sync Database Status
+      // Sync Database Status & Local State
       if (popup) {
         try {
-          // Note: Using 'unplash' to perfectly match your PLATFORM_COLUMNS key
           await updateSupabasePostStatus(p.id, 'unplash');
+
+          // Update local property so the UI button updates/highlights immediately
+          p.published_unplash_at = new Date().toISOString();
         } catch (err) {
           console.error("Unsplash DB sync failed:", err);
         }
@@ -3470,16 +3473,23 @@ function App() {
                               e.stopPropagation();
                               handleUnsplashExport(p);
                             }}
-                            className="flex flex-col items-center justify-center gap-1 py-2 text-black border border-slate-200 bg-white rounded-xl hover:bg-zinc-900 hover:text-white transition-all shadow-sm group relative"
+                            title={p?.published_unplash_at ? "Exported to Unsplash" : "Export to Unsplash"}
+                            className={`flex flex-col items-center justify-center gap-1 py-2 rounded-xl border transition-all shadow-sm group relative ${p?.published_unplash_at
+                              ? "bg-emerald-600 border-emerald-600 text-white shadow-emerald-100"
+                              : "bg-white border-slate-200 text-black hover:bg-zinc-900 hover:text-white"
+                              }`}
                           >
                             <svg
-                              className="w-3.5 h-3.5 fill-current text-zinc-800 group-hover:text-white transition-colors"
+                              className={`w-3.5 h-3.5 fill-current transition-colors ${p?.published_unplash_at
+                                ? "text-white"
+                                : "text-zinc-800 group-hover:text-white"
+                                }`}
                               viewBox="0 0 24 24"
                             >
                               <path d="M12 9c1.657 0 3 1.343 3 3s-1.343 3-3 3-3-1.343-3-3 1.343-3 3-3zm9-2h-2.586l-1.707-1.707A.996.996 0 0 0 16 5h-8a.996.996 0 0 0-.707.293L5.586 7H3c-1.103 0-2 .897-2 2v11c0 1.103.897 2 2 2h18c1.103 0 2-.897 2-2V9c0-1.103-.897-2-2-2zM12 17c-2.761 0-5-2.239-5-5s2.239-5 5-5 5 2.239 5 5-2.239 5-5 5z" />
                             </svg>
                             <span className="text-[7px] font-black uppercase tracking-tighter">
-                              Unsplash
+                              {p?.published_unplash_at ? "Shared" : "Unsplash"}
                             </span>
                           </button>
 
