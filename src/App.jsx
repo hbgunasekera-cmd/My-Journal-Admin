@@ -1323,7 +1323,7 @@ function App() {
 
       const galleryLink = `🌐: https://www.myjournalview.com/gallery/${slug}`;
 
-      // Clean 20 tags with '#' prefix
+      // Clean 20 tags with ',' separator
       const tagsList = [
         "MyJournal,",
         "SriLanka,",
@@ -1366,7 +1366,7 @@ function App() {
       const blob = await response.blob();
       const blobUrl = window.URL.createObjectURL(blob);
 
-      const link = document.createElement('a');
+      const link = document.createElement("a");
       link.href = blobUrl;
       link.download = `${slug}-cover.jpg`;
       document.body.appendChild(link);
@@ -1374,17 +1374,36 @@ function App() {
       document.body.removeChild(link);
       window.URL.revokeObjectURL(blobUrl);
 
-      // Open Unsplash submission page in a separate popup window
+      // --- Dynamic Unsplash Topic Destination Mapping ---
+      const natureCategories = [
+        "Waterfall",
+        "Mountain",
+        "Trail",
+        "Viewpoint",
+        "Beach",
+        "Park",
+        "Plateaus",
+        "Reserved Forest",
+        "Reservoir",
+        "Pool",
+        "Stream"
+      ];
+
+      // Determine topic based on category match; default to 'travel'
+      const unsplashTopic = natureCategories.includes(p.category) ? "nature" : "travel";
+      const targetUrl = `https://unsplash.com/t/${unsplashTopic}?modal=%5B%22Uploader%22%2C%5B%22Publish%22%2C%7B%22value%22%3A%22${unsplashTopic}%22%7D%5D%5D`;
+
+      // Open Unsplash topic-specific upload modal in a popup window
       const popup = window.open(
-        'https://unsplash.com/submit',
-        'unsplash_submit',
-        'width=800,height=750,scrollbars=yes,resizable=yes'
+        targetUrl,
+        "unsplash_submit",
+        "width=800,height=750,scrollbars=yes,resizable=yes"
       );
 
       // Sync Database Status & Local State
       if (popup) {
         try {
-          await updateSupabasePostStatus(p.id, 'unplash');
+          await updateSupabasePostStatus(p.id, "unplash");
 
           // Update local property so the UI button updates/highlights immediately
           p.published_unplash_at = new Date().toISOString();
@@ -3475,8 +3494,8 @@ function App() {
                             }}
                             title={p?.published_unplash_at ? "Exported to Unsplash" : "Export to Unsplash"}
                             className={`flex flex-col items-center justify-center gap-1 py-2 text-black border rounded-xl hover:bg-slate-900 hover:text-white transition-all shadow-sm group relative ${p?.published_unplash_at
-                                ? "border-emerald-500 bg-emerald-50/50 shadow-sm shadow-emerald-100"
-                                : "border-slate-200 bg-white"
+                              ? "border-emerald-500 bg-emerald-50/50 shadow-sm shadow-emerald-100"
+                              : "border-slate-200 bg-white"
                               }`}
                           >
                             {p?.published_unplash_at && (
