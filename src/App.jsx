@@ -903,6 +903,21 @@ function App() {
   // 2. REVISED INTEGRATION SHARING FUNCTIONS
   // ==========================================
 
+  /**
+   * Helper Function: Generate Gallery URL
+   * Converts a location name into a URL-friendly slug and returns the gallery link.
+   */
+  const generateGalleryLink = (placeName) => {
+    const name = placeName || "Island Vignette";
+    const slug = name
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9\s-]/g, "")
+      .replace(/\s+/g, "-");
+    return `https://www.myjournalview.com/gallery/${slug}`;
+  };
+
+  // --- META (FACEBOOK/INSTAGRAM/THREADS) ---
   const handleMetaShare = async (p, platform, accessToken) => {
     // Defensive Guard: Strictly prevent React Event objects from reaching the backend
     if (accessToken && typeof accessToken !== 'string') {
@@ -917,7 +932,7 @@ function App() {
     console.log(`[DEBUG] Token Length:`, accessToken ? accessToken.length : 'N/A');
 
     const locationName = p.place_name || "Island Vignette";
-    const shareLink = generateShareLink(locationName);
+    const shareLink = generateGalleryLink(locationName);
     const coreTags = "#MyJournal #SriLanka #TravelSriLanka #TravelPhotography";
     const dynamicHashtags = `${coreTags} ${getSpecificTags(p)}`.trim();
 
@@ -959,7 +974,6 @@ function App() {
           text: socialText,
           imageUrl: p.cover_photo_url,
           link: shareLink,
-          // Updated: Sending igAccessToken for Instagram to decouple from the Facebook Page token logic
           ...(platform === 'threads' ? { threadsAccessToken: accessToken } : { igAccessToken: accessToken })
         }),
       });
@@ -975,15 +989,15 @@ function App() {
 
     } catch (err) {
       console.error(`${platform} Integration Error:`, err);
-      // Display the exact error message from the backend to identify configuration issues
       setToast?.({ show: true, msg: err.message || "Unknown error occurred." });
       setTimeout(() => setToast?.({ show: false, msg: "" }), 6000);
     }
   };
 
+  // --- MASTODON ---
   const handleMastodonShare = async (p) => {
     const locationName = p.place_name || "Island Vignette";
-    const shareLink = generateShareLink(locationName, 'mastodon');
+    const shareLink = generateGalleryLink(locationName);
     const coreTags = "#MyJournal #SriLanka #TravelSriLanka #TravelPhotography";
     const dynamicHashtags = `${coreTags} ${getSpecificTags(p)}`.trim();
 
@@ -1031,9 +1045,10 @@ function App() {
     }
   };
 
+  // --- BLUESKY ---
   const handleBlueskyShare = async (p) => {
     const locationName = p.place_name || "Island Vignette";
-    const shareLink = generateShareLink(locationName, 'bluesky');
+    const shareLink = generateGalleryLink(locationName);
     const coreTags = "#MyJournal #SriLanka";
     const specificTags = getSpecificTags(p).split(' ').slice(0, 2).join(' ');
     const dynamicHashtags = `${coreTags} ${specificTags}`.trim();
@@ -1089,10 +1104,10 @@ function App() {
     }
   };
 
+  // --- PINTEREST ---
   const handlePinterestShare = async (p) => {
     if (!p) return;
 
-    // Guard: Ensure a cover photo exists before attempting to pin
     if (!p.cover_photo_url) {
       if (typeof setToast === 'function') {
         setToast({ show: true, msg: "No cover photo available to share!" });
@@ -1102,13 +1117,11 @@ function App() {
     }
 
     const locationName = p.place_name || "Island Vignette";
-    const shareUrl = generateShareLink(locationName, 'pinterest');
+    const shareUrl = generateGalleryLink(locationName);
 
-    // Dynamic Hashtags Conversion
     const coreTags = "#MyJournal #SriLanka #TravelSriLanka #TravelPhotography";
     const dynamicHashtags = `${coreTags} ${getSpecificTags(p)}`.trim();
 
-    // --- SMART TEXT PARSING DESCRIPTION LOGIC ---
     let shortDesc = "";
     const fullStory = p.ai_article?.story || p.ai_article?.description;
 
@@ -1116,7 +1129,6 @@ function App() {
       const cleanText = fullStory.replace(/[#*]/g, '').trim();
       const sentences = cleanText.match(/[^.!?]+[.!?]+/g) || [cleanText];
 
-      // Take the first clean sentence, capped intelligently around 150 chars max
       shortDesc = sentences[0].trim();
       if (shortDesc.length > 150) {
         shortDesc = shortDesc.substring(0, 147).trim();
@@ -1125,21 +1137,16 @@ function App() {
         shortDesc += "...";
       }
     } else {
-      // Replaced the array-based index fallback with a single static fallback
       shortDesc = `Breathtaking views at ${locationName}. A stunning escape in Sri Lanka.`;
     }
 
-    // --- NEW STRUCTURED DESCRIPTION WITH LOCATION HEADER ---
     const finalDescription = `${locationName} \n\n${shortDesc}\n\n📍Location: ${locationName}\n© Hasitha Gunasekera\n\n${dynamicHashtags}`;
 
-    // Pass p.cover_photo_url directly to the media parameter
     const pinterestUrl = `https://www.pinterest.com/pin/create/button/?url=${encodeURIComponent(shareUrl)}&media=${encodeURIComponent(p.cover_photo_url)}&description=${encodeURIComponent(finalDescription)}`;
 
-    // Open Pinterest sharing popup window
     const popup = window.open(pinterestUrl, '_blank', 'width=750,height=600');
     if (typeof setActivePinHubId === 'function') setActivePinHubId(null);
 
-    // Update state to validated since user initiated the direct link sharing successfully
     if (popup) {
       try {
         await updateSupabasePostStatus(p.id, 'pinterest');
@@ -1151,17 +1158,16 @@ function App() {
     }
   };
 
+  // --- FLIPBOARD ---
   const handleFlipboardShare = async (p) => {
     if (!p) return;
 
     const locationName = p.place_name || "Island Vignette";
-    const shareLink = generateShareLink(locationName, 'flipboard');
+    const shareLink = generateGalleryLink(locationName);
 
-    // Dynamic Hashtags Conversion
     const coreTags = "#MyJournal #SriLanka #TravelSriLanka #TravelPhotography";
     const dynamicHashtags = `${coreTags} ${getSpecificTags(p)}`.trim();
 
-    // --- SMART SENTENCE SENTINEL PARSING ---
     let shortDesc = "";
     const storyText = p.ai_article?.story || p.ai_article?.description || "";
 
@@ -1171,7 +1177,7 @@ function App() {
 
       for (let sentence of sentences) {
         const candidate = (shortDesc + " " + sentence.trim()).trim();
-        if (candidate.length <= 300) { // Standard safe text blurb cap for Flipboard preview card layouts
+        if (candidate.length <= 300) {
           shortDesc = candidate;
         } else {
           break;
@@ -1181,10 +1187,8 @@ function App() {
       shortDesc = `Exploring the raw beauty of ${locationName}, Sri Lanka.`;
     }
 
-    // --- THE TEXT PACKAGE (FOR CLIPBOARD) ---
     const fullTextToCopy = `${locationName}\n\n${shortDesc}\n\n📍Location: ${shareLink}\n\n${dynamicHashtags}`;
 
-    // --- EXECUTE COPY TO CLIPBOARD ---
     try {
       await navigator.clipboard.writeText(fullTextToCopy);
       setToast?.({ show: true, msg: "Caption copied! Opening Flipboard..." });
@@ -1192,7 +1196,6 @@ function App() {
       console.error("Flipboard clipboard failure", err);
     }
 
-    // --- OPEN FLIPBOARD ---
     const targetUrl = p.cover_photo_url || shareLink;
     const flipboardUrl = `https://share.flipboard.com/bookmarklet/popout?v=2` +
       `&url=${encodeURIComponent(targetUrl)}` +
@@ -1214,8 +1217,8 @@ function App() {
     }
   };
 
+  // --- TWITTER (X) ---
   const handleTwitterPush = async (p, e) => {
-    // 1. INSTANT BROWSER INTERCEPT (Stops DOM bubbling immediately)
     if (e) {
       e.preventDefault();
       e.stopPropagation();
@@ -1223,22 +1226,18 @@ function App() {
 
     if (!p) return;
 
-    // 2. TRIGGER BACKGROUND DOWNLOAD
-    // Initiated immediately via proxy to bypass CORS
     if (p.cover_photo_url) {
       downloadCoverImage(p.cover_photo_url, p.place_name);
     }
 
-    // 3. LOCAL CACHE GUARD (Completely bypasses the async delay of checkAndPost)
     if (p.published_twitter_at) {
       setToast?.({ show: true, msg: "Already shared to X / Twt!" });
       setTimeout(() => setToast?.({ show: false, msg: "" }), 3000);
       return;
     }
 
-    // 4. CONTENT SETUP 
     const locationName = p.place_name || "Island Vignette";
-    const shareLink = generateShareLink(locationName, 'twitter');
+    const shareLink = generateGalleryLink(locationName);
 
     const coreTags = "#MyJournal #SriLanka #TravelSriLanka #TravelPhotography";
     const dynamicHashtags = `${coreTags} ${getSpecificTags(p)}`.trim();
@@ -1270,7 +1269,6 @@ function App() {
 
     const tweetText = `${locationName}\n\n${shortDesc}\n\n📍Location: ${shareLink}\n\n${dynamicHashtags}`;
 
-    // 5. SYNCHRONOUS POPUP CREATION
     const twitterIntentUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(tweetText)}`;
     const popup = window.open(
       twitterIntentUrl,
@@ -1278,7 +1276,6 @@ function App() {
       'width=550,height=420,scrollbars=yes,resizable=yes'
     );
 
-    // 6. ASYNC TASKS (Execute safely *after* the window is secured)
     try {
       await navigator.clipboard.writeText(tweetText);
       setToast?.({ show: true, msg: "Caption copied! Opening X Composer..." });
@@ -1286,7 +1283,6 @@ function App() {
       console.error("Clipboard Error:", err);
     }
 
-    // 7. SYNC LOCAL & REMOTE DATABASE
     if (popup) {
       try {
         await updateSupabasePostStatus(p.id, 'twitter');
@@ -1297,15 +1293,14 @@ function App() {
     }
   };
 
+  // --- UNSPLASH ---
   const handleUnsplashExport = async (p) => {
-    // 1. Guard against invalid post object or missing photo
     if (!p || !p.cover_photo_url) {
       setToast?.({ show: true, msg: "No cover photo available to export!" });
       setTimeout(() => setToast?.({ show: false, msg: "" }), 3000);
       return;
     }
 
-    // 2. Cache Guard: Stop if already exported
     if (p.published_unplash_at) {
       setToast?.({ show: true, msg: "Already exported to Unsplash!" });
       setTimeout(() => setToast?.({ show: false, msg: "" }), 3000);
@@ -1313,49 +1308,23 @@ function App() {
     }
 
     try {
-      // Prepare location, URL slug, and gallery link
       const locationName = p.place_name || "Travel Spot";
-      const slug = locationName
-        .toLowerCase()
-        .trim()
-        .replace(/[^a-z0-9\s-]/g, "")
-        .replace(/\s+/g, "-");
+      const galleryLink = `🌐: ${generateGalleryLink(locationName)}`;
 
-      const galleryLink = `🌐: https://www.myjournalview.com/gallery/${slug}`;
-
-      // Clean 20 tags with ',' separator
       const tagsList = [
-        "MyJournal,",
-        "SriLanka,",
-        "VisitSriLanka,",
-        "TravelSriLanka,",
-        "WanderlustSriLanka,",
-        "BeautifulSriLanka,",
-        "HiddenGemsSriLanka,",
-        "SriLankaDiaries,",
-        "ChasingWaterfalls,",
-        "HikingAdventures,",
-        "CampingLife,",
-        "MountainViews,",
-        "NatureSeekers,",
-        "AdventureSriLanka,",
-        "ExploreSriLanka,",
-        "TravelPhotography,",
-        "TravelDiaries,",
-        "IslandParadise,",
-        "ProtectNature,",
-        "CeylonVibes,"
+        "MyJournal,", "SriLanka,", "VisitSriLanka,", "TravelSriLanka,",
+        "WanderlustSriLanka,", "BeautifulSriLanka,", "HiddenGemsSriLanka,",
+        "SriLankaDiaries,", "ChasingWaterfalls,", "HikingAdventures,",
+        "CampingLife,", "MountainViews,", "NatureSeekers,", "AdventureSriLanka,",
+        "ExploreSriLanka,", "TravelPhotography,", "TravelDiaries,",
+        "IslandParadise,", "ProtectNature,", "CeylonVibes,"
       ].join(" ");
 
       const description = p.description || p.journal_entry || "";
-
-      // Format clipboard content cleanly
       const clipboardText = `${locationName}\n${galleryLink}\n\n${description}\n\n${tagsList}`.trim();
 
-      // Copy text to clipboard
       await navigator.clipboard.writeText(clipboardText);
 
-      // Fetch cover photo through local API proxy to bypass CORS
       const proxyUrl = `/api/cover-image-proxy?url=${encodeURIComponent(p.cover_photo_url)}`;
       const response = await fetch(proxyUrl);
 
@@ -1368,44 +1337,29 @@ function App() {
 
       const link = document.createElement("a");
       link.href = blobUrl;
-      link.download = `${slug}-cover.jpg`;
+      link.download = `${locationName.toLowerCase().trim().replace(/[^a-z0-9\s-]/g, "").replace(/\s+/g, "-")}-cover.jpg`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       window.URL.revokeObjectURL(blobUrl);
 
-      // --- Dynamic Unsplash Topic Destination Mapping ---
       const natureCategories = [
-        "Waterfall",
-        "Mountain",
-        "Trail",
-        "Viewpoint",
-        "Beach",
-        "Park",
-        "Plateaus",
-        "Reserved Forest",
-        "Reservoir",
-        "Pool",
-        "Stream"
+        "Waterfall", "Mountain", "Trail", "Viewpoint", "Beach",
+        "Park", "Plateaus", "Reserved Forest", "Reservoir", "Pool", "Stream"
       ];
 
-      // Determine topic based on category match; default to 'travel'
       const unsplashTopic = natureCategories.includes(p.category) ? "nature" : "travel";
       const targetUrl = `https://unsplash.com/t/${unsplashTopic}?modal=%5B%22Uploader%22%2C%5B%22Publish%22%2C%7B%22value%22%3A%22${unsplashTopic}%22%7D%5D%5D`;
 
-      // Open Unsplash topic-specific upload modal in a popup window
       const popup = window.open(
         targetUrl,
         "unsplash_submit",
         "width=800,height=750,scrollbars=yes,resizable=yes"
       );
 
-      // Sync Database Status & Local State
       if (popup) {
         try {
           await updateSupabasePostStatus(p.id, "unplash");
-
-          // Update local property so the UI button updates/highlights immediately
           p.published_unplash_at = new Date().toISOString();
         } catch (err) {
           console.error("Unsplash DB sync failed:", err);
