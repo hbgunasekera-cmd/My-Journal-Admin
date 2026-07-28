@@ -219,13 +219,17 @@ const WeatherIcon = ({ condition }) => {
  * Generates a clean, URL-safe slug from any string.
  * Converts to lowercase, removes special characters, and replaces spaces with hyphens.
  */
-const generateCleanSlug = (text) => {
+export const generateCleanSlug = (text) => {
   if (!text) return "";
-  return text
+  return String(text)
     .toLowerCase()
     .trim()
-    .replace(/[^a-z0-9\s-]/g, "") // Remove all non-alphanumeric characters except spaces and hyphens
-    .replace(/\s+/g, "-");        // Replace spaces with hyphens
+    .normalize('NFD')                   // Decompose accented characters (e.g., "é" -> "e" + "´")
+    .replace(/[\u0300-\u036f]/g, '')    // Strip diacritic mark overlays
+    .replace(/[–—]/g, '-')              // Convert En-dash & Em-dash to standard hyphens
+    .replace(/[^a-z0-9\s-]/g, '')       // Remove non-alphanumeric characters except spaces & hyphens
+    .replace(/\s+/g, '-')               // Replace spaces with hyphens
+    .replace(/-+/g, '-');               // Collapse multiple hyphens into a single hyphen
 };
 
 
@@ -2434,20 +2438,24 @@ function App() {
     const safeLikes = Array.isArray(likesData) ? likesData : [];
     const safeSubscribers = Array.isArray(subscribersData) ? subscribersData : [];
 
+    // Localized Set per recalculation to avoid state leakage across re-renders
+    const knownUsers = new Set();
+
     const parseUA = (v) => {
-      // Use the raw user agent, fallback to empty string
       const rawUA = v.user_agent || "";
       const lowerUA = rawUA.toLowerCase();
+      const referrer = (v.referrer || "").toLowerCase();
+      const utmSource = (v.utm_source || "").toLowerCase();
 
       const ip = v.ip_address || "";
       const city = v.city || "";
-      const country = (v.country === "The Netherlands") ? "Netherlands" : (v.country || "Unknown");
+      const country = v.country === "The Netherlands" ? "Netherlands" : (v.country || "Unknown");
 
       const fingerprint = `${ip}_${rawUA}`;
 
-      // 1. Loyalty Check
+      // 1. Loyalty Check (Chronological execution based on sorted created_at)
       let loyaltyStatus = "Returning User";
-      if (!knownUsers.has(fingerprint)) {
+      if (fingerprint !== "_" && !knownUsers.has(fingerprint)) {
         knownUsers.add(fingerprint);
         loyaltyStatus = "Unique Visit";
       }
@@ -2465,7 +2473,7 @@ function App() {
         'ia_archiver', 'screaming frog', 'adsbot'
       ];
 
-      // Expanded Data Center IP Prefixes (AWS, Google Cloud, Meta, Azure)
+      // Data Center IP Prefixes (AWS, Google Cloud, Meta, Azure)
       const isDataCenterNetwork =
         ip.startsWith('66.220.') || ip.startsWith('173.252.') ||
         ip.startsWith('31.13.') || ip.startsWith('66.249.') ||
@@ -2475,18 +2483,16 @@ function App() {
         ip.startsWith('52.') || ip.startsWith('54.') ||
         ip.startsWith('69.171.');
 
-      // The bot boolean: True if UA matches patterns, headless browser, or known DC IP.
-      let isBot =
+      const isBot =
         botPatterns.some(pattern => lowerUA.includes(pattern)) ||
         lowerUA.includes('headlesschrome') ||
         v.is_webdriver === true ||
         isDataCenterNetwork;
 
-      // 3. SOURCE DETECTION
+      // 3. SOURCE DETECTION (Incorporating UA, Referrer, and UTM Source)
       let finalSource = "Direct";
 
       if (isBot) {
-        // Granular Bot Sources
         if (lowerUA.includes('facebook') || lowerUA.includes('meta') || ip.startsWith('31.13.') || ip.startsWith('66.220.') || ip.startsWith('69.171.')) {
           finalSource = 'Meta Scraper';
         } else if (lowerUA.includes('google') || ip.startsWith('66.249.')) {
@@ -2499,41 +2505,50 @@ function App() {
           finalSource = 'Automated Crawler';
         }
       } else {
-        // Human Source Detection (All identifiers restored)
-        if (lowerUA.includes('google') || lowerUA.includes('bing') || lowerUA.includes('yahoo') || lowerUA.includes('duckduckgo') || lowerUA.includes('ecosia')) {
+        // Check explicit UTM source first
+        if (utmSource) {
+          if (utmSource.includes('facebook') || utmSource.includes('fb')) finalSource = 'Facebook';
+          else if (utmSource.includes('instagram') || utmSource.includes('ig')) finalSource = 'Instagram';
+          else if (utmSource.includes('twitter') || utmSource.includes('x')) finalSource = 'Twitter(X)';
+          else if (utmSource.includes('newsletter') || utmSource.includes('email')) finalSource = 'Email / Newsletter';
+          else finalSource = utmSource.charAt(0).toUpperCase() + utmSource.slice(1);
+        }
+        // Search Engines
+        else if (
+          lowerUA.includes('google') || lowerUA.includes('bing') || lowerUA.includes('yahoo') ||
+          lowerUA.includes('duckduckgo') || lowerUA.includes('ecosia') ||
+          referrer.includes('google.') || referrer.includes('bing.com') || referrer.includes('duckduckgo.com')
+        ) {
           finalSource = 'Search Engine';
         }
         // Meta Ecosystem
         else if (lowerUA.includes('messenger') || lowerUA.includes('fb_iab')) finalSource = 'Messenger';
-        else if (lowerUA.includes('instagram')) finalSource = 'Instagram';
+        else if (lowerUA.includes('instagram') || referrer.includes('instagram.com')) finalSource = 'Instagram';
         else if (lowerUA.includes('threads') || lowerUA.includes('barcelona')) finalSource = 'Threads';
-        else if (lowerUA.includes('fban') || lowerUA.includes('fbav')) finalSource = 'Facebook';
+        else if (lowerUA.includes('fban') || lowerUA.includes('fbav') || referrer.includes('facebook.com')) finalSource = 'Facebook';
         // Other Social Platforms
         else if (lowerUA.includes('tiktok') || lowerUA.includes('musical')) finalSource = 'TikTok';
         else if (lowerUA.includes('whatsapp')) finalSource = 'WhatsApp';
         else if (lowerUA.includes('surf.social')) finalSource = 'Surf.Social';
-        else if (lowerUA.includes('youtube') || lowerUA.includes('com.google.android.youtube')) finalSource = 'YouTube';
-        else if (lowerUA.includes('reddit')) finalSource = 'Reddit';
+        else if (lowerUA.includes('youtube') || lowerUA.includes('com.google.android.youtube') || referrer.includes('youtube.com')) finalSource = 'YouTube';
+        else if (lowerUA.includes('reddit') || referrer.includes('reddit.com')) finalSource = 'Reddit';
         else if (lowerUA.includes('unsplash')) finalSource = 'Unsplash';
         else if (lowerUA.includes('elakiri')) finalSource = 'Elakiri';
-        else if (lowerUA.includes('pinterest')) finalSource = 'Pinterest';
+        else if (lowerUA.includes('pinterest') || referrer.includes('pinterest.com')) finalSource = 'Pinterest';
         else if (lowerUA.includes('flipboard')) finalSource = 'Flipboard';
-        // Twitter(X) Detection
-        else if (lowerUA.includes('twitter') || lowerUA.includes(' x/')) finalSource = 'Twitter(X)';
-        // Fediverse / Mastodon Detection
+        else if (lowerUA.includes('twitter') || lowerUA.includes(' x/') || referrer.includes('t.co') || referrer.includes('twitter.com')) finalSource = 'Twitter(X)';
         else if (lowerUA.includes('mastodon') || lowerUA.includes('ivory') || lowerUA.includes('tusky')) finalSource = 'Mastodon';
-        // Bluesky Detection
         else if (lowerUA.includes('bsky') || lowerUA.includes('bluesky')) finalSource = 'Bluesky';
-
-        else finalSource = "Direct";
+        else {
+          finalSource = "Direct";
+        }
       }
 
-      // 4. Device & OS Detection
+      // 4. DEVICE & OS DETECTION
       let type = 'Desktop';
       if (lowerUA.includes('tablet') || lowerUA.includes('ipad')) type = 'Tablet';
       else if (lowerUA.includes('mobile') || lowerUA.includes('android') || lowerUA.includes('iphone')) type = 'Mobile';
 
-      // Force type to "Bot/Server" if it's automated, to keep device stats clean
       if (isBot) type = 'Bot/Server';
 
       let os = 'Other';
@@ -2545,9 +2560,16 @@ function App() {
 
       if (isBot) os = 'Server OS';
 
-      return { type, source: finalSource, os, isBot, loyaltyStatus, country };
+      // Normalize page path casing to prevent fragmented route stats (e.g., 'Gallery/diva guhawa')
+      const rawPath = v.page_path || 'Unknown';
+      const normalizedPagePath = rawPath.includes('/')
+        ? rawPath.split('/').map(part => part.trim().toLowerCase()).join('/')
+        : rawPath;
+
+      return { type, source: finalSource, os, isBot, loyaltyStatus, country, normalizedPagePath };
     };
 
+    // Sort analytics chronologically prior to computing loyalty status
     const parsedData = [...safeAnalytics]
       .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
       .map(v => ({ ...v, ...parseUA(v) }));
@@ -2573,15 +2595,15 @@ function App() {
       sources: getSortedMetrics(parsedData, 'source'),
       deviceTypes: getSortedMetrics(parsedData, 'type'),
       loyalty: getSortedMetrics(parsedData, 'loyaltyStatus'),
-      pageHistory: getSortedMetrics(parsedData, 'page_path')
-        .filter(([path, count]) => count > 0 && path && path !== 'Unknown'),
+      pageHistory: getSortedMetrics(parsedData, 'normalizedPagePath')
+        .filter(([path, count]) => count > 0 && path && path !== 'unknown'),
       os: getSortedMetrics(parsedData, 'os'),
       trafficType: getSortedMetrics(parsedData, v => v.isBot ? 'Bot/Crawler' : 'Real Person'),
 
       likesSummary: safeLikes.reduce((acc, l) => {
-        const locName = l.travel_bucket_list?.place_name;
-        const category = l.travel_bucket_list?.category;
-        const country = l.country;
+        const locName = l.travel_bucket_list?.place_name || 'Unknown Location';
+        const category = l.travel_bucket_list?.category || 'General';
+        const country = l.country || 'Unknown';
 
         const existing = acc.find(x => x.name === locName);
         if (existing) {
