@@ -215,6 +215,19 @@ const WeatherIcon = ({ condition }) => {
   return <WIcon className={`w-5 h-5 ${color} shrink-0`} strokeWidth={1.75} />;
 };
 
+/**
+ * Generates a clean, URL-safe slug from any string.
+ * Converts to lowercase, removes special characters, and replaces spaces with hyphens.
+ */
+const generateCleanSlug = (text) => {
+  if (!text) return "";
+  return text
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9\s-]/g, "") // Remove all non-alphanumeric characters except spaces and hyphens
+    .replace(/\s+/g, "-");        // Replace spaces with hyphens
+};
+
 
 const formatPageName = (path) => {
   if (!path || path === '/') return 'Main Page';
@@ -888,7 +901,7 @@ function App() {
    * Generates clean URL path structures: https://www.myjournalview.com/gallery/Devon-Falls
    */
   const generateShareLink = (locationName, utmSource = '') => {
-    const formattedName = encodeURIComponent(locationName.trim().replace(/\s+/g, '-'));
+    const formattedName = generateCleanSlug(locationName);
     // Updated to use the clean sub-directory route layout
     let url = `https://www.myjournalview.com/gallery/${formattedName}`;
 
@@ -907,15 +920,7 @@ function App() {
    * Helper Function: Generate Gallery URL
    * Converts a location name into a URL-friendly slug and returns the gallery link.
    */
-  const generateGalleryLink = (placeName) => {
-    const name = placeName || "Island Vignette";
-    const slug = name
-      .toLowerCase()
-      .trim()
-      .replace(/[^a-z0-9\s-]/g, "")
-      .replace(/\s+/g, "-");
-    return `https://www.myjournalview.com/gallery/${slug}`;
-  };
+  const slug = generateCleanSlug(name);
 
   // --- META (FACEBOOK/INSTAGRAM/THREADS) ---
   const handleMetaShare = async (p, platform, accessToken) => {
@@ -1199,7 +1204,7 @@ function App() {
     const targetUrl = p.cover_photo_url || shareLink;
     const flipboardUrl = `https://share.flipboard.com/bookmarklet/popout?v=2` +
       `&url=${encodeURIComponent(targetUrl)}` +
-      `&title=${encodeURIComponent(locationName.replace(/\s+/g, '-'))}`;
+      `&title=${generateCleanSlug(locationName)}`;
 
     const popup = window.open(
       flipboardUrl,
@@ -1337,7 +1342,7 @@ function App() {
 
       const link = document.createElement("a");
       link.href = blobUrl;
-      link.download = `${locationName.toLowerCase().trim().replace(/[^a-z0-9\s-]/g, "").replace(/\s+/g, "-")}-cover.jpg`;
+      link.download = `${generateCleanSlug(locationName)}-cover.jpg`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -1391,9 +1396,13 @@ function App() {
   const triggerIndexNow = async (placeName, albumPhotos) => {
     try {
       const host = "www.myjournalview.com";
-      const cleanSlug = encodeURIComponent(placeName.trim().replace(/ /g, '-'));
+
+      // Standardized clean slug generation using the utility function
+      const cleanSlug = generateCleanSlug(placeName);
+
       const urlsToSubmit = [`https://${host}/place/${cleanSlug}`];
 
+      // Push the gallery route if album photos are present
       if (albumPhotos && albumPhotos.length > 0) {
         urlsToSubmit.push(`https://${host}/gallery/${cleanSlug}`);
       }
@@ -1415,14 +1424,14 @@ function App() {
 
       if (response.ok && result.success) {
         triggerToast("🚀 IndexNow notified of new links safely via backend!");
-        return true; // <-- ADD THIS: Tell the app it succeeded
+        return true; // <-- Tell the app it succeeded
       } else {
         console.error("IndexNow failed via proxy:", result.error || response.status);
-        return false; // <-- ADD THIS: Tell the app it failed
+        return false; // <-- Tell the app it failed
       }
     } catch (error) {
       console.error("IndexNow integration error:", error);
-      return false; // <-- ADD THIS
+      return false; // <-- Tell the app it failed
     }
   };
 
@@ -1992,8 +2001,8 @@ function App() {
       // Construct the exact dynamic URL to open the gallery on your website
       const locationName = locationData.place_name || 'Remote Target Location';
 
-      // REVISED: Changed to /gallery/ routing scheme
-      const galleryLink = `https://www.myjournalview.com/gallery/${encodeURIComponent(locationName.trim().replace(/\s+/g, '-'))}`;
+      // REVISED: Changed to /gallery/ routing scheme using the utility slug function
+      const galleryLink = `https://www.myjournalview.com/gallery/${generateCleanSlug(locationName)}`;
 
       // 3. Construct the batch delivery payload container array mapping over each subscriber
       const emailPayload = emailList.map(subscriberEmail => ({
