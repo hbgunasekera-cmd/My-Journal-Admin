@@ -900,7 +900,7 @@ function App() {
   /**
    * Generates clean URL path structures: https://www.myjournalview.com/gallery/Devon-Falls
    */
-  const generateShareLink = (locationName, utmSource = '') => {
+  const generateGalleryLink = (locationName, utmSource = '') => {
     const formattedName = generateCleanSlug(locationName);
     // Updated to use the clean sub-directory route layout
     let url = `https://www.myjournalview.com/gallery/${formattedName}`;
