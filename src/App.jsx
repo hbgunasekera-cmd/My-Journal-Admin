@@ -3829,37 +3829,82 @@ function App() {
 
                 {/* Metrics Grid */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-x-8 gap-y-10 relative z-10">
-                  <MetricColumn title="Countries" data={dashboardStats.countries} highlightValue={dashboardStats.latest?.country} />
-                  <MetricColumn title="Regions" data={dashboardStats.regions} highlightValue={dashboardStats.latest?.region} />
-                  <MetricColumn title="Cities" data={dashboardStats.cities} highlightValue={dashboardStats.latest?.city} />
-                  <MetricColumn title="Device Type" data={dashboardStats.deviceTypes} highlightValue={dashboardStats.latest?.type} />
-                  <MetricColumn title="Operating System" data={dashboardStats.os} highlightValue={dashboardStats.latest?.os} />
-                  <MetricColumn title="App / Source" data={dashboardStats.sources} highlightValue={dashboardStats.latest?.source} />
-                  <MetricColumn title="Visit Loyalty" data={dashboardStats.loyalty} highlightValue={dashboardStats.latest?.loyaltyStatus} />
+                  <MetricColumn
+                    title="Countries"
+                    data={dashboardStats.countries}
+                    highlightValue={dashboardStats.latest?.country}
+                  />
+                  <MetricColumn
+                    title="Regions"
+                    data={dashboardStats.regions}
+                    highlightValue={dashboardStats.latest?.region}
+                  />
+                  <MetricColumn
+                    title="Cities"
+                    data={dashboardStats.cities}
+                    highlightValue={dashboardStats.latest?.city}
+                  />
+                  <MetricColumn
+                    title="Device Type"
+                    data={dashboardStats.deviceTypes}
+                    highlightValue={dashboardStats.latest?.type}
+                  />
+                  <MetricColumn
+                    title="Operating System"
+                    data={dashboardStats.os}
+                    highlightValue={dashboardStats.latest?.os}
+                  />
+                  <MetricColumn
+                    title="App / Source"
+                    data={dashboardStats.sources}
+                    highlightValue={dashboardStats.latest?.source}
+                  />
+                  <MetricColumn
+                    title="Visit Loyalty"
+                    data={dashboardStats.loyalty}
+                    highlightValue={dashboardStats.latest?.loyaltyStatus}
+                  />
                   <MetricColumn
                     title="Visit History"
                     data={dashboardStats.pageHistory}
-                    highlightValue={dashboardStats.latest?.page_path}
+                    /* Fixed: Uses normalizedPagePath to match the normalized path entries in pageHistory */
+                    highlightValue={dashboardStats.latest?.normalizedPagePath}
                   />
+
                   {/* Traffic Type Breakdown */}
                   <div>
-                    <p className="text-[9px] font-black uppercase text-slate-500 mb-3 border-b border-slate-700 pb-1 tracking-wider">Traffic Type</p>
+                    <p className="text-[9px] font-black uppercase text-slate-500 mb-3 border-b border-slate-700 pb-1 tracking-wider">
+                      Traffic Type
+                    </p>
                     <div className="space-y-2">
-                      {dashboardStats.trafficType.map(([type, count]) => {
-                        // Dynamically matches 'Real Person' or Bot categories with the latest log state
-                        const isLatestTraffic = dashboardStats.latest && (
-                          (dashboardStats.latest.isBot && type !== 'Real Person') ||
-                          (!dashboardStats.latest.isBot && type === 'Real Person')
-                        );
+                      {(dashboardStats.trafficType || []).map(([type, count]) => {
+                        // Matches 'Real Person' or Bot categories with the latest log state
+                        const isLatestTraffic =
+                          dashboardStats.latest &&
+                          ((dashboardStats.latest.isBot && type !== 'Real Person') ||
+                            (!dashboardStats.latest.isBot && type === 'Real Person'));
 
                         return (
-                          <div key={type} className="flex justify-between items-center text-[10px] font-bold">
-                            {/* Label stays completely standard */}
-                            <span className={type === 'Real Person' ? 'text-emerald-400' : 'text-rose-400'}>
+                          <div
+                            key={type}
+                            className="flex justify-between items-center text-[10px] font-bold"
+                          >
+                            {/* Label color depending on Real Person vs Bot */}
+                            <span
+                              className={
+                                type === 'Real Person' ? 'text-emerald-400' : 'text-rose-400'
+                              }
+                            >
                               {type}
                             </span>
-                            {/* Only the count switches color to orange for the latest log type */}
-                            <span className={isLatestTraffic ? 'text-orange-400 font-black' : 'text-white font-black'}>
+                            {/* Highlight latest traffic log count in orange */}
+                            <span
+                              className={
+                                isLatestTraffic
+                                  ? 'text-orange-400 font-black'
+                                  : 'text-white font-black'
+                              }
+                            >
                               {count}
                             </span>
                           </div>
