@@ -3627,365 +3627,372 @@ function App() {
 
 
         {/* TAB 3: MAP */}
-        <div className={`flex h-full w-full ${activeTab === 'map' ? 'flex' : 'hidden'} flex-col md:flex-row overflow-hidden`}>
+<div className={`flex h-full w-full ${activeTab === 'map' ? 'flex' : 'hidden'} flex-col md:flex-row overflow-hidden`}>
 
-          {/* MAP CONTAINER - Top on Mobile (40%), Right on Desktop */}
-          <section className="w-full flex-[0.4] md:flex-1 relative bg-slate-100 order-1 md:order-2 min-h-[300px]">
-            <div id="map-container" className="w-full h-full"></div>
-          </section>
+  {/* MAP CONTAINER - Top on Mobile (40%), Right on Desktop */}
+  <section className="w-full flex-[0.4] md:flex-1 relative bg-slate-100 order-1 md:order-2 min-h-[300px]">
+    <div id="map-container" className="w-full h-full"></div>
+  </section>
 
-          {/* SIDEBAR / BOTTOM PANEL - Single Scrollable Container */}
-          <aside className="w-full flex-[0.6] md:w-80 md:flex-none border-t md:border-t-0 md:border-r border-slate-100 bg-white overflow-y-auto shadow-2xl z-[1000] order-2 md:order-1 custom-scrollbar">
+  {/* SIDEBAR / BOTTOM PANEL - Fixed Container with 3 Vertically Split Scrollable Sections */}
+  <aside className="w-full flex-[0.6] md:w-96 md:flex-none border-t md:border-t-0 md:border-r border-slate-200 bg-slate-100/60 p-2 flex flex-col gap-2 overflow-hidden shadow-2xl z-[1000] order-2 md:order-1 h-full">
 
-            {/* 1. ACTIVE TRIP PLANNER & ACTION TOOLBAR */}
-            <div className="p-4 border-b border-slate-100 bg-slate-50/50 space-y-3">
-              {/* Header & Control Actions */}
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-[9px] font-black uppercase text-slate-400 tracking-widest">
-                    Active Trip ({selectedTrip.length})
-                  </p>
-                  {typeof calculateRouteDistance === 'function' && (
-                    <p className="text-[10px] text-slate-500 font-semibold">
-                      Est: {calculateRouteDistance()} km
-                    </p>
-                  )}
-                </div>
+    {/* 1. ACTIVE TRIP PLANNER & ACTION TOOLBAR (1/4 Height) */}
+    <div className="h-1/4 flex flex-col bg-slate-50 rounded-xl border border-slate-200/80 overflow-hidden shadow-sm">
+      {/* Header & Control Actions */}
+      <div className="p-3 bg-slate-50 border-b border-slate-200/60 flex items-center justify-between shrink-0">
+        <div>
+          <p className="text-[9px] font-black uppercase text-slate-400 tracking-widest">
+            Active Trip ({selectedTrip.length})
+          </p>
+          {typeof calculateRouteDistance === 'function' && (
+            <p className="text-[10px] text-slate-500 font-semibold">
+              Est: {calculateRouteDistance()} km
+            </p>
+          )}
+        </div>
 
-                {/* Active Route Toolbar */}
-                <div className="flex items-center gap-1">
-                  {/* SAVE ROUTE BUTTON */}
-                  <button
-                    onClick={handleSaveRoute}
-                    disabled={selectedTrip.length === 0}
-                    className="flex items-center gap-1 px-2.5 py-1 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white rounded-lg text-[9px] font-black uppercase transition-all shadow-sm"
-                    title="Save Active Route"
+        {/* Active Route Toolbar */}
+        <div className="flex items-center gap-1">
+          {/* SAVE ROUTE BUTTON */}
+          <button
+            onClick={handleSaveRoute}
+            disabled={selectedTrip.length === 0}
+            className="flex items-center gap-1 px-2.5 py-1 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white rounded-lg text-[9px] font-black uppercase transition-all shadow-sm"
+            title="Save Active Route"
+          >
+            <Icon name="save" className="w-3 h-3" />
+            Save
+          </button>
+
+          {/* SHARE VIA WHATSAPP */}
+          {typeof handleWhatsAppShare === 'function' && (
+            <button
+              onClick={handleWhatsAppShare}
+              disabled={selectedTrip.length === 0}
+              className="p-1 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-40 text-white rounded-lg transition-all"
+              title="Share via WhatsApp"
+            >
+              <Icon name="message-square" className="w-3.5 h-3.5" />
+            </button>
+          )}
+
+          {/* QR CODE */}
+          {typeof handleShowQR === 'function' && (
+            <button
+              onClick={handleShowQR}
+              disabled={selectedTrip.length === 0}
+              className="p-1 bg-slate-800 hover:bg-slate-900 disabled:opacity-40 text-white rounded-lg transition-all"
+              title="Show QR Code"
+            >
+              <Icon name="navigation-2" className="w-3.5 h-3.5" />
+            </button>
+          )}
+
+          {/* CLEAR TRIP */}
+          <button
+            onClick={() => {
+              setSelectedTrip([]);
+              if (routingControl?.current && mapRef?.current) {
+                mapRef.current.removeControl(routingControl.current);
+              }
+              triggerToast('Route Cleared');
+            }}
+            disabled={selectedTrip.length === 0}
+            className="p-1 text-rose-500 hover:bg-rose-50 disabled:opacity-40 rounded-lg transition-all"
+            title="Clear Route"
+          >
+            <Icon name="trash-2" className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      </div>
+
+      {/* Active Trip Scrollable Body */}
+      <div className="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar">
+        <DragDropContext onDragEnd={handleDragEnd}>
+          <Droppable droppableId="trip-planner-list">
+            {(provided) => (
+              <ul
+                className="space-y-2 pr-1 min-h-full"
+                {...provided.droppableProps}
+                ref={provided.innerRef}
+              >
+                {selectedTrip.map((stop, index) => (
+                  <Draggable
+                    key={stop.id || `stop-${index}`}
+                    draggableId={String(stop.id || `stop-${index}`)}
+                    index={index}
                   >
-                    <Icon name="save" className="w-3 h-3" />
-                    Save
-                  </button>
+                    {(provided, snapshot) => (
+                      <li
+                        ref={provided.innerRef}
+                        {...provided.draggableProps}
+                        {...provided.dragHandleProps}
+                        className={`flex items-center gap-2 p-2 bg-white border rounded-xl transition-shadow ${snapshot.isDragging ? 'shadow-lg border-indigo-300 z-50' : 'shadow-sm border-slate-200/80'
+                          }`}
+                      >
+                        {/* Drag Handle Icon */}
+                        <div className="text-slate-400 cursor-grab active:cursor-grabbing">
+                          <Icon name="layout-grid" className="w-3.5 h-3.5" />
+                        </div>
 
-                  {/* SHARE VIA WHATSAPP (if available) */}
-                  {typeof handleWhatsAppShare === 'function' && (
-                    <button
-                      onClick={handleWhatsAppShare}
-                      disabled={selectedTrip.length === 0}
-                      className="p-1 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-40 text-white rounded-lg transition-all"
-                      title="Share via WhatsApp"
-                    >
-                      <Icon name="message-square" className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-
-                  {/* QR CODE (if available) */}
-                  {typeof handleShowQR === 'function' && (
-                    <button
-                      onClick={handleShowQR}
-                      disabled={selectedTrip.length === 0}
-                      className="p-1 bg-slate-800 hover:bg-slate-900 disabled:opacity-40 text-white rounded-lg transition-all"
-                      title="Show QR Code"
-                    >
-                      <Icon name="navigation-2" className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-
-                  {/* CLEAR TRIP */}
-                  <button
-                    onClick={() => {
-                      setSelectedTrip([]);
-                      if (routingControl?.current && mapRef?.current) {
-                        mapRef.current.removeControl(routingControl.current);
-                      }
-                      triggerToast('Route Cleared');
-                    }}
-                    disabled={selectedTrip.length === 0}
-                    className="p-1 text-rose-500 hover:bg-rose-50 disabled:opacity-40 rounded-lg transition-all"
-                    title="Clear Route"
-                  >
-                    <Icon name="trash-2" className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </div>
-
-              {/* Active Trip Re-orderable List */}
-              <DragDropContext onDragEnd={handleDragEnd}>
-                <Droppable droppableId="trip-planner-list">
-                  {(provided) => (
-                    <ul
-                      className="space-y-2 max-h-56 overflow-y-auto pr-1 custom-scrollbar"
-                      {...provided.droppableProps}
-                      ref={provided.innerRef}
-                    >
-                      {selectedTrip.map((stop, index) => (
-                        <Draggable
-                          key={stop.id || `stop-${index}`}
-                          draggableId={String(stop.id || `stop-${index}`)}
-                          index={index}
-                        >
-                          {(provided, snapshot) => (
-                            <li
-                              ref={provided.innerRef}
-                              {...provided.draggableProps}
-                              {...provided.dragHandleProps}
-                              className={`flex items-center gap-2 p-2 bg-white border rounded-xl transition-shadow ${snapshot.isDragging ? 'shadow-lg border-indigo-300 z-50' : 'shadow-sm border-slate-200/80'
-                                }`}
-                            >
-                              {/* Drag Handle Icon */}
-                              <div className="text-slate-400 cursor-grab active:cursor-grabbing">
-                                <Icon name="layout-grid" className="w-3.5 h-3.5" />
-                              </div>
-
-                              {/* Waypoint Info */}
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-2">
-                                  <span className="flex items-center justify-center w-4 h-4 rounded-full bg-slate-900 text-white text-[8px] font-black shrink-0">
-                                    {index + 1}
-                                  </span>
-                                  <p className="text-[10px] font-black uppercase text-slate-800 truncate">
-                                    {stop.place_name || stop.n}
-                                  </p>
-                                </div>
-                              </div>
-
-                              {/* Remove Waypoint Button */}
-                              <button
-                                onClick={() => setSelectedTrip(prev => prev.filter(p => p.id !== stop.id))}
-                                className="p-1 text-rose-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
-                              >
-                                <Icon name="trash-2" className="w-3.5 h-3.5" />
-                              </button>
-                            </li>
-                          )}
-                        </Draggable>
-                      ))}
-                      {provided.placeholder}
-                    </ul>
-                  )}
-                </Droppable>
-              </DragDropContext>
-
-              {selectedTrip.length === 0 && (
-                <div className="py-6 flex flex-col items-center justify-center text-slate-400 space-y-1 border border-dashed border-slate-200 rounded-xl bg-white/50">
-                  <Icon name="map-pin" className="w-5 h-5 text-slate-300" />
-                  <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Route is empty</p>
-                </div>
-              )}
-            </div>
-
-            {/* 2. SAVED ROUTE PLANS SECTION (WITH DRAG & DROP) */}
-            <div className="p-4 border-b border-slate-100 bg-white">
-              <div className="flex justify-between items-center mb-3">
-                <p className="text-[9px] font-black uppercase text-slate-400 tracking-widest">
-                  Saved Route Plans ({savedRoutes.length})
-                </p>
-              </div>
-
-              <DragDropContext onDragEnd={handleSavedRoutesDragEnd}>
-                <Droppable droppableId="saved-routes-list">
-                  {(provided) => (
-                    <div
-                      className="space-y-2 max-h-48 overflow-y-auto pr-1 custom-scrollbar"
-                      {...provided.droppableProps}
-                      ref={provided.innerRef}
-                    >
-                      {savedRoutes.length === 0 ? (
-                        <p className="text-[10px] text-slate-300 italic py-4 text-center border border-dashed border-slate-200 rounded-xl uppercase font-bold">
-                          No saved routes
-                        </p>
-                      ) : (
-                        savedRoutes.map((route, index) => {
-                          let wpArray = [];
-                          try {
-                            wpArray = typeof route.waypoints === 'string' ? JSON.parse(route.waypoints) : (route.waypoints || []);
-                          } catch (e) {
-                            wpArray = [];
-                          }
-
-                          return (
-                            <Draggable
-                              key={route.id}
-                              draggableId={String(route.id)}
-                              index={index}
-                            >
-                              {(provided, snapshot) => (
-                                <div
-                                  ref={provided.innerRef}
-                                  {...provided.draggableProps}
-                                  className={`p-2.5 bg-slate-50/80 border rounded-xl shadow-sm hover:border-indigo-200 transition-all group ${snapshot.isDragging ? 'shadow-lg border-indigo-300 bg-white z-50' : 'border-slate-100'
-                                    }`}
-                                >
-                                  <div className="flex justify-between items-start mb-2">
-                                    <div className="flex items-center gap-1.5 min-w-0 pr-2">
-                                      {/* Drag Handle Icon */}
-                                      <div
-                                        {...provided.dragHandleProps}
-                                        className="text-slate-400 cursor-grab active:cursor-grabbing hover:text-slate-600 transition-colors shrink-0"
-                                        title="Drag to reorder route plan"
-                                      >
-                                        <Icon name="layout-grid" className="w-3.5 h-3.5" />
-                                      </div>
-                                      <p className="text-[10px] font-black uppercase text-slate-700 group-hover:text-indigo-600 truncate">
-                                        {route.route_name}
-                                      </p>
-                                    </div>
-                                    <span className="text-[8px] font-black bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded uppercase shrink-0">
-                                      {wpArray.length} Stop{wpArray.length === 1 ? '' : 's'}
-                                    </span>
-                                  </div>
-
-                                  <div className="flex gap-1.5">
-                                    {/* LOAD ROUTE */}
-                                    <button
-                                      onClick={() => {
-                                        if (wpArray.length > 0) {
-                                          const enrichedPlaces = wpArray.map(wp => {
-                                            const match = places.find(p => p.id === (wp.id || wp));
-                                            return match ? match : {
-                                              id: wp.id || `temp-${Math.random()}`,
-                                              place_name: wp.place_name || wp.n || "Saved Stop",
-                                              latitude: wp.latitude || wp.lt,
-                                              longitude: wp.longitude || wp.ln,
-                                              category: wp.category || 'Location'
-                                            };
-                                          });
-                                          setSelectedTrip(enrichedPlaces);
-                                          if (typeof fetchRouteWeather === 'function') fetchRouteWeather(enrichedPlaces);
-                                          triggerToast(`Loaded: ${route.route_name}`);
-                                        }
-                                      }}
-                                      className="flex-1 py-1 bg-indigo-50 text-indigo-600 rounded-lg text-[8px] font-black uppercase border border-indigo-100 hover:bg-indigo-100 transition-colors"
-                                    >
-                                      Load
-                                    </button>
-
-                                    {/* SHARE ROUTE */}
-                                    <button
-                                      onClick={() => shareRoute(route)}
-                                      className="flex-1 py-1 bg-emerald-50 text-emerald-600 rounded-lg text-[8px] font-black uppercase border border-emerald-100 hover:bg-emerald-100 transition-colors"
-                                    >
-                                      Share
-                                    </button>
-
-                                    {/* DELETE ROUTE */}
-                                    <button
-                                      onClick={() => deleteRoute(route.id)}
-                                      className="py-1 px-2 bg-rose-50 text-rose-600 rounded-lg text-[8px] font-black uppercase border border-rose-100 hover:bg-rose-100 transition-colors"
-                                      title="Delete Route"
-                                    >
-                                      <Icon name="trash-2" className="w-3 h-3" />
-                                    </button>
-                                  </div>
-                                </div>
-                              )}
-                            </Draggable>
-                          );
-                        })
-                      )}
-                      {provided.placeholder}
-                    </div>
-                  )}
-                </Droppable>
-              </DragDropContext>
-            </div>
-
-            {/* 3. AVAILABLE LOCATIONS SECTION */}
-            <div className="p-4 bg-white">
-              <div className="mb-3 sticky top-0 z-10 bg-white pb-2">
-                <p className="text-[9px] font-black uppercase text-slate-400 tracking-widest mb-2">Available Locations</p>
-                <input
-                  type="text"
-                  placeholder="Search locations..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-[9px] font-bold uppercase outline-none focus:border-indigo-400 transition-all"
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                {processedPlaces
-                  .filter(p => !selectedTrip.find(t => t.id === p.id))
-                  .map(p => {
-                    const d = HomePoint ? L.latLng(HomePoint.lat, HomePoint.lng).distanceTo(L.latLng(p.latitude, p.longitude)) : 0;
-                    const km = (d / 1000).toFixed(1);
-                    const isDone = p.status === 'done';
-
-                    // Find if this location is saved in any route plan (supports both legacy 'n' and modern 'place_name'/'id')
-                    const matchingRoute = savedRoutes.find(route => {
-                      let wpArray = [];
-                      try {
-                        wpArray = typeof route.waypoints === 'string' ? JSON.parse(route.waypoints) : (route.waypoints || []);
-                      } catch (e) {
-                        wpArray = [];
-                      }
-                      return wpArray.some(wp =>
-                        wp.id === p.id ||
-                        (wp.place_name && wp.place_name === p.place_name) ||
-                        (wp.n && wp.n === p.place_name)
-                      );
-                    });
-
-                    const reservedRouteName = matchingRoute ? matchingRoute.route_name : null;
-                    const isReserved = !!reservedRouteName;
-
-                    return (
-                      <div key={p.id} className="flex justify-between items-center p-2 hover:bg-slate-50 rounded-xl transition-all border border-transparent hover:border-slate-100 group">
-                        <div className="flex flex-col truncate pr-2">
+                        {/* Waypoint Info */}
+                        <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2">
-                            <span className="text-[9px] font-black uppercase truncate text-slate-600 group-hover:text-slate-900">
-                              {p.place_name}
+                            <span className="flex items-center justify-center w-4 h-4 rounded-full bg-slate-900 text-white text-[8px] font-black shrink-0">
+                              {index + 1}
                             </span>
-
-                            {/* DYNAMIC STATUS TAG WITH PURPLE RESERVED VARIANT */}
-                            <div className={`flex items-center gap-1 px-1 py-0.5 rounded-md border ${isReserved
-                              ? 'bg-purple-50 border-purple-100 text-purple-600'
-                              : isDone
-                                ? 'bg-emerald-50 border-emerald-100 text-emerald-600'
-                                : 'bg-orange-50 border-orange-100 text-orange-600'
-                              }`}>
-                              <div className={`w-1 h-1 rounded-full ${isReserved
-                                ? 'bg-purple-500'
-                                : isDone
-                                  ? 'bg-emerald-500'
-                                  : 'bg-orange-400 animate-pulse'
-                                }`}></div>
-                              <span className="text-[8px] font-black uppercase tracking-tighter">
-                                {isReserved ? 'Reserved' : isDone ? 'Done' : 'Pending'}
-                              </span>
-                            </div>
-                          </div>
-
-                          {/* DISTANCE & ROUTE PLAN ASSOCIATION NAME */}
-                          <div className="flex items-center gap-1.5 truncate">
-                            <span className="text-[9px] font-bold uppercase text-slate-400 tracking-tight shrink-0">
-                              {km} KM
-                            </span>
-                            {isReserved && (
-                              <span className="text-[8px] font-black uppercase text-purple-500 tracking-tight truncate italic">
-                                • Plan: {reservedRouteName}
-                              </span>
-                            )}
+                            <p className="text-[10px] font-black uppercase text-slate-800 truncate">
+                              {stop.place_name || stop.n}
+                            </p>
                           </div>
                         </div>
 
+                        {/* Remove Waypoint Button */}
                         <button
-                          onClick={() => {
-                            const updatedTrip = [...selectedTrip, p];
-                            setSelectedTrip(updatedTrip);
-                            if (typeof fetchRouteWeather === 'function') fetchRouteWeather(updatedTrip);
-                            triggerToast(`Added ${p.place_name}`);
-                          }}
-                          className="text-emerald-500 hover:bg-emerald-50 p-1.5 rounded-lg active:scale-90 transition-transform shrink-0"
-                          title="Add to Active Route"
+                          onClick={() => setSelectedTrip(prev => prev.filter(p => p.id !== stop.id))}
+                          className="p-1 text-rose-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
                         >
-                          <Icon name="plus-circle" className="w-4 h-4" />
+                          <Icon name="trash-2" className="w-3.5 h-3.5" />
                         </button>
-                      </div>
+                      </li>
+                    )}
+                  </Draggable>
+                ))}
+                {provided.placeholder}
+              </ul>
+            )}
+          </Droppable>
+        </DragDropContext>
+
+        {selectedTrip.length === 0 && (
+          <div className="h-full py-4 flex flex-col items-center justify-center text-slate-400 space-y-1 border border-dashed border-slate-200 rounded-xl bg-white/50">
+            <Icon name="map-pin" className="w-5 h-5 text-slate-300" />
+            <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Route is empty</p>
+          </div>
+        )}
+      </div>
+    </div>
+
+    {/* 2. SAVED ROUTE PLANS SECTION (1/3 Height) */}
+    <div className="h-1/3 flex flex-col bg-white rounded-xl border border-slate-200/80 overflow-hidden shadow-sm">
+      <div className="p-3 bg-white border-b border-slate-100 shrink-0 flex justify-between items-center">
+        <p className="text-[9px] font-black uppercase text-slate-400 tracking-widest">
+          Saved Route Plans ({savedRoutes.length})
+        </p>
+      </div>
+
+      {/* Saved Routes Scrollable Body */}
+      <div className="flex-1 overflow-y-auto p-2 custom-scrollbar">
+        <DragDropContext onDragEnd={handleSavedRoutesDragEnd}>
+          <Droppable droppableId="saved-routes-list">
+            {(provided) => (
+              <div
+                className="space-y-2 pr-1 min-h-full"
+                {...provided.droppableProps}
+                ref={provided.innerRef}
+              >
+                {savedRoutes.length === 0 ? (
+                  <p className="text-[10px] text-slate-300 italic py-6 text-center border border-dashed border-slate-200 rounded-xl uppercase font-bold">
+                    No saved routes
+                  </p>
+                ) : (
+                  savedRoutes.map((route, index) => {
+                    let wpArray = [];
+                    try {
+                      wpArray = typeof route.waypoints === 'string' ? JSON.parse(route.waypoints) : (route.waypoints || []);
+                    } catch (e) {
+                      wpArray = [];
+                    }
+
+                    return (
+                      <Draggable
+                        key={route.id}
+                        draggableId={String(route.id)}
+                        index={index}
+                      >
+                        {(provided, snapshot) => (
+                          <div
+                            ref={provided.innerRef}
+                            {...provided.draggableProps}
+                            className={`p-2.5 bg-slate-50/80 border rounded-xl shadow-sm hover:border-indigo-200 transition-all group ${snapshot.isDragging ? 'shadow-lg border-indigo-300 bg-white z-50' : 'border-slate-100'
+                              }`}
+                          >
+                            <div className="flex justify-between items-start mb-2">
+                              <div className="flex items-center gap-1.5 min-w-0 pr-2">
+                                {/* Drag Handle Icon */}
+                                <div
+                                  {...provided.dragHandleProps}
+                                  className="text-slate-400 cursor-grab active:cursor-grabbing hover:text-slate-600 transition-colors shrink-0"
+                                  title="Drag to reorder route plan"
+                                >
+                                  <Icon name="layout-grid" className="w-3.5 h-3.5" />
+                                </div>
+                                <p className="text-[10px] font-black uppercase text-slate-700 group-hover:text-indigo-600 truncate">
+                                  {route.route_name}
+                                </p>
+                              </div>
+                              <span className="text-[8px] font-black bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded uppercase shrink-0">
+                                {wpArray.length} Stop{wpArray.length === 1 ? '' : 's'}
+                              </span>
+                            </div>
+
+                            <div className="flex gap-1.5">
+                              {/* LOAD ROUTE */}
+                              <button
+                                onClick={() => {
+                                  if (wpArray.length > 0) {
+                                    const enrichedPlaces = wpArray.map(wp => {
+                                      const match = places.find(p => p.id === (wp.id || wp));
+                                      return match ? match : {
+                                        id: wp.id || `temp-${Math.random()}`,
+                                        place_name: wp.place_name || wp.n || "Saved Stop",
+                                        latitude: wp.latitude || wp.lt,
+                                        longitude: wp.longitude || wp.ln,
+                                        category: wp.category || 'Location'
+                                      };
+                                    });
+                                    setSelectedTrip(enrichedPlaces);
+                                    if (typeof fetchRouteWeather === 'function') fetchRouteWeather(enrichedPlaces);
+                                    triggerToast(`Loaded: ${route.route_name}`);
+                                  }
+                                }}
+                                className="flex-1 py-1 bg-indigo-50 text-indigo-600 rounded-lg text-[8px] font-black uppercase border border-indigo-100 hover:bg-indigo-100 transition-colors"
+                              >
+                                Load
+                              </button>
+
+                              {/* SHARE ROUTE */}
+                              <button
+                                onClick={() => shareRoute(route)}
+                                className="flex-1 py-1 bg-emerald-50 text-emerald-600 rounded-lg text-[8px] font-black uppercase border border-emerald-100 hover:bg-emerald-100 transition-colors"
+                              >
+                                Share
+                              </button>
+
+                              {/* DELETE ROUTE */}
+                              <button
+                                onClick={() => deleteRoute(route.id)}
+                                className="py-1 px-2 bg-rose-50 text-rose-600 rounded-lg text-[8px] font-black uppercase border border-rose-100 hover:bg-rose-100 transition-colors"
+                                title="Delete Route"
+                              >
+                                <Icon name="trash-2" className="w-3 h-3" />
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </Draggable>
                     );
-                  })}
+                  })
+                )}
+                {provided.placeholder}
               </div>
-            </div>
-          </aside>
-        </div>
+            )}
+          </Droppable>
+        </DragDropContext>
+      </div>
+    </div>
+
+    {/* 3. AVAILABLE LOCATIONS SECTION (1/3 Height) */}
+    <div className="h-1/3 flex flex-col bg-white rounded-xl border border-slate-200/80 overflow-hidden shadow-sm">
+      <div className="p-3 bg-white border-b border-slate-100 shrink-0 space-y-2">
+        <p className="text-[9px] font-black uppercase text-slate-400 tracking-widest">Available Locations</p>
+        <input
+          type="text"
+          placeholder="Search locations..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-[9px] font-bold uppercase outline-none focus:border-indigo-400 transition-all"
+        />
+      </div>
+
+      {/* Available Locations Scrollable Body */}
+      <div className="flex-1 overflow-y-auto p-2 space-y-1.5 custom-scrollbar">
+        {processedPlaces
+          .filter(p => !selectedTrip.find(t => t.id === p.id))
+          .map(p => {
+            const d = HomePoint ? L.latLng(HomePoint.lat, HomePoint.lng).distanceTo(L.latLng(p.latitude, p.longitude)) : 0;
+            const km = (d / 1000).toFixed(1);
+            const isDone = p.status === 'done';
+
+            // Find if location is saved in any route plan
+            const matchingRoute = savedRoutes.find(route => {
+              let wpArray = [];
+              try {
+                wpArray = typeof route.waypoints === 'string' ? JSON.parse(route.waypoints) : (route.waypoints || []);
+              } catch (e) {
+                wpArray = [];
+              }
+              return wpArray.some(wp =>
+                wp.id === p.id ||
+                (wp.place_name && wp.place_name === p.place_name) ||
+                (wp.n && wp.n === p.place_name)
+              );
+            });
+
+            const reservedRouteName = matchingRoute ? matchingRoute.route_name : null;
+            const isReserved = !!reservedRouteName;
+
+            return (
+              <div key={p.id} className="flex justify-between items-center p-2 hover:bg-slate-50 rounded-xl transition-all border border-transparent hover:border-slate-100 group">
+                <div className="flex flex-col truncate pr-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[9px] font-black uppercase truncate text-slate-600 group-hover:text-slate-900">
+                      {p.place_name}
+                    </span>
+
+                    {/* DYNAMIC STATUS TAG */}
+                    <div className={`flex items-center gap-1 px-1 py-0.5 rounded-md border ${isReserved
+                      ? 'bg-purple-50 border-purple-100 text-purple-600'
+                      : isDone
+                        ? 'bg-emerald-50 border-emerald-100 text-emerald-600'
+                        : 'bg-orange-50 border-orange-100 text-orange-600'
+                      }`}>
+                      <div className={`w-1 h-1 rounded-full ${isReserved
+                        ? 'bg-purple-500'
+                        : isDone
+                          ? 'bg-emerald-500'
+                          : 'bg-orange-400 animate-pulse'
+                        }`}></div>
+                      <span className="text-[8px] font-black uppercase tracking-tighter">
+                        {isReserved ? 'Reserved' : isDone ? 'Done' : 'Pending'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* DISTANCE & ROUTE PLAN ASSOCIATION */}
+                  <div className="flex items-center gap-1.5 truncate">
+                    <span className="text-[9px] font-bold uppercase text-slate-400 tracking-tight shrink-0">
+                      {km} KM
+                    </span>
+                    {isReserved && (
+                      <span className="text-[8px] font-black uppercase text-purple-500 tracking-tight truncate italic">
+                        • Plan: {reservedRouteName}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => {
+                    const updatedTrip = [...selectedTrip, p];
+                    setSelectedTrip(updatedTrip);
+                    if (typeof fetchRouteWeather === 'function') fetchRouteWeather(updatedTrip);
+                    triggerToast(`Added ${p.place_name}`);
+                  }}
+                  className="text-emerald-500 hover:bg-emerald-50 p-1.5 rounded-lg active:scale-90 transition-transform shrink-0"
+                  title="Add to Active Route"
+                >
+                  <Icon name="plus-circle" className="w-4 h-4" />
+                </button>
+              </div>
+            );
+          })}
+      </div>
+    </div>
+
+  </aside>
+</div>
 
         {/* TAB 4: DASHBOARD */}
 
