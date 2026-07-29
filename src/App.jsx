@@ -298,29 +298,7 @@ const MetricColumn = ({ title, data, highlightValue }) => (
 
 // --- Main Application Component ---
 function App() {
-  // --- Core Data States ---
-  const [places, setPlaces] = useState([]);
-  const [visiblePlaces, setVisiblePlaces] = useState([]);
-  const [filteredPlaces, setFilteredPlaces] = useState([]);
-  const [savedRoutes, setSavedRoutes] = useState([]);
-  const [pendingApprovals, setPendingApprovals] = useState([]);
-  const [analyticsData, setAnalyticsData] = useState([]);
-  const [allComments, setAllComments] = useState([]);
-  const [likesData, setLikesData] = useState([]);
-  const [subscribersData, setSubscribersData] = useState([]);
-  const [expandedLikeLoc, setExpandedLikeLoc] = useState(null);
-  const [manualHome, setManualHome] = useState(null);
-  const [weatherData, setWeatherData] = useState({});
-  const [debouncedSearch, setDebouncedSearch] = useState('');
-  const [userCoords, setUserCoords] = useState(null);
-  const [sortCenter, setSortCenter] = useState(HomePoint);
-  const [locationSource, setLocationSource] = useState('device');
-  const [activePinHubId, setActivePinHubId] = useState(null);
-  const [igToken, setIgToken] = useState("");
-  const [threadsToken, setThreadsToken] = useState("");
-
-
-
+  // --- Constants ---
   const PLATFORM_COLUMNS = {
     instagram: 'published_instagram_at',
     threads: 'published_threads_at',
@@ -332,36 +310,62 @@ function App() {
     unplash: 'published_unplash_at'
   };
 
-  // --- Auth & UI States ---
+  // --- Auth & Token States ---
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [loginLoading, setLoginLoading] = useState(false);
   const [loginError, setLoginError] = useState("");
+  const [igToken, setIgToken] = useState("");
+  const [threadsToken, setThreadsToken] = useState("");
+
+  // --- Core Data States ---
+  const [places, setPlaces] = useState([]);
+  const [visiblePlaces, setVisiblePlaces] = useState([]);
+  const [filteredPlaces, setFilteredPlaces] = useState([]);
+  const [savedRoutes, setSavedRoutes] = useState([]);
+  const [pendingApprovals, setPendingApprovals] = useState([]);
+  const [analyticsData, setAnalyticsData] = useState([]);
+  const [allComments, setAllComments] = useState([]);
+  const [likesData, setLikesData] = useState([]);
+  const [subscribersData, setSubscribersData] = useState([]);
+  const [expandedLikeLoc, setExpandedLikeLoc] = useState(null);
+  const [weatherData, setWeatherData] = useState({});
+
+  // --- UI, Search & Filter States ---
   const [activeTab, setActiveTab] = useState('places');
-  const [selectedTrip, setSelectedTrip] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [filterCategory, setFilterCategory] = useState('All');
   const [filterStatus, setFilterStatus] = useState('All');
   const [sortBy, setSortBy] = useState('newest');
   const [toast, setToast] = useState({ show: false, msg: '' });
 
-  // --- Add Location Flow State ---
+  // --- Active Trip & Route Planning States ---
+  const [selectedTrip, setSelectedTrip] = useState([]);
+  const [activeRouteName, setActiveRouteName] = useState('');
+  const [routeWeather, setRouteWeather] = useState(null);
+
+  // --- Location & Add Location Flow States ---
+  const [manualHome, setManualHome] = useState(null);
+  const [userCoords, setUserCoords] = useState(null);
+  const [sortCenter, setSortCenter] = useState(HomePoint);
+  const [locationSource, setLocationSource] = useState('device');
+  const [activePinHubId, setActivePinHubId] = useState(null);
   const [suggestions, setSuggestions] = useState([]);
   const [stagedLocation, setStagedLocation] = useState(null);
   const [mapReady, setMapReady] = useState(false);
   const [qrUrl, setQrUrl] = useState('');
   const [albumLinks, setAlbumLinks] = useState([]);
 
-  // --- Refs ---
+  // --- DOM & Mutable Instance Refs ---
   const mapRef = useRef(null);
   const lastRoutePoints = useRef("");
   const markersLayer = useRef(L.layerGroup());
   const routingControl = useRef(null);
   const autocompleteRef = useRef(null);
   const lastDrawnCoords = useRef(null);
-  const knownUsers = new Set();
+  const knownUsersRef = useRef(new Set());
   const downloadedImagesRef = useRef(new Set());
   const activeSharesRef = useRef(new Set());
-
 
   useEffect(() => {
     if (isLoggedIn) {
@@ -427,15 +431,24 @@ function App() {
     return () => clearTimeout(timer);
   }, [searchTerm]);
 
-  const fetchRouteWeather = async (waypoints) => {
-    // Only fetch for locations we don't have data for yet
-    const fetchList = waypoints.filter(wp => !weatherData[wp.place_name]);
+  // ============================================================================
+  // --- WEATHER, ROUTING & MAP MARKER MANAGERS ---
+  // ============================================================================
+
+  // --- 1. WEATHER FETCHING ---
+  // Fetches weather forecasts for waypoints missing existing weather data.
+  const fetchRouteWeather = React.useCallback(async (waypoints) => {
+    const fetchList = waypoints.filter(wp => wp.place_name && !weatherData[wp.place_name]);
     if (fetchList.length === 0) return;
 
     try {
       const weatherPromises = fetchList.map(async (wp) => {
+        const lat = wp.latitude !== undefined ? wp.latitude : wp.lt;
+        const lng = wp.longitude !== undefined ? wp.longitude : wp.ln;
+        if (!lat || !lng) return null;
+
         const response = await fetch(
-          `https://api.openweathermap.org/data/2.5/forecast?lat=${wp.latitude}&lon=${wp.longitude}&units=metric&appid=${WEATHER_KEY}`
+          `https://api.openweathermap.org/data/2.5/forecast?lat=${lat}&lon=${lng}&units=metric&appid=${WEATHER_KEY}`
         );
         const data = await response.json();
 
@@ -461,57 +474,60 @@ function App() {
         setWeatherData(prev => ({ ...prev, ...newBatch }));
       }
     } catch (error) {
-
+      console.error("Error fetching route weather:", error);
     }
-  };
+  }, [weatherData]);
 
-  useEffect(() => {
-    if (activeTab === 'map' && selectedTrip.length > 0) {
+
+  // --- 2. ACTIVE TRIP & WEATHER SYNC EFFECT ---
+  // Automatically resets active route metadata when trip is cleared and triggers weather fetches.
+  React.useEffect(() => {
+    if (selectedTrip.length === 0) {
+      setActiveRouteName('');
+      if (setRouteWeather) setRouteWeather(null);
+      return;
+    }
+
+    if (activeTab === 'map') {
       fetchRouteWeather(selectedTrip);
     }
-  }, [selectedTrip, activeTab]);
+  }, [selectedTrip, activeTab, fetchRouteWeather]);
 
 
-  // --- 2. STEADY ROUTING EFFECT (No More Blinking) ---
-
+  // --- 3. STEADY OSRM ROUTING EFFECT ---
+  // Draws directional routing polyline lines between origin and selected waypoints.
   React.useEffect(() => {
-    // 1. Cleanup: If we aren't on the map tab, safely remove the control
+    // Cleanup routing control when leaving map tab or when map is unready
     if (activeTab !== 'map' || !mapReady) {
       if (routingControl.current && mapRef.current) {
         try {
-          // Ensure the control is actually on the map before removing
           if (mapRef.current.hasLayer(routingControl.current)) {
             mapRef.current.removeControl(routingControl.current);
           }
         } catch (e) {
-          console.warn("Cleanup error ignored:", e);
+          console.warn("Routing control cleanup error ignored:", e);
         }
         routingControl.current = null;
       }
       return;
     }
 
-    // 2. Guard: Map instance must exist
     if (!mapRef.current) return;
 
     const startPoint = L.latLng(HomePoint.lat, HomePoint.lng);
     const waypoints = [
       startPoint,
       ...selectedTrip.map(p => {
-        // Safely extract coordinates regardless of the data schema
         const lat = p.latitude !== undefined ? p.latitude : p.lt;
         const lng = p.longitude !== undefined ? p.longitude : p.ln;
-
-        // Ensure they are parsed as numbers before passing to Leaflet
         return L.latLng(parseFloat(lat), parseFloat(lng));
       })
     ];
 
-    // 3. Debounce the routing request to prevent OSRM rate-limiting blocks
+    // Debounce routing calculations (600ms) to prevent OSRM API rate-limiting
     const routingTimeout = setTimeout(() => {
       try {
         if (routingControl.current) {
-          // Check if the internal routing engine still thinks it's on a map
           if (routingControl.current._map) {
             routingControl.current.setWaypoints(waypoints);
           } else {
@@ -525,7 +541,6 @@ function App() {
               styles: [{ color: '#ef4444', weight: 5, opacity: 0.8 }]
             },
             router: L.Routing.osrmv1({
-              // Switched to the primary OSRM demo server
               serviceUrl: 'https://router.project-osrm.org/route/v1'
             }),
             createMarker: () => null,
@@ -536,13 +551,10 @@ function App() {
       } catch (err) {
         console.error("Routing calculation failed:", err);
       }
-    }, 600); // 600ms delay prevents spamming the public API
+    }, 600);
 
     return () => {
-      // Clear the timeout if the user clicks another location before the 600ms finishes
       clearTimeout(routingTimeout);
-
-      // Final safety check on unmount
       if (routingControl.current && mapRef.current && activeTab !== 'map') {
         try {
           mapRef.current.removeControl(routingControl.current);
@@ -552,38 +564,31 @@ function App() {
     };
   }, [selectedTrip, activeTab, mapReady]);
 
-  // --- DRAG AND DROP HANDLER ---
+
+  // --- 4. DRAG & DROP REORDERING HANDLERS ---
+
+  // Reorders active trip waypoints locally
   const handleDragEnd = (result) => {
-    // If the user drops the item outside the list, do nothing
     if (!result.destination) return;
 
-    // Create a new array to avoid mutating state directly
     const items = Array.from(selectedTrip);
-
-    // Remove the item from its original source index
     const [reorderedItem] = items.splice(result.source.index, 1);
-
-    // Insert the item into its new destination index
     items.splice(result.destination.index, 0, reorderedItem);
 
-    // Update the state. This will instantly trigger the Leaflet Routing useEffect!
     setSelectedTrip(items);
   };
 
+  // Reorders saved routes locally and persists new sort_order to Supabase
   const handleSavedRoutesDragEnd = async (result) => {
-    // Drop outside the list
     if (!result.destination) return;
 
-    // 1. Create a new array and reorder locally for instant UI update
     const items = Array.from(savedRoutes);
     const [reorderedItem] = items.splice(result.source.index, 1);
     items.splice(result.destination.index, 0, reorderedItem);
 
     setSavedRoutes(items);
 
-    // 2. Persist the new order to Supabase
     try {
-      // Create an array of update promises for the new order
       const updatePromises = items.map((route, index) =>
         supabaseClient
           .from('saved_travel_routes')
@@ -591,25 +596,20 @@ function App() {
           .eq('id', route.id)
       );
 
-      // Execute all updates simultaneously
       await Promise.all(updatePromises);
-
     } catch (err) {
       console.error("Error saving route order:", err);
       triggerToast("Failed to save the new route order.");
-      // Optional: Re-fetch data if the update fails to revert the UI
       refreshAllData();
     }
   };
 
 
-  // --- 3. MARKER MANAGER EFFECT ---
+  // --- 5. MARKER MANAGER EFFECT ---
+  // Synchronizes dot markers, dynamic reservation statuses, tooltips, and popups.
   React.useEffect(() => {
-    // 1. Guard: Only run if map instance exists
     if (!mapRef.current || !mapReady) return;
 
-    // 2. Fix Layout: Re-calculate map dimensions when switching to Map Tab
-    // Using a 100ms delay to allow CSS transitions/displays to finish
     let resizeTimer;
     if (activeTab === 'map') {
       resizeTimer = setTimeout(() => {
@@ -617,10 +617,9 @@ function App() {
       }, 100);
     }
 
-    // 3. Clear existing markers for a fresh render
     markersLayer.current.clearLayers();
 
-    // 4. Helper: Add customized CircleMarkers
+    // Helper: Renders customizable Leaflet circle markers
     const addDot = (lat, lng, color, title, subtitle, routePlanName = null) => {
       const pLat = parseFloat(lat);
       const pLng = parseFloat(lng);
@@ -635,7 +634,6 @@ function App() {
         fillOpacity: 0.9
       });
 
-      // HOVER: Show Name (including route plan if reserved)
       const tooltipContent = routePlanName ? `${title} (Plan: ${routePlanName})` : title;
       marker.bindTooltip(tooltipContent, {
         direction: 'top',
@@ -644,28 +642,25 @@ function App() {
         offset: [0, -5]
       });
 
-      // CLICK: Show Category Info & Reserved Status
       marker.bindPopup(`
-            <div style="padding: 4px; font-family: sans-serif; min-width: 120px;">
-                <b style="font-size: 11px; color: ${color}; text-transform: uppercase;">${title}</b><br/>
-                <span style="font-size: 9px; color: #64748b; font-weight: bold; text-transform: uppercase;">${subtitle}</span>
-                ${routePlanName ? `
-                  <div style="margin-top: 4px; border-top: 1px dashed #e2e8f0; padding-top: 4px;">
-                    <span style="font-size: 9px; color: #a855f7; font-weight: 900; text-transform: uppercase; tracking-tight: 0.05em; display: inline-block; background: #f3e8ff; padding: 1px 4px; border-radius: 3px;">★ Reserved</span>
-                    <div style="font-size: 9px; color: #7c3aed; font-weight: bold; font-style: italic; margin-top: 1px;">Plan: ${routePlanName}</div>
-                  </div>
-                ` : ''}
-            </div>
-        `);
+      <div style="padding: 4px; font-family: sans-serif; min-width: 120px;">
+        <b style="font-size: 11px; color: ${color}; text-transform: uppercase;">${title}</b><br/>
+        <span style="font-size: 9px; color: #64748b; font-weight: bold; text-transform: uppercase;">${subtitle}</span>
+        ${routePlanName ? `
+          <div style="margin-top: 4px; border-top: 1px dashed #e2e8f0; padding-top: 4px;">
+            <span style="font-size: 9px; color: #a855f7; font-weight: 900; text-transform: uppercase; tracking-tight: 0.05em; display: inline-block; background: #f3e8ff; padding: 1px 4px; border-radius: 3px;">★ Reserved</span>
+            <div style="font-size: 9px; color: #7c3aed; font-weight: bold; font-style: italic; margin-top: 1px;">Plan: ${routePlanName}</div>
+          </div>
+        ` : ''}
+      </div>
+    `);
 
       marker.addTo(markersLayer.current);
     };
 
-    // 5. Draw Places (Sync with Search Results)
-    // We use filteredPlaces so that markers disappear/appear as you search
+    // Render Places (Filtered / Search list)
     const displayList = searchTerm ? filteredPlaces : places;
     displayList.forEach(p => {
-      // Find if this specific location is saved inside any of the route plans
       const matchingRoute = savedRoutes.find(route => {
         let wpArray = [];
         try {
@@ -678,8 +673,6 @@ function App() {
 
       const reservedRouteName = matchingRoute ? matchingRoute.route_name : null;
       const isReserved = !!reservedRouteName;
-
-      // Color coding: Purple if reserved in a route, Green for visited (done), Orange for bucket list (pending)
       const color = isReserved ? '#a855f7' : (p.status === 'done' ? '#22c55e' : '#f97316');
 
       addDot(
@@ -692,26 +685,25 @@ function App() {
       );
     });
 
-    // 6. Draw Saved Route Waypoints directly
+    // Render Saved Route Waypoints directly
     savedRoutes.forEach(route => {
       try {
         const pts = typeof route.waypoints === 'string' ? JSON.parse(route.waypoints) : route.waypoints;
         pts?.forEach(pt => {
-          // Purple dots for route lines/waypoints to distinguish them from generic list markers
-          addDot(pt.lt, pt.ln, '#a855f7', pt.n || 'Route Stop', 'Saved Route Plan', route.route_name);
+          const lat = pt.latitude !== undefined ? pt.latitude : pt.lt;
+          const lng = pt.longitude !== undefined ? pt.longitude : pt.ln;
+          addDot(lat, lng, '#a855f7', pt.place_name || pt.n || 'Route Stop', 'Saved Route Plan', route.route_name);
         });
       } catch (e) {
-        // Fallback for parsing errors
+        // Fallback for JSON parsing errors
       }
     });
 
-    // 7. Cleanup timer on unmount or re-run
     return () => {
       if (resizeTimer) clearTimeout(resizeTimer);
     };
 
   }, [mapReady, activeTab, filteredPlaces, places, savedRoutes, searchTerm]);
-
 
   // --- 4. SEARCH & FILTER LOGIC ---
 
@@ -2137,104 +2129,148 @@ function App() {
   };
 
 
-  // --- TAB 2: MAP FUNCTIONS & ROUTING ---
+  // ============================================================================
+  // --- TAB 2: MAP FUNCTIONS, ROUTING & SHARING ---
+  // ============================================================================
 
-  // --- STABLE MAP INITIALIZATION ---
-  const initMap = () => {
-    if (mapRef.current) return;
+  // --- 1. MAP CORE LIFECYCLE EFFECT ---
 
-    // Initialize the map
-    const map = L.map('map-container').setView([7.8731, 80.7718], 8); // Centered on Sri Lanka
+  React.useEffect(() => {
+    let timer;
 
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '© OpenStreetMap'
-    }).addTo(map);
+    if (activeTab === 'map') {
+      // Use requestAnimationFrame or a short timeout to ensure React paints the DOM
+      timer = setTimeout(() => {
+        // 1. Target the element explicitly
+        const container = document.getElementById('map-container');
 
-    // Attach the markers layer group immediately
-    markersLayer.current.addTo(map);
+        // 2. Defensive guard: If React hasn't mounted it yet, safely abort
+        if (!container) return;
 
-    mapRef.current = map;
-  };
+        // Initialize map instance if it doesn't already exist
+        if (!mapRef.current) {
+          // 3. Pass the DOM element variable directly instead of the string ID
+          const map = L.map(container, {
+            zoomControl: false,
+            attributionControl: false,
+            fadeAnimation: true
+          }).setView([HomePoint.lat, HomePoint.lng], 8); // Centered on Sri Lanka
+
+          L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png')
+            .addTo(map);
+
+          markersLayer.current.addTo(map);
+          mapRef.current = map;
+          setMapReady(true);
+        } else {
+          // Force map re-render/resize when returning to tab
+          mapRef.current.invalidateSize();
+          setMapReady(true);
+        }
+      }, 150);
+    } else {
+      setMapReady(false);
+    }
+
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
+  }, [activeTab]);
 
 
+
+  // --- 2. ACTIVE TRIP & WEATHER SIDE EFFECT ---
+  // Resets route names when the trip is cleared, and triggers weather fetches.
+  React.useEffect(() => {
+    // Reset active route details when trip is cleared
+    if (selectedTrip.length === 0) {
+      setActiveRouteName('');
+      if (setRouteWeather) setRouteWeather(null);
+      return;
+    }
+
+    // Fetch route weather when in map view with active locations
+    if (activeTab === 'map' && typeof fetchRouteWeather === 'function') {
+      fetchRouteWeather(selectedTrip);
+    }
+  }, [selectedTrip, activeTab]);
+
+
+  // --- 3. MARKER RENDERING & UPDATES ---
   const updateMapMarkers = React.useCallback(() => {
-    // 1. Safety check for Leaflet refs
+    // Safety check for Leaflet refs
     if (!mapRef.current || !markersLayer.current) return;
 
-    // 2. Performance: Clear existing layers before repainting
+    // Performance: Clear existing layers before repainting
     markersLayer.current.clearLayers();
 
-    // 3. Optimization: Use debouncedSearch to prevent lag during typing
+    // Optimization: Use debouncedSearch to prevent lag during typing
     const displayList = debouncedSearch ? filteredPlaces : places;
 
     displayList.forEach(p => {
-      // Ensure valid coordinates exist
       if (!p.latitude || !p.longitude) return;
 
-      // 4. Logic: Determine marker state (Selected vs Done vs Pending)
-      const isSelected = selectedTrip.some(item => item.id === p.id);
-      const markerClass = isSelected ? 'marker-selected' :
-        (p.status === 'done' ? 'marker-done' : 'marker-pending');
+      const lat = parseFloat(p.latitude);
+      const lng = parseFloat(p.longitude);
+      if (isNaN(lat) || isNaN(lng)) return;
 
-      // 5. UI: Define the Dot Marker
+      // Determine marker styling state
+      const isSelected = selectedTrip.some(item => item.id === p.id);
+      const markerClass = isSelected
+        ? 'marker-selected'
+        : (p.status === 'done' ? 'marker-done' : 'marker-pending');
+
       const icon = L.divIcon({
         className: `${markerClass} shadow-md transition-all duration-200 hover:scale-150`,
         iconSize: [12, 12],
         iconAnchor: [6, 6]
       });
 
-      const lat = parseFloat(p.latitude);
-      const lng = parseFloat(p.longitude);
-
-      if (isNaN(lat) || isNaN(lng)) return;
-
       const marker = L.marker([lat, lng], { icon });
 
-      // 6. UI: Standardized Popup with correct naming and styling
-
+      // Custom Popup Setup
       marker.bindPopup(`
-    <div class="p-1">
+      <div class="p-1">
         <p class="m-0 font-black text-[10px] text-slate-800 uppercase tracking-tighter">
-            ${p.place_name}
+          ${p.place_name}
         </p>
         <div class="flex items-center gap-1 mt-1">
-            <span class="h-1 w-1 rounded-full bg-${p.status === 'done' ? 'emerald' : 'orange'}-500"></span>
-            <p class="m-0 text-[8px] text-slate-400 font-bold uppercase">${p.category}</p>
+          <span class="h-1 w-1 rounded-full bg-${p.status === 'done' ? 'emerald' : 'orange'}-500"></span>
+          <p class="m-0 text-[8px] text-slate-400 font-bold uppercase">${p.category}</p>
         </div>
-    </div>
-`, { closeButton: false, className: 'custom-map-popup' });
+      </div>
+    `, { closeButton: false, className: 'custom-map-popup' });
 
-      // 7. Interaction: Clean mouseover behavior
+      // Interaction Handlers
       marker.on('mouseover', function () { this.openPopup(); });
       marker.on('mouseout', function () { this.closePopup(); });
-
-      // 8. Action: Optional - Select location on click
       marker.on('click', () => {
-        // If you want to center or trigger an action on click, add here
         mapRef.current.setView([lat, lng], 13);
       });
 
       marker.addTo(markersLayer.current);
     });
   }, [places, filteredPlaces, debouncedSearch, selectedTrip]);
-  // Included selectedTrip so markers update instantly when added to a route
 
+
+  // --- 4. ROUTE CALCULATION & MANAGEMENT ---
+
+  // Calculates total route distance from origin (sortCenter) through selected waypoints
   const calculateRouteDistance = () => {
-    // Uses the toggled sortCenter (Device or Home) as the origin
     const startPoint = L.latLng(sortCenter.lat, sortCenter.lng);
-
     let totalDistance = 0;
     let currentPos = startPoint;
 
     selectedTrip.forEach((point) => {
       const destination = L.latLng(parseFloat(point.latitude), parseFloat(point.longitude));
-      totalDistance += currentPos.distanceTo(destination) / 1000;
+      totalDistance += currentPos.distanceTo(destination) / 1000; // Convert meters to KM
       currentPos = destination;
     });
+
     return totalDistance.toFixed(1);
   };
 
-
+  // Saves current trip selection to database and resets active state
   const handleSaveRoute = async () => {
     if (!selectedTrip || selectedTrip.length === 0) {
       triggerToast("Add at least one location to save a route.");
@@ -2251,7 +2287,7 @@ function App() {
         latitude: p.latitude || p.lt,
         longitude: p.longitude || p.ln,
         category: p.category || 'Location',
-        // Legacy backwards-compatibility keys
+        // Legacy compatibility keys
         lt: p.latitude || p.lt,
         ln: p.longitude || p.ln,
         n: p.place_name || p.n
@@ -2268,6 +2304,7 @@ function App() {
 
       await refreshAllData();
       setSelectedTrip([]);
+      setActiveRouteName(''); // Reset active route name upon saving
       triggerToast("Route saved successfully!");
     } catch (err) {
       console.error("Save Route Error:", err);
@@ -2275,7 +2312,7 @@ function App() {
     }
   };
 
-  // Handler to load a saved route back into selectedTrip for active navigation
+  // Loads a saved route into current trip selection and sets display header
   const handleLoadRoute = (route) => {
     try {
       const waypoints = typeof route.waypoints === 'string'
@@ -2296,6 +2333,7 @@ function App() {
       }));
 
       setSelectedTrip(formattedTrip);
+      setActiveRouteName(route.route_name || ""); // Track and display active route name
       triggerToast(`Loaded "${route.route_name}" into active trip!`);
     } catch (err) {
       console.error("Load Route Error:", err);
@@ -2303,6 +2341,7 @@ function App() {
     }
   };
 
+  // Deletes route plan from Supabase database
   const deleteRoute = async (id) => {
     if (confirm("Delete this route plan?")) {
       const { error } = await supabaseClient.from('saved_travel_routes').delete().eq('id', id);
@@ -2313,55 +2352,15 @@ function App() {
     }
   };
 
-  React.useEffect(() => {
-    let timer;
 
-    if (activeTab === 'map') {
+  // --- 5. UNIVERSAL SHARING & QR SYSTEM ---
 
-      timer = setTimeout(() => {
-        if (!mapRef.current) {
-          // INITIALIZATION
-          const map = L.map('map-container', {
-            zoomControl: false,
-            attributionControl: false,
-            fadeAnimation: true
-          }).setView([HomePoint.lat, HomePoint.lng], 8);
-
-          L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png')
-            .addTo(map);
-
-          markersLayer.current.addTo(map);
-          mapRef.current = map;
-          setMapReady(true);
-
-        } else {
-
-          mapRef.current.invalidateSize();
-          setMapReady(true);
-        }
-      }, 150);
-    } else {
-
-      setMapReady(false);
-    }
-
-    return () => {
-      if (timer) clearTimeout(timer);
-    };
-  }, [activeTab]); // ONLY re-run when the tab actually changes
-
-
-  // --- SHARING & QR SYSTEM ---
-
-  // --- 1. UNIVERSAL URL GENERATOR ---
+  // Constructs deep-link URL for Google Maps directions
   const generateGoogleMapsUrl = (points) => {
     if (!points || points.length === 0) return null;
 
-    // Use the official, secure Google Maps Directions deep-link format
     const baseUrl = "https://www.google.com/maps/dir/";
-
     const stops = points.map(p => {
-      // Universal coordinate check: supports .latitude OR .lt
       const lat = p.latitude !== undefined ? p.latitude : p.lt;
       const lng = p.longitude !== undefined ? p.longitude : p.ln;
       return `${lat},${lng}`;
@@ -2370,9 +2369,7 @@ function App() {
     return `${baseUrl}${stops}`;
   };
 
-  // --- 2. COMPONENT HANDLERS ---
-
-  // For the "Share" button in the Live Planning Sidebar
+  // Direct WhatsApp sharing handler for current trip
   const handleWhatsAppShare = () => {
     const link = generateGoogleMapsUrl(selectedTrip);
     if (!link) {
@@ -2380,7 +2377,6 @@ function App() {
       return;
     }
 
-    // Build the sequential list of location names
     const locationsList = selectedTrip
       .map((p, idx) => `${idx + 1}. ${p.place_name || p.n || 'Unknown Stop'}`)
       .join('\n');
@@ -2391,85 +2387,80 @@ function App() {
     window.open(`https://wa.me/?text=${encodedText}`, '_blank');
   };
 
-  // For the "QR" button in the Live Planning Sidebar
+  // Opens QR Code Modal for active trip
   const handleShowQR = () => {
     if (!selectedTrip || selectedTrip.length === 0) {
       triggerToast("Add some places to your trip first!");
       return;
     }
-    showQRCode(selectedTrip, "Current Trip Route");
+    showQRCode(selectedTrip, activeRouteName || "Current Trip Route");
   };
 
-  // For the "Share" button inside the Saved Routes list (Database)
+  // Opens QR Code Modal for a saved route item
   const shareRoute = (route) => {
     try {
-      // Parse waypoints (handling both Supabase stringified JSON and pre-parsed objects)
       const pts = typeof route.waypoints === 'string' ? JSON.parse(route.waypoints) : route.waypoints;
       if (!pts || pts.length === 0) {
         triggerToast("This route has no waypoints.");
         return;
       }
-      // Open the unified modal using the saved points, correctly targeting 'route_name'
       showQRCode(pts, route.route_name || route.name || "Saved Route Plan");
     } catch (e) {
       triggerToast("Error processing route data.");
     }
   };
 
-  // --- 3. THE OPTIMIZED MODAL ---
+  // Modal UI generator for QR Code & Quick Links
   const showQRCode = (points, name = "My Travel Route") => {
     const universalUrl = generateGoogleMapsUrl(points);
     if (!universalUrl) return;
 
-    // Clean up existing modals
+    // Cleanup existing open modals
     const existing = document.getElementById('qr-modal-overlay');
     if (existing) existing.remove();
 
-    // Create UI Elements
     const overlay = document.createElement('div');
     overlay.id = "qr-modal-overlay";
     overlay.className = "fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[9999] flex items-center justify-center p-6";
 
-    // Generate the comprehensive multi-line text with location names
     const locationsList = points
       .map((pt, idx) => `${idx + 1}. ${pt.place_name || pt.n || 'Unknown Stop'}`)
       .join('\n');
 
     const fullShareContent = `🗺️ Route Plan: ${name}\n\nLocations:\n${locationsList}\n\n🔗 Google Maps Link:\n${universalUrl}`;
 
-    // Minimalistic, standard template design container
     const modal = document.createElement('div');
     modal.className = "bg-white p-6 rounded-2xl max-w-sm w-full shadow-2xl flex flex-col items-center border border-slate-100 animate-in fade-in zoom-in-95 duration-150";
     modal.innerHTML = `
-      <div class="w-full flex justify-between items-center mb-4">
-        <h3 class="text-[11px] font-black uppercase tracking-wider text-slate-400">Share Route Plan</h3>
-        <button id="close-qr-btn" class="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-50 transition-colors">
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-        </button>
-      </div>
+    <div class="w-full flex justify-between items-center mb-4">
+      <h3 class="text-[11px] font-black uppercase tracking-wider text-slate-400">Share Route Plan</h3>
+      <button id="close-qr-btn" class="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-50 transition-colors">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+      </button>
+    </div>
 
-      <p class="text-xs font-black uppercase text-slate-800 text-center mb-4 w-full truncate px-2 italic">${name}</p>
+    <p class="text-xs font-black uppercase text-slate-800 text-center mb-4 w-full truncate px-2 italic">${name}</p>
 
-      <div class="bg-slate-50 p-4 rounded-xl mb-5 border border-slate-100 flex items-center justify-center shadow-inner">
-        <div id="qrcode-canvas" class="mix-blend-multiply"></div>
-      </div>
+    <div class="bg-slate-50 p-4 rounded-xl mb-5 border border-slate-100 flex items-center justify-center shadow-inner">
+      <div id="qrcode-canvas" class="mix-blend-multiply"></div>
+    </div>
 
-      <div class="grid grid-cols-2 gap-3 w-full">
-        <button id="copy-link-btn" class="flex items-center justify-center gap-2 py-2.5 bg-slate-900 text-white rounded-xl text-[10px] font-black uppercase shadow-lg shadow-slate-200 hover:bg-slate-800 transition-colors">
-          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-          Copy Info
-        </button>
-        <button id="whatsapp-modal-btn" class="flex items-center justify-center gap-2 py-2.5 bg-emerald-500 text-white rounded-xl text-[10px] font-black uppercase shadow-lg shadow-emerald-100 hover:bg-emerald-600 transition-colors">
-          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" viewBox="0 0 24 24"><path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946C.06 5.348 5.397.01 12.008.01c3.202.001 6.212 1.246 8.477 3.514 2.266 2.268 3.507 5.28 3.505 8.484-.004 6.657-5.34 11.997-11.953 11.997-2.005-.001-3.973-.503-5.714-1.458L0 24zm6.59-4.846c1.6.95 3.188 1.449 4.825 1.451 5.436 0 9.86-4.37 9.864-9.799.002-2.623-1.023-5.086-2.885-6.948C16.63 2.016 14.17 1 11.545 1 6.11 1 1.687 5.37 1.682 10.8c-.001 1.743.461 3.442 1.337 4.947l-1.01 3.694 3.79-.994z"/></svg>
-          WhatsApp
-        </button>
-      </div>
-    `;
+    <div class="grid grid-cols-2 gap-3 w-full">
+      <button id="copy-link-btn" class="flex items-center justify-center gap-2 py-2.5 bg-slate-900 text-white rounded-xl text-[10px] font-black uppercase shadow-lg shadow-slate-200 hover:bg-slate-800 transition-colors">
+        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+        Copy Info
+      </button>
+      <button id="whatsapp-modal-btn" class="flex items-center justify-center gap-2 py-2.5 bg-emerald-500 text-white rounded-xl text-[10px] font-black uppercase shadow-lg shadow-emerald-100 hover:bg-emerald-600 transition-colors">
+        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" viewBox="0 0 24 24"><path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946C.06 5.348 5.397.01 12.008.01c3.202.001 6.212 1.246 8.477 3.514 2.266 2.268 3.507 5.28 3.505 8.484-.004 6.657-5.34 11.997-11.953 11.997-2.005-.001-3.973-.503-5.714-1.458L0 24zm6.59-4.846c1.6.95 3.188 1.449 4.825 1.451 5.436 0 9.86-4.37 9.864-9.799.002-2.623-1.023-5.086-2.885-6.948C16.63 2.016 14.17 1 11.545 1 6.11 1 1.687 5.37 1.682 10.8c-.001 1.743.461 3.442 1.337 4.947l-1.01 3.694 3.79-.994z"/></svg>
+        WhatsApp
+      </button>
+    </div>
+  `;
 
     overlay.appendChild(modal);
     document.body.appendChild(overlay);
 
-    // Render QR Code safely
+    // Render QR Code canvas safely
     setTimeout(() => {
       const qrContainer = document.getElementById("qrcode-canvas");
       if (qrContainer && window.QRCode) {
@@ -2484,7 +2475,7 @@ function App() {
       }
     }, 50);
 
-    // Interaction Observers
+    // Modal Event Listeners
     modal.querySelector('#close-qr-btn').onclick = () => overlay.remove();
 
     modal.querySelector('#copy-link-btn').onclick = () => {
@@ -2498,13 +2489,15 @@ function App() {
     };
   };
 
+
+  // --- 6. MISC TOGGLE HELPERS ---
+
   const toggleStatus = (id, currentStatus) => {
     const newStatus = currentStatus === 'done' ? 'pending' : 'done';
     updatePlaceField(id, 'status', newStatus);
   };
 
   const toggleSubscriberStatus = async (id, currentStatus) => {
-
     const newStatus = !currentStatus;
 
     try {
@@ -3627,372 +3620,410 @@ function App() {
 
 
         {/* TAB 3: MAP */}
-<div className={`flex h-full w-full ${activeTab === 'map' ? 'flex' : 'hidden'} flex-col md:flex-row overflow-hidden`}>
+        <div className={`flex h-full w-full ${activeTab === 'map' ? 'flex' : 'hidden'} flex-col md:flex-row overflow-hidden`}>
 
-  {/* MAP CONTAINER - Top on Mobile (40%), Right on Desktop */}
-  <section className="w-full flex-[0.4] md:flex-1 relative bg-slate-100 order-1 md:order-2 min-h-[300px]">
-    <div id="map-container" className="w-full h-full"></div>
-  </section>
+          {/* MAP CONTAINER - Top on Mobile (40%), Right on Desktop */}
+          <section className="w-full flex-[0.4] md:flex-1 relative bg-slate-100 order-1 md:order-2 min-h-[300px]">
+            <div id="map-container" className="w-full h-full"></div>
+          </section>
 
-  {/* SIDEBAR / BOTTOM PANEL - Fixed Container with 3 Vertically Split Scrollable Sections */}
-  <aside className="w-full flex-[0.6] md:w-96 md:flex-none border-t md:border-t-0 md:border-r border-slate-200 bg-slate-100/60 p-2 flex flex-col gap-2 overflow-hidden shadow-2xl z-[1000] order-2 md:order-1 h-full">
+          {/* SIDEBAR / BOTTOM PANEL - Fixed Container with 3 Vertically Split Scrollable Sections */}
+          <aside className="w-full flex-[0.6] md:w-96 md:flex-none border-t md:border-t-0 md:border-r border-slate-200 bg-slate-100/60 p-2 flex flex-col gap-2 overflow-hidden shadow-2xl z-[1000] order-2 md:order-1 h-full">
 
-    {/* 1. ACTIVE TRIP PLANNER & ACTION TOOLBAR (1/4 Height) */}
-    <div className="h-1/4 flex flex-col bg-slate-50 rounded-xl border border-slate-200/80 overflow-hidden shadow-sm">
-      {/* Header & Control Actions */}
-      <div className="p-3 bg-slate-50 border-b border-slate-200/60 flex items-center justify-between shrink-0">
-        <div>
-          <p className="text-[9px] font-black uppercase text-slate-400 tracking-widest">
-            Active Trip ({selectedTrip.length})
-          </p>
-          {typeof calculateRouteDistance === 'function' && (
-            <p className="text-[10px] text-slate-500 font-semibold">
-              Est: {calculateRouteDistance()} km
-            </p>
-          )}
-        </div>
+            {/* =================================================================== */}
+            {/* 1. ACTIVE TRIP PLANNER & ACTION TOOLBAR (1/4 Height)                */}
+            {/* =================================================================== */}
+            <div className="h-1/4 flex flex-col bg-slate-50 rounded-xl border border-slate-200/80 overflow-hidden shadow-sm">
 
-        {/* Active Route Toolbar */}
-        <div className="flex items-center gap-1">
-          {/* SAVE ROUTE BUTTON */}
-          <button
-            onClick={handleSaveRoute}
-            disabled={selectedTrip.length === 0}
-            className="flex items-center gap-1 px-2.5 py-1 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white rounded-lg text-[9px] font-black uppercase transition-all shadow-sm"
-            title="Save Active Route"
-          >
-            <Icon name="save" className="w-3 h-3" />
-            Save
-          </button>
-
-          {/* SHARE VIA WHATSAPP */}
-          {typeof handleWhatsAppShare === 'function' && (
-            <button
-              onClick={handleWhatsAppShare}
-              disabled={selectedTrip.length === 0}
-              className="p-1 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-40 text-white rounded-lg transition-all"
-              title="Share via WhatsApp"
-            >
-              <Icon name="message-square" className="w-3.5 h-3.5" />
-            </button>
-          )}
-
-          {/* QR CODE */}
-          {typeof handleShowQR === 'function' && (
-            <button
-              onClick={handleShowQR}
-              disabled={selectedTrip.length === 0}
-              className="p-1 bg-slate-800 hover:bg-slate-900 disabled:opacity-40 text-white rounded-lg transition-all"
-              title="Show QR Code"
-            >
-              <Icon name="navigation-2" className="w-3.5 h-3.5" />
-            </button>
-          )}
-
-          {/* CLEAR TRIP */}
-          <button
-            onClick={() => {
-              setSelectedTrip([]);
-              if (routingControl?.current && mapRef?.current) {
-                mapRef.current.removeControl(routingControl.current);
-              }
-              triggerToast('Route Cleared');
-            }}
-            disabled={selectedTrip.length === 0}
-            className="p-1 text-rose-500 hover:bg-rose-50 disabled:opacity-40 rounded-lg transition-all"
-            title="Clear Route"
-          >
-            <Icon name="trash-2" className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      </div>
-
-      {/* Active Trip Scrollable Body */}
-      <div className="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar">
-        <DragDropContext onDragEnd={handleDragEnd}>
-          <Droppable droppableId="trip-planner-list">
-            {(provided) => (
-              <ul
-                className="space-y-2 pr-1 min-h-full"
-                {...provided.droppableProps}
-                ref={provided.innerRef}
-              >
-                {selectedTrip.map((stop, index) => (
-                  <Draggable
-                    key={stop.id || `stop-${index}`}
-                    draggableId={String(stop.id || `stop-${index}`)}
-                    index={index}
-                  >
-                    {(provided, snapshot) => (
-                      <li
-                        ref={provided.innerRef}
-                        {...provided.draggableProps}
-                        {...provided.dragHandleProps}
-                        className={`flex items-center gap-2 p-2 bg-white border rounded-xl transition-shadow ${snapshot.isDragging ? 'shadow-lg border-indigo-300 z-50' : 'shadow-sm border-slate-200/80'
-                          }`}
-                      >
-                        {/* Drag Handle Icon */}
-                        <div className="text-slate-400 cursor-grab active:cursor-grabbing">
-                          <Icon name="layout-grid" className="w-3.5 h-3.5" />
-                        </div>
-
-                        {/* Waypoint Info */}
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <span className="flex items-center justify-center w-4 h-4 rounded-full bg-slate-900 text-white text-[8px] font-black shrink-0">
-                              {index + 1}
-                            </span>
-                            <p className="text-[10px] font-black uppercase text-slate-800 truncate">
-                              {stop.place_name || stop.n}
-                            </p>
-                          </div>
-                        </div>
-
-                        {/* Remove Waypoint Button */}
-                        <button
-                          onClick={() => setSelectedTrip(prev => prev.filter(p => p.id !== stop.id))}
-                          className="p-1 text-rose-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
-                        >
-                          <Icon name="trash-2" className="w-3.5 h-3.5" />
-                        </button>
-                      </li>
+              {/* Header & Control Actions */}
+              <div className="p-3 bg-slate-50 border-b border-slate-200/60 flex items-center justify-between shrink-0 gap-2">
+                <div className="min-w-0 flex-1">
+                  <p className="text-[9px] font-black uppercase text-slate-400 tracking-widest flex items-center gap-1.5 truncate">
+                    <span>Active Trip ({selectedTrip.length})</span>
+                    {activeRouteName && (
+                      <span className="text-amber-600 font-bold normal-case truncate">
+                        — {activeRouteName}
+                      </span>
                     )}
-                  </Draggable>
-                ))}
-                {provided.placeholder}
-              </ul>
-            )}
-          </Droppable>
-        </DragDropContext>
-
-        {selectedTrip.length === 0 && (
-          <div className="h-full py-4 flex flex-col items-center justify-center text-slate-400 space-y-1 border border-dashed border-slate-200 rounded-xl bg-white/50">
-            <Icon name="map-pin" className="w-5 h-5 text-slate-300" />
-            <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Route is empty</p>
-          </div>
-        )}
-      </div>
-    </div>
-
-    {/* 2. SAVED ROUTE PLANS SECTION (1/3 Height) */}
-    <div className="h-1/3 flex flex-col bg-white rounded-xl border border-slate-200/80 overflow-hidden shadow-sm">
-      <div className="p-3 bg-white border-b border-slate-100 shrink-0 flex justify-between items-center">
-        <p className="text-[9px] font-black uppercase text-slate-400 tracking-widest">
-          Saved Route Plans ({savedRoutes.length})
-        </p>
-      </div>
-
-      {/* Saved Routes Scrollable Body */}
-      <div className="flex-1 overflow-y-auto p-2 custom-scrollbar">
-        <DragDropContext onDragEnd={handleSavedRoutesDragEnd}>
-          <Droppable droppableId="saved-routes-list">
-            {(provided) => (
-              <div
-                className="space-y-2 pr-1 min-h-full"
-                {...provided.droppableProps}
-                ref={provided.innerRef}
-              >
-                {savedRoutes.length === 0 ? (
-                  <p className="text-[10px] text-slate-300 italic py-6 text-center border border-dashed border-slate-200 rounded-xl uppercase font-bold">
-                    No saved routes
                   </p>
-                ) : (
-                  savedRoutes.map((route, index) => {
-                    let wpArray = [];
-                    try {
-                      wpArray = typeof route.waypoints === 'string' ? JSON.parse(route.waypoints) : (route.waypoints || []);
-                    } catch (e) {
-                      wpArray = [];
-                    }
-
-                    return (
-                      <Draggable
-                        key={route.id}
-                        draggableId={String(route.id)}
-                        index={index}
-                      >
-                        {(provided, snapshot) => (
-                          <div
-                            ref={provided.innerRef}
-                            {...provided.draggableProps}
-                            className={`p-2.5 bg-slate-50/80 border rounded-xl shadow-sm hover:border-indigo-200 transition-all group ${snapshot.isDragging ? 'shadow-lg border-indigo-300 bg-white z-50' : 'border-slate-100'
-                              }`}
-                          >
-                            <div className="flex justify-between items-start mb-2">
-                              <div className="flex items-center gap-1.5 min-w-0 pr-2">
-                                {/* Drag Handle Icon */}
-                                <div
-                                  {...provided.dragHandleProps}
-                                  className="text-slate-400 cursor-grab active:cursor-grabbing hover:text-slate-600 transition-colors shrink-0"
-                                  title="Drag to reorder route plan"
-                                >
-                                  <Icon name="layout-grid" className="w-3.5 h-3.5" />
-                                </div>
-                                <p className="text-[10px] font-black uppercase text-slate-700 group-hover:text-indigo-600 truncate">
-                                  {route.route_name}
-                                </p>
-                              </div>
-                              <span className="text-[8px] font-black bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded uppercase shrink-0">
-                                {wpArray.length} Stop{wpArray.length === 1 ? '' : 's'}
-                              </span>
-                            </div>
-
-                            <div className="flex gap-1.5">
-                              {/* LOAD ROUTE */}
-                              <button
-                                onClick={() => {
-                                  if (wpArray.length > 0) {
-                                    const enrichedPlaces = wpArray.map(wp => {
-                                      const match = places.find(p => p.id === (wp.id || wp));
-                                      return match ? match : {
-                                        id: wp.id || `temp-${Math.random()}`,
-                                        place_name: wp.place_name || wp.n || "Saved Stop",
-                                        latitude: wp.latitude || wp.lt,
-                                        longitude: wp.longitude || wp.ln,
-                                        category: wp.category || 'Location'
-                                      };
-                                    });
-                                    setSelectedTrip(enrichedPlaces);
-                                    if (typeof fetchRouteWeather === 'function') fetchRouteWeather(enrichedPlaces);
-                                    triggerToast(`Loaded: ${route.route_name}`);
-                                  }
-                                }}
-                                className="flex-1 py-1 bg-indigo-50 text-indigo-600 rounded-lg text-[8px] font-black uppercase border border-indigo-100 hover:bg-indigo-100 transition-colors"
-                              >
-                                Load
-                              </button>
-
-                              {/* SHARE ROUTE */}
-                              <button
-                                onClick={() => shareRoute(route)}
-                                className="flex-1 py-1 bg-emerald-50 text-emerald-600 rounded-lg text-[8px] font-black uppercase border border-emerald-100 hover:bg-emerald-100 transition-colors"
-                              >
-                                Share
-                              </button>
-
-                              {/* DELETE ROUTE */}
-                              <button
-                                onClick={() => deleteRoute(route.id)}
-                                className="py-1 px-2 bg-rose-50 text-rose-600 rounded-lg text-[8px] font-black uppercase border border-rose-100 hover:bg-rose-100 transition-colors"
-                                title="Delete Route"
-                              >
-                                <Icon name="trash-2" className="w-3 h-3" />
-                              </button>
-                            </div>
-                          </div>
-                        )}
-                      </Draggable>
-                    );
-                  })
-                )}
-                {provided.placeholder}
-              </div>
-            )}
-          </Droppable>
-        </DragDropContext>
-      </div>
-    </div>
-
-    {/* 3. AVAILABLE LOCATIONS SECTION (1/3 Height) */}
-    <div className="h-1/3 flex flex-col bg-white rounded-xl border border-slate-200/80 overflow-hidden shadow-sm">
-      <div className="p-3 bg-white border-b border-slate-100 shrink-0 space-y-2">
-        <p className="text-[9px] font-black uppercase text-slate-400 tracking-widest">Available Locations</p>
-        <input
-          type="text"
-          placeholder="Search locations..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-[9px] font-bold uppercase outline-none focus:border-indigo-400 transition-all"
-        />
-      </div>
-
-      {/* Available Locations Scrollable Body */}
-      <div className="flex-1 overflow-y-auto p-2 space-y-1.5 custom-scrollbar">
-        {processedPlaces
-          .filter(p => !selectedTrip.find(t => t.id === p.id))
-          .map(p => {
-            const d = HomePoint ? L.latLng(HomePoint.lat, HomePoint.lng).distanceTo(L.latLng(p.latitude, p.longitude)) : 0;
-            const km = (d / 1000).toFixed(1);
-            const isDone = p.status === 'done';
-
-            // Find if location is saved in any route plan
-            const matchingRoute = savedRoutes.find(route => {
-              let wpArray = [];
-              try {
-                wpArray = typeof route.waypoints === 'string' ? JSON.parse(route.waypoints) : (route.waypoints || []);
-              } catch (e) {
-                wpArray = [];
-              }
-              return wpArray.some(wp =>
-                wp.id === p.id ||
-                (wp.place_name && wp.place_name === p.place_name) ||
-                (wp.n && wp.n === p.place_name)
-              );
-            });
-
-            const reservedRouteName = matchingRoute ? matchingRoute.route_name : null;
-            const isReserved = !!reservedRouteName;
-
-            return (
-              <div key={p.id} className="flex justify-between items-center p-2 hover:bg-slate-50 rounded-xl transition-all border border-transparent hover:border-slate-100 group">
-                <div className="flex flex-col truncate pr-2">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[9px] font-black uppercase truncate text-slate-600 group-hover:text-slate-900">
-                      {p.place_name}
-                    </span>
-
-                    {/* DYNAMIC STATUS TAG */}
-                    <div className={`flex items-center gap-1 px-1 py-0.5 rounded-md border ${isReserved
-                      ? 'bg-purple-50 border-purple-100 text-purple-600'
-                      : isDone
-                        ? 'bg-emerald-50 border-emerald-100 text-emerald-600'
-                        : 'bg-orange-50 border-orange-100 text-orange-600'
-                      }`}>
-                      <div className={`w-1 h-1 rounded-full ${isReserved
-                        ? 'bg-purple-500'
-                        : isDone
-                          ? 'bg-emerald-500'
-                          : 'bg-orange-400 animate-pulse'
-                        }`}></div>
-                      <span className="text-[8px] font-black uppercase tracking-tighter">
-                        {isReserved ? 'Reserved' : isDone ? 'Done' : 'Pending'}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* DISTANCE & ROUTE PLAN ASSOCIATION */}
-                  <div className="flex items-center gap-1.5 truncate">
-                    <span className="text-[9px] font-bold uppercase text-slate-400 tracking-tight shrink-0">
-                      {km} KM
-                    </span>
-                    {isReserved && (
-                      <span className="text-[8px] font-black uppercase text-purple-500 tracking-tight truncate italic">
-                        • Plan: {reservedRouteName}
-                      </span>
-                    )}
-                  </div>
+                  {typeof calculateRouteDistance === 'function' && (
+                    <p className="text-[10px] text-slate-500 font-semibold">
+                      Est: {calculateRouteDistance()} km
+                    </p>
+                  )}
                 </div>
 
-                <button
-                  onClick={() => {
-                    const updatedTrip = [...selectedTrip, p];
-                    setSelectedTrip(updatedTrip);
-                    if (typeof fetchRouteWeather === 'function') fetchRouteWeather(updatedTrip);
-                    triggerToast(`Added ${p.place_name}`);
-                  }}
-                  className="text-emerald-500 hover:bg-emerald-50 p-1.5 rounded-lg active:scale-90 transition-transform shrink-0"
-                  title="Add to Active Route"
-                >
-                  <Icon name="plus-circle" className="w-4 h-4" />
-                </button>
-              </div>
-            );
-          })}
-      </div>
-    </div>
+                {/* Active Route Toolbar */}
+                <div className="flex items-center gap-1 shrink-0">
+                  {/* SAVE ROUTE BUTTON */}
+                  <button
+                    onClick={handleSaveRoute}
+                    disabled={selectedTrip.length === 0}
+                    className="flex items-center gap-1 px-2.5 py-1 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white rounded-lg text-[9px] font-black uppercase transition-all shadow-sm"
+                    title="Save Active Route"
+                  >
+                    <Icon name="save" className="w-3 h-3" />
+                    Save
+                  </button>
 
-  </aside>
-</div>
+                  {/* SHARE VIA WHATSAPP */}
+                  {typeof handleWhatsAppShare === 'function' && (
+                    <button
+                      onClick={handleWhatsAppShare}
+                      disabled={selectedTrip.length === 0}
+                      className="p-1 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-40 text-white rounded-lg transition-all"
+                      title="Share via WhatsApp"
+                    >
+                      <Icon name="message-square" className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+
+                  {/* QR CODE */}
+                  {typeof handleShowQR === 'function' && (
+                    <button
+                      onClick={handleShowQR}
+                      disabled={selectedTrip.length === 0}
+                      className="p-1 bg-slate-800 hover:bg-slate-900 disabled:opacity-40 text-white rounded-lg transition-all"
+                      title="Show QR Code"
+                    >
+                      <Icon name="navigation-2" className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+
+                  {/* CLEAR TRIP */}
+                  <button
+                    onClick={() => {
+                      setSelectedTrip([]);
+                      setActiveRouteName('');
+                      if (routingControl?.current && mapRef?.current) {
+                        mapRef.current.removeControl(routingControl.current);
+                      }
+                      triggerToast('Route Cleared');
+                    }}
+                    disabled={selectedTrip.length === 0}
+                    className="p-1 text-rose-500 hover:bg-rose-50 disabled:opacity-40 rounded-lg transition-all"
+                    title="Clear Route"
+                  >
+                    <Icon name="trash-2" className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Active Trip Scrollable Body */}
+              <div className="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar">
+                <DragDropContext onDragEnd={handleDragEnd}>
+                  <Droppable droppableId="trip-planner-list">
+                    {(provided) => (
+                      <ul
+                        className="space-y-2 pr-1 min-h-full"
+                        {...provided.droppableProps}
+                        ref={provided.innerRef}
+                      >
+                        {selectedTrip.map((stop, index) => {
+                          const placeNameKey = stop.place_name || stop.n;
+                          const weather = weatherData[placeNameKey];
+
+                          return (
+                            <Draggable
+                              key={stop.id || `stop-${index}`}
+                              draggableId={String(stop.id || `stop-${index}`)}
+                              index={index}
+                            >
+                              {(provided, snapshot) => (
+                                <li
+                                  ref={provided.innerRef}
+                                  {...provided.draggableProps}
+                                  {...provided.dragHandleProps}
+                                  className={`flex flex-col gap-2 p-2 bg-white border rounded-xl transition-shadow ${snapshot.isDragging
+                                    ? 'shadow-lg border-indigo-300 z-50'
+                                    : 'shadow-sm border-slate-200/80'
+                                    }`}
+                                >
+                                  {/* Top Row: Handle, Index, Waypoint Name, Delete */}
+                                  <div className="flex items-center gap-2">
+                                    {/* Drag Handle Icon */}
+                                    <div className="text-slate-400 cursor-grab active:cursor-grabbing">
+                                      <Icon name="layout-grid" className="w-3.5 h-3.5" />
+                                    </div>
+
+                                    {/* Waypoint Info */}
+                                    <div className="flex-1 min-w-0">
+                                      <div className="flex items-center gap-2">
+                                        <span className="flex items-center justify-center w-4 h-4 rounded-full bg-slate-900 text-white text-[8px] font-black shrink-0">
+                                          {index + 1}
+                                        </span>
+                                        <p className="text-[10px] font-black uppercase text-slate-800 truncate">
+                                          {placeNameKey}
+                                        </p>
+                                      </div>
+                                    </div>
+
+                                    {/* Remove Waypoint Button */}
+                                    <button
+                                      onClick={() => setSelectedTrip((prev) => prev.filter((p) => p.id !== stop.id))}
+                                      className="p-1 text-rose-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                                    >
+                                      <Icon name="trash-2" className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+
+                                  {/* Weather Status Integration */}
+                                  {weather ? (
+                                    <div className="flex items-center gap-3 px-6 py-1.5 bg-slate-50 rounded-lg border border-slate-100">
+                                      {/* Current Weather */}
+                                      <div className="flex items-center gap-1.5">
+                                        <WeatherIcon condition={weather.currentCond} />
+                                        <div className="flex flex-col">
+                                          <span className="text-[8px] font-bold text-slate-400 uppercase tracking-wider">Current</span>
+                                          <span className="text-xs font-black text-slate-700">{weather.current}°C</span>
+                                        </div>
+                                      </div>
+
+                                      <div className="w-px h-6 bg-slate-200"></div>
+
+                                      {/* Next Day Weather */}
+                                      <div className="flex items-center gap-1.5">
+                                        <WeatherIcon condition={weather.nextCond} />
+                                        <div className="flex flex-col">
+                                          <span className="text-[8px] font-bold text-slate-400 uppercase tracking-wider">Next Day</span>
+                                          <span className="text-xs font-black text-slate-700">{weather.nextDay}°C</span>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <div className="px-6 py-1 text-[9px] text-slate-400 italic animate-pulse">
+                                      Loading weather...
+                                    </div>
+                                  )}
+                                </li>
+                              )}
+                            </Draggable>
+                          );
+                        })}
+                        {provided.placeholder}
+                      </ul>
+                    )}
+                  </Droppable>
+                </DragDropContext>
+
+                {selectedTrip.length === 0 && (
+                  <div className="h-full py-4 flex flex-col items-center justify-center text-slate-400 space-y-1 border border-dashed border-slate-200 rounded-xl bg-white/50">
+                    <Icon name="map-pin" className="w-5 h-5 text-slate-300" />
+                    <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Route is empty</p>
+                  </div>
+                )}
+              </div>
+            </div>
+
+
+            {/* =================================================================== */}
+            {/* 2. SAVED ROUTE PLANS SECTION (1/3 Height)                            */}
+            {/* =================================================================== */}
+            <div className="h-1/3 flex flex-col bg-white rounded-xl border border-slate-200/80 overflow-hidden shadow-sm">
+              <div className="p-3 bg-white border-b border-slate-100 shrink-0 flex justify-between items-center">
+                <p className="text-[9px] font-black uppercase text-slate-400 tracking-widest">
+                  Saved Route Plans ({savedRoutes.length})
+                </p>
+              </div>
+
+              {/* Saved Routes Scrollable Body */}
+              <div className="flex-1 overflow-y-auto p-2 custom-scrollbar">
+                <DragDropContext onDragEnd={handleSavedRoutesDragEnd}>
+                  <Droppable droppableId="saved-routes-list">
+                    {(provided) => (
+                      <div
+                        className="space-y-2 pr-1 min-h-full"
+                        {...provided.droppableProps}
+                        ref={provided.innerRef}
+                      >
+                        {savedRoutes.length === 0 ? (
+                          <p className="text-[10px] text-slate-300 italic py-6 text-center border border-dashed border-slate-200 rounded-xl uppercase font-bold">
+                            No saved routes
+                          </p>
+                        ) : (
+                          savedRoutes.map((route, index) => {
+                            let wpArray = [];
+                            try {
+                              wpArray = typeof route.waypoints === 'string' ? JSON.parse(route.waypoints) : (route.waypoints || []);
+                            } catch (e) {
+                              wpArray = [];
+                            }
+
+                            return (
+                              <Draggable
+                                key={route.id}
+                                draggableId={String(route.id)}
+                                index={index}
+                              >
+                                {(provided, snapshot) => (
+                                  <div
+                                    ref={provided.innerRef}
+                                    {...provided.draggableProps}
+                                    className={`p-2.5 bg-slate-50/80 border rounded-xl shadow-sm hover:border-indigo-200 transition-all group ${snapshot.isDragging ? 'shadow-lg border-indigo-300 bg-white z-50' : 'border-slate-100'
+                                      }`}
+                                  >
+                                    <div className="flex justify-between items-start mb-2">
+                                      <div className="flex items-center gap-1.5 min-w-0 pr-2">
+                                        {/* Drag Handle Icon */}
+                                        <div
+                                          {...provided.dragHandleProps}
+                                          className="text-slate-400 cursor-grab active:cursor-grabbing hover:text-slate-600 transition-colors shrink-0"
+                                          title="Drag to reorder route plan"
+                                        >
+                                          <Icon name="layout-grid" className="w-3.5 h-3.5" />
+                                        </div>
+                                        <p className="text-[10px] font-black uppercase text-slate-700 group-hover:text-indigo-600 truncate">
+                                          {route.route_name}
+                                        </p>
+                                      </div>
+                                      <span className="text-[8px] font-black bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded uppercase shrink-0">
+                                        {wpArray.length} Stop{wpArray.length === 1 ? '' : 's'}
+                                      </span>
+                                    </div>
+
+                                    <div className="flex gap-1.5">
+                                      {/* LOAD ROUTE */}
+                                      <button
+                                        onClick={() => handleLoadRoute(route)}
+                                        className="flex-1 py-1 bg-indigo-50 text-indigo-600 rounded-lg text-[8px] font-black uppercase border border-indigo-100 hover:bg-indigo-100 transition-colors"
+                                      >
+                                        Load
+                                      </button>
+
+                                      {/* SHARE ROUTE */}
+                                      <button
+                                        onClick={() => shareRoute(route)}
+                                        className="flex-1 py-1 bg-emerald-50 text-emerald-600 rounded-lg text-[8px] font-black uppercase border border-emerald-100 hover:bg-emerald-100 transition-colors"
+                                      >
+                                        Share
+                                      </button>
+
+                                      {/* DELETE ROUTE */}
+                                      <button
+                                        onClick={() => deleteRoute(route.id)}
+                                        className="py-1 px-2 bg-rose-50 text-rose-600 rounded-lg text-[8px] font-black uppercase border border-rose-100 hover:bg-rose-100 transition-colors"
+                                        title="Delete Route"
+                                      >
+                                        <Icon name="trash-2" className="w-3 h-3" />
+                                      </button>
+                                    </div>
+                                  </div>
+                                )}
+                              </Draggable>
+                            );
+                          })
+                        )}
+                        {provided.placeholder}
+                      </div>
+                    )}
+                  </Droppable>
+                </DragDropContext>
+              </div>
+            </div>
+
+
+            {/* =================================================================== */}
+            {/* 3. AVAILABLE LOCATIONS SECTION (1/3 Height)                        */}
+            {/* =================================================================== */}
+            <div className="h-1/3 flex flex-col bg-white rounded-xl border border-slate-200/80 overflow-hidden shadow-sm">
+              <div className="p-3 bg-white border-b border-slate-100 shrink-0 space-y-2">
+                <p className="text-[9px] font-black uppercase text-slate-400 tracking-widest">Available Locations</p>
+                <input
+                  type="text"
+                  placeholder="Search locations..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-[9px] font-bold uppercase outline-none focus:border-indigo-400 transition-all"
+                />
+              </div>
+
+              {/* Available Locations Scrollable Body */}
+              <div className="flex-1 overflow-y-auto p-2 space-y-1.5 custom-scrollbar">
+                {processedPlaces
+                  .filter(p => !selectedTrip.find(t => t.id === p.id))
+                  .map(p => {
+                    const d = HomePoint ? L.latLng(HomePoint.lat, HomePoint.lng).distanceTo(L.latLng(p.latitude, p.longitude)) : 0;
+                    const km = (d / 1000).toFixed(1);
+                    const isDone = p.status === 'done';
+
+                    // Check if location is part of any saved route plan
+                    const matchingRoute = savedRoutes.find(route => {
+                      let wpArray = [];
+                      try {
+                        wpArray = typeof route.waypoints === 'string' ? JSON.parse(route.waypoints) : (route.waypoints || []);
+                      } catch (e) {
+                        wpArray = [];
+                      }
+                      return wpArray.some(wp =>
+                        wp.id === p.id ||
+                        (wp.place_name && wp.place_name === p.place_name) ||
+                        (wp.n && wp.n === p.place_name)
+                      );
+                    });
+
+                    const reservedRouteName = matchingRoute ? matchingRoute.route_name : null;
+                    const isReserved = !!reservedRouteName;
+
+                    return (
+                      <div key={p.id} className="flex justify-between items-center p-2 hover:bg-slate-50 rounded-xl transition-all border border-transparent hover:border-slate-100 group">
+                        <div className="flex flex-col truncate pr-2">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[9px] font-black uppercase truncate text-slate-600 group-hover:text-slate-900">
+                              {p.place_name}
+                            </span>
+
+                            {/* DYNAMIC STATUS TAG */}
+                            <div className={`flex items-center gap-1 px-1 py-0.5 rounded-md border ${isReserved
+                              ? 'bg-purple-50 border-purple-100 text-purple-600'
+                              : isDone
+                                ? 'bg-emerald-50 border-emerald-100 text-emerald-600'
+                                : 'bg-orange-50 border-orange-100 text-orange-600'
+                              }`}>
+                              <div className={`w-1 h-1 rounded-full ${isReserved
+                                ? 'bg-purple-500'
+                                : isDone
+                                  ? 'bg-emerald-500'
+                                  : 'bg-orange-400 animate-pulse'
+                                }`}></div>
+                              <span className="text-[8px] font-black uppercase tracking-tighter">
+                                {isReserved ? 'Reserved' : isDone ? 'Done' : 'Pending'}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* DISTANCE & ROUTE PLAN ASSOCIATION */}
+                          <div className="flex items-center gap-1.5 truncate">
+                            <span className="text-[9px] font-bold uppercase text-slate-400 tracking-tight shrink-0">
+                              {km} KM
+                            </span>
+                            {isReserved && (
+                              <span className="text-[8px] font-black uppercase text-purple-500 tracking-tight truncate italic">
+                                • Plan: {reservedRouteName}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        <button
+                          onClick={() => {
+                            const updatedTrip = [...selectedTrip, p];
+                            setSelectedTrip(updatedTrip);
+                            if (typeof fetchRouteWeather === 'function') fetchRouteWeather(updatedTrip);
+                            triggerToast(`Added ${p.place_name}`);
+                          }}
+                          className="text-emerald-500 hover:bg-emerald-50 p-1.5 rounded-lg active:scale-90 transition-transform shrink-0"
+                          title="Add to Active Route"
+                        >
+                          <Icon name="plus-circle" className="w-4 h-4" />
+                        </button>
+                      </div>
+                    );
+                  })}
+              </div>
+            </div>
+
+          </aside>
+        </div>
 
         {/* TAB 4: DASHBOARD */}
 
