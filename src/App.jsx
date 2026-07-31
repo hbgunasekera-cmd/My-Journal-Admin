@@ -366,6 +366,8 @@ function App() {
   const knownUsersRef = useRef(new Set());
   const downloadedImagesRef = useRef(new Set());
   const activeSharesRef = useRef(new Set());
+  const REFRESH_INTERVAL_SECONDS = 600;
+  const [timeLeft, setTimeLeft] = useState(REFRESH_INTERVAL_SECONDS);
 
   useEffect(() => {
     if (isLoggedIn) {
@@ -415,16 +417,25 @@ function App() {
     initGoogle();
   }, []);
 
-  // Auto-refresh all dashboard and app data every 10 minutes (600,000 ms)
   useEffect(() => {
-    const intervalId = setInterval(() => {
-      console.log("Triggering periodic 10-minute database refresh...");
-      refreshAllData();
-    }, 10 * 60 * 1000); // 10 minutes
+    const timer = setInterval(() => {
+      setTimeLeft((prevTime) => {
+        if (prevTime <= 1) {
+          refreshAllData(); // Trigger full database sync
+          return REFRESH_INTERVAL_SECONDS; // Reset timer
+        }
+        return prevTime - 1;
+      });
+    }, 1000);
 
-    // Crucial: Clear the interval on component unmount to prevent memory leaks
-    return () => clearInterval(intervalId);
+    return () => clearInterval(timer);
   }, []);
+
+  // Optional Helper: Reset countdown when manual refresh occurs
+  const handleManualRefresh = () => {
+    refreshAllData();
+    setTimeLeft(REFRESH_INTERVAL_SECONDS);
+  };
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(searchTerm), 300);
@@ -2707,7 +2718,56 @@ function App() {
     };
   }, [analyticsData, likesData, subscribersData]);
 
+/**
+ * Circular Progress Ring Indicator for Dashboard Refresh Countdown
+ */
+const RefreshProgressCircle = React.memo(({ timeLeft, totalTime = 600 }) => {
+  const radius = 9;
+  const strokeWidth = 2;
+  const circumference = 2 * Math.PI * radius; // ~56.55px
 
+  // Calculate percentage elapsed
+  const progress = Math.max(0, Math.min(1, (totalTime - timeLeft) / totalTime));
+  const strokeDashoffset = circumference * (1 - progress);
+
+  // Format MM:SS for hover tooltip
+  const minutes = Math.floor(timeLeft / 60);
+  const seconds = timeLeft % 60;
+  const formattedTime = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+
+  return (
+    <div 
+      className="relative flex items-center justify-center group cursor-pointer"
+      title={`Auto-refreshes in ${formattedTime}`}
+    >
+      <svg className="w-5 h-5 -rotate-90 transform" viewBox="0 0 24 24">
+        {/* Background Track Circle */}
+        <circle
+          cx="12"
+          cy="12"
+          r={radius}
+          stroke="currentColor"
+          strokeWidth={strokeWidth}
+          className="text-slate-700/50 fill-none"
+        />
+        {/* Animated Progress Circle */}
+        <circle
+          cx="12"
+          cy="12"
+          r={radius}
+          stroke="currentColor"
+          strokeWidth={strokeWidth}
+          strokeDasharray={circumference}
+          strokeDashoffset={strokeDashoffset}
+          strokeLinecap="round"
+          className="text-orange-500 fill-none transition-all duration-1000 ease-linear"
+        />
+      </svg>
+      {/* Dynamic pulse dot in the center */}
+      <span className="absolute h-1.5 w-1.5 rounded-full bg-orange-400 animate-pulse" />
+    </div>
+  );
+});
 
   const handleClearDashboardData = async () => {
     if (window.confirm("⚠️ Are you sure you want to delete all analytics records (page_visits)? This operation cannot be undone.")) {
@@ -4036,149 +4096,164 @@ function App() {
                 <h1 className="text-2xl font-black text-slate-900 italic uppercase tracking-tighter">System Overview</h1>
                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Real-time journal analytics</p>
               </div>
-              <button onClick={refreshAllData} className="w-12 h-12 bg-white border border-slate-200 rounded-full shadow-sm flex items-center justify-center hover:shadow-md transition-all active:scale-95 group">
-                <Icon name="refresh-cw" className="w-5 h-5 text-indigo-600 group-active:animate-spin lucide" />
-              </button>
+              
             </div>
 
             <div className="max-w-full mx-auto grid grid-cols-1 lg:grid-cols-2 gap-6 pb-20">
 
               {/* 1. PAGE VISITS BLOCK (TRAFFIC INTELLIGENCE) */}
-              <div className="bg-slate-900 rounded-[2.5rem] p-8 text-white shadow-xl relative overflow-hidden lg:col-span-2">
-                <div className="absolute -top-20 -right-20 w-64 h-64 bg-indigo-500 rounded-full blur-3xl opacity-20"></div>
+<div className="bg-slate-900 rounded-[2.5rem] p-8 text-white shadow-xl relative overflow-hidden lg:col-span-2">
+  <div className="absolute -top-20 -right-20 w-64 h-64 bg-indigo-500 rounded-full blur-3xl opacity-20" />
 
-                {/* Header Logic: Deriving totals from breakdown to ensure sync */}
-                {(() => {
-                  const trafficEntries = dashboardStats.trafficType || [];
-                  const realCount = trafficEntries.find(t => t[0] === 'Real Person')?.[1] || 0;
+  {/* Header Logic: Deriving totals from breakdown to ensure sync */}
+  {(() => {
+    const trafficEntries = dashboardStats.trafficType || [];
+    const realCount = trafficEntries.find(([type]) => type === 'Real Person')?.[1] || 0;
 
-                  // Summing all types ensures the total matches the breakdown exactly
-                  const calculatedTotal = trafficEntries.reduce((acc, [_, count]) => acc + count, 0);
+    // Summing all types ensures the total matches the breakdown exactly
+    const calculatedTotal = trafficEntries.reduce((acc, [_, count]) => acc + count, 0);
 
-                  const verifiedPercentage = calculatedTotal > 0
-                    ? Math.min(Math.round((realCount / calculatedTotal) * 100), 100)
-                    : 0;
+    const verifiedPercentage = calculatedTotal > 0
+      ? Math.min(Math.round((realCount / calculatedTotal) * 100), 100)
+      : 0;
 
-                  return (
-                    <div className="flex justify-between items-start mb-10 relative z-10">
-                      <div>
-                        <p className="text-[10px] font-black uppercase text-indigo-400 mb-1 tracking-widest">Traffic Intelligence</p>
-                        <p className="text-6xl font-black italic tracking-tighter">{calculatedTotal}</p>
-                      </div>
+    return (
+      <div className="flex justify-between items-start mb-10 relative z-10">
+  <div>
+    <p className="text-[10px] font-black uppercase text-indigo-400 mb-1 tracking-widest">
+      Traffic Intelligence
+    </p>
+    <p className="text-6xl font-black italic tracking-tighter">
+      {calculatedTotal}
+    </p>
+  </div>
 
-                      <div className="text-right flex flex-col items-end gap-2">
-                        {/* Container grouping Human Verification badge and Clear Data button shifted to top */}
-                        <div className="flex items-center gap-2">
-                          {/* Human Verification Badge */}
-                          <div className="flex items-center gap-2 bg-white/5 px-3 py-1.5 rounded-full border border-white/10">
-                            <span className="text-emerald-400 font-black italic text-sm">
-                              {verifiedPercentage}%
-                            </span>
-                            <span className="text-[8px] text-slate-400 uppercase font-bold tracking-tighter">Verified Person</span>
-                          </div>
+  <div className="text-right flex flex-col items-end gap-2">
+    {/* Container grouping Badge, Refresh button, and Delete button */}
+    <div className="flex items-center gap-2">
+      
+      {/* 1. Human Verification Badge */}
+      <div className="flex items-center gap-2 bg-white/5 px-3 py-1.5 rounded-full border border-white/10">
+        <RefreshProgressCircle 
+          timeLeft={timeLeft} 
+          totalTime={REFRESH_INTERVAL_SECONDS} 
+        />
+        <span className="text-emerald-400 font-black italic text-sm">
+          {verifiedPercentage}%
+        </span>
+        <span className="text-[8px] text-slate-400 uppercase font-bold tracking-tighter">
+          Verified Person
+        </span>
+      </div>
 
-                          {/* Clear/Delete Dashboard Data Button */}
-                          <button
-                            onClick={handleClearDashboardData}
-                            title="Clear all page visits history"
-                            className="flex items-center gap-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 px-3 py-1.5 rounded-full text-[9px] font-bold uppercase tracking-wider transition-all duration-150 active:scale-95"
-                          >
-                            <Icon name="trash-2" className="w-3 h-3 text-rose-400" />
-                            <span>Clear Visits</span>
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  ); ss
-                })()}
+      {/* 2. Refresh Button (Middle - Styled to match badge/delete button) */}
+      <button
+        onClick={handleManualRefresh || refreshAllData}
+        title="Refresh data"
+        className="flex items-center justify-center bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 p-2 rounded-full transition-all duration-150 active:scale-95 group"
+      >
+        <Icon name="refresh-cw" className="w-3.5 h-3.5 text-indigo-400 group-active:animate-spin" />
+      </button>
 
-                {/* Metrics Grid */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-x-8 gap-y-10 relative z-10">
-                  <MetricColumn
-                    title="Countries"
-                    data={dashboardStats.countries}
-                    highlightValue={dashboardStats.latest?.country}
-                  />
-                  <MetricColumn
-                    title="Regions"
-                    data={dashboardStats.regions}
-                    highlightValue={dashboardStats.latest?.region}
-                  />
-                  <MetricColumn
-                    title="Cities"
-                    data={dashboardStats.cities}
-                    highlightValue={dashboardStats.latest?.city}
-                  />
-                  <MetricColumn
-                    title="Device Type"
-                    data={dashboardStats.deviceTypes}
-                    highlightValue={dashboardStats.latest?.type}
-                  />
-                  <MetricColumn
-                    title="Operating System"
-                    data={dashboardStats.os}
-                    highlightValue={dashboardStats.latest?.os}
-                  />
-                  <MetricColumn
-                    title="App / Source"
-                    data={dashboardStats.sources}
-                    highlightValue={dashboardStats.latest?.source}
-                  />
-                  <MetricColumn
-                    title="Visit Loyalty"
-                    data={dashboardStats.loyalty}
-                    highlightValue={dashboardStats.latest?.loyaltyStatus}
-                  />
-                  <MetricColumn
-                    title="Visit History"
-                    data={dashboardStats.pageHistory}
-                    /* Fixed: Uses normalizedPagePath to match the normalized path entries in pageHistory */
-                    highlightValue={dashboardStats.latest?.normalizedPagePath}
-                  />
+      {/* 3. Icon-Only Delete Button */}
+      <button
+        onClick={handleClearDashboardData}
+        title="Clear all page visits history"
+        className="flex items-center justify-center bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 p-2 rounded-full transition-all duration-150 active:scale-95"
+      >
+        <Icon name="trash-2" className="w-3.5 h-3.5 text-rose-400" />
+      </button>
+      
+    </div>
+  </div>
+</div>
+    );
+  })()}
 
-                  {/* Traffic Type Breakdown */}
-                  <div>
-                    <p className="text-[9px] font-black uppercase text-slate-500 mb-3 border-b border-slate-700 pb-1 tracking-wider">
-                      Traffic Type
-                    </p>
-                    <div className="space-y-2">
-                      {(dashboardStats.trafficType || []).map(([type, count]) => {
-                        // Matches 'Real Person' or Bot categories with the latest log state
-                        const isLatestTraffic =
-                          dashboardStats.latest &&
-                          ((dashboardStats.latest.isBot && type !== 'Real Person') ||
-                            (!dashboardStats.latest.isBot && type === 'Real Person'));
+  {/* Metrics Grid */}
+  <div className="grid grid-cols-2 md:grid-cols-4 gap-x-8 gap-y-10 relative z-10">
+    <MetricColumn
+      title="Countries"
+      data={dashboardStats.countries}
+      highlightValue={dashboardStats.latest?.country}
+    />
+    <MetricColumn
+      title="Regions"
+      data={dashboardStats.regions}
+      highlightValue={dashboardStats.latest?.region}
+    />
+    <MetricColumn
+      title="Cities"
+      data={dashboardStats.cities}
+      highlightValue={dashboardStats.latest?.city}
+    />
+    <MetricColumn
+      title="Device Type"
+      data={dashboardStats.deviceTypes}
+      highlightValue={dashboardStats.latest?.type}
+    />
+    <MetricColumn
+      title="Operating System"
+      data={dashboardStats.os}
+      highlightValue={dashboardStats.latest?.os}
+    />
+    <MetricColumn
+      title="App / Source"
+      data={dashboardStats.sources}
+      highlightValue={dashboardStats.latest?.source}
+    />
+    <MetricColumn
+      title="Visit Loyalty"
+      data={dashboardStats.loyalty}
+      highlightValue={dashboardStats.latest?.loyaltyStatus}
+    />
+    <MetricColumn
+      title="Visit History"
+      data={dashboardStats.pageHistory}
+      highlightValue={dashboardStats.latest?.normalizedPagePath}
+    />
 
-                        return (
-                          <div
-                            key={type}
-                            className="flex justify-between items-center text-[10px] font-bold"
-                          >
-                            {/* Label color depending on Real Person vs Bot */}
-                            <span
-                              className={
-                                type === 'Real Person' ? 'text-emerald-400' : 'text-rose-400'
-                              }
-                            >
-                              {type}
-                            </span>
-                            {/* Highlight latest traffic log count in orange */}
-                            <span
-                              className={
-                                isLatestTraffic
-                                  ? 'text-orange-400 font-black'
-                                  : 'text-white font-black'
-                              }
-                            >
-                              {count}
-                            </span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                </div>
-              </div>
+    {/* Traffic Type Breakdown */}
+    <div>
+      <p className="text-[9px] font-black uppercase text-slate-500 mb-3 border-b border-slate-700 pb-1 tracking-wider">
+        Traffic Type
+      </p>
+      <div className="space-y-2">
+        {(dashboardStats.trafficType || []).map(([type, count]) => {
+          // Matches 'Real Person' or Bot categories with the latest log state
+          const isLatestTraffic =
+            dashboardStats.latest &&
+            ((dashboardStats.latest.isBot && type !== 'Real Person') ||
+              (!dashboardStats.latest.isBot && type === 'Real Person'));
+
+          return (
+            <div
+              key={type}
+              className="flex justify-between items-center text-[10px] font-bold"
+            >
+              <span
+                className={
+                  type === 'Real Person' ? 'text-emerald-400' : 'text-rose-400'
+                }
+              >
+                {type}
+              </span>
+              <span
+                className={
+                  isLatestTraffic
+                    ? 'text-orange-400 font-black'
+                    : 'text-white font-black'
+                }
+              >
+                {count}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  </div>
+</div>
 
               {/* 2. LIKES METRICS*/}
 
