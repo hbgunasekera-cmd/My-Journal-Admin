@@ -2790,6 +2790,27 @@ function App() {
     }
   };
 
+  // State to track revealed email IDs
+  const [revealedEmails, setRevealedEmails] = useState({});
+
+  // Helper function to mask emails (e.g., j***n@example.com)
+  const maskEmail = (email) => {
+    if (!email || !email.includes('@')) return email;
+    const [name, domain] = email.split('@');
+    if (name.length <= 2) {
+      return `${name[0]}*@${domain}`;
+    }
+    return `${name[0]}${'*'.repeat(name.length - 2)}${name[name.length - 1]}@${domain}`;
+  };
+
+  // Toggle reveal state for a specific subscriber ID
+  const toggleEmailVisibility = (id) => {
+    setRevealedEmails((prev) => ({
+      ...prev,
+      [id]: !prev[id],
+    }));
+  };
+
 
   // --- DASHBOARD ACTIONS (Comments & Suggestions) ---
 
@@ -2836,6 +2857,24 @@ function App() {
     }
   };
 
+  const handleDeleteSubscriber = async (id) => {
+    try {
+      // 1. Delete from your 'subscribers' table in Supabase
+      const { error } = await supabaseClient
+        .from('subscribers') // Replace with your exact table name if different
+        .delete()
+        .eq('id', id);
+
+      if (error) throw error;
+
+      // 2. Remove subscriber from local state instantly
+      setSubscribersData((prev) => prev.filter((sub) => sub.id !== id));
+
+    } catch (error) {
+      console.error('Error deleting subscriber:', error.message || error);
+      alert('Failed to delete subscriber. Please try again.');
+    }
+  };
 
 
   // Handles Approve/Reject for Suggestion Approvals
@@ -4335,42 +4374,80 @@ function App() {
                   <h2 className="text-[10px] font-black uppercase text-indigo-600 flex items-center gap-2 tracking-widest">
                     <Icon name="mail" className="w-4 h-4 lucide" /> Subscribers
                   </h2>
-                  {/* Corrected to ensure safe access and accurate length calculation */}
                   <span className="px-3 py-1 bg-indigo-50 text-indigo-600 rounded-full text-[9px] font-black uppercase tracking-tighter border border-indigo-100">
                     {(subscribersData || []).length} Total
                   </span>
                 </div>
 
                 <div className="space-y-3 overflow-y-auto custom-scrollbar flex-1 pr-2 min-h-0">
-                  {(subscribersData || []).map(sub => (
-                    <div key={sub.id} className="p-4 bg-slate-50/50 rounded-2xl border border-slate-100 flex justify-between items-center group hover:bg-slate-50 transition-all">
-                      <div className="flex flex-col truncate pr-4">
-                        <p className="text-[10px] font-black text-slate-800 truncate">{sub.email}</p>
-                        <p className="text-[8px] font-bold text-slate-400 mt-0.5 tracking-widest uppercase">
-                          {/* Using subscribed_at as the primary date source */}
-                          {new Date(sub.subscribed_at).toLocaleDateString()}
-                        </p>
+                  {(subscribersData || []).map((sub) => {
+                    const isRevealed = !!revealedEmails[sub.id];
+
+                    return (
+                      <div
+                        key={sub.id}
+                        onClick={() => toggleEmailVisibility(sub.id)}
+                        title={isRevealed ? "Click to mask email" : "Click to reveal email"}
+                        className="p-4 bg-slate-50/50 hover:bg-slate-100/70 rounded-2xl border border-slate-100 flex justify-between items-center group cursor-pointer transition-all duration-150 select-none"
+                      >
+                        <div className="flex flex-col truncate pr-4">
+                          <div className="flex items-center gap-2">
+                            {/* Increased font size from text-[10px] to text-xs */}
+                            <p className="text-xs font-black text-slate-800 truncate font-mono">
+                              {isRevealed ? sub.email : maskEmail(sub.email)}
+                            </p>
+                            {/* Eye Icon Indicator */}
+                            <Icon
+                              name={isRevealed ? "eye-off" : "eye"}
+                              className="w-3.5 h-3.5 text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                            />
+                          </div>
+                          <p className="text-[8px] font-bold text-slate-400 mt-0.5 tracking-widest uppercase">
+                            {new Date(sub.subscribed_at).toLocaleDateString()}
+                          </p>
+                        </div>
+
+                        {/* Action Buttons Container */}
+                        <div className="flex items-center shrink-0 gap-2">
+                          {/* 1. Status Toggle Button */}
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleSubscriberStatus(sub.id, sub.is_active);
+                            }}
+                            title={`Click to mark as ${sub.is_active ? 'Inactive' : 'Active'}`}
+                            className={`px-3 py-1.5 rounded-xl text-[8px] font-black uppercase tracking-widest transition-all transform active:scale-95 hover:scale-105 ${sub.is_active
+                              ? 'bg-emerald-100 text-emerald-700 border border-emerald-200 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 group-hover:shadow-sm'
+                              : 'bg-rose-100 text-rose-700 border border-rose-200 hover:bg-emerald-50 hover:text-emerald-600 hover:border-emerald-200 group-hover:shadow-sm'
+                              }`}
+                          >
+                            {sub.is_active ? 'Active' : 'Inactive'}
+                          </button>
+
+                          {/* 2. Delete Subscriber Button */}
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (window.confirm("Are you sure you want to delete this subscriber?")) {
+                                handleDeleteSubscriber(sub.id); // Call your database delete handler
+                              }
+                            }}
+                            title="Delete subscriber permanently"
+                            className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 rounded-xl transition-all transform active:scale-95 hover:scale-105 group-hover:shadow-sm"
+                          >
+                            <Icon name="trash-2" className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
-                      <div className="flex items-center shrink-0">
-                        {/* Clickable interactive status toggle */}
-                        <button
-                          onClick={() => toggleSubscriberStatus(sub.id, sub.is_active)}
-                          title={`Click to mark as ${sub.is_active === true ? 'Inactive' : 'Active'}`}
-                          className={`px-3 py-1.5 rounded-xl text-[8px] font-black uppercase tracking-widest transition-all transform active:scale-95 hover:scale-105 ${sub.is_active === true
-                            ? 'bg-emerald-100 text-emerald-700 border border-emerald-200 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 group-hover:shadow-sm'
-                            : 'bg-rose-100 text-rose-700 border border-rose-200 hover:bg-emerald-50 hover:text-emerald-600 hover:border-emerald-200 group-hover:shadow-sm'
-                            }`}
-                        >
-                          {sub.is_active === true ? 'Active' : 'Inactive'}
-                        </button>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
 
                   {(!subscribersData || subscribersData.length === 0) && (
                     <div className="flex flex-col items-center justify-center h-full opacity-30">
                       <Icon name="mail" className="w-10 h-10 mb-2 lucide" />
-                      <p className="text-[10px] font-black uppercase tracking-widest text-center">No Subscribers Yet</p>
+                      <p className="text-[10px] font-black uppercase tracking-widest text-center">
+                        No Subscribers Yet
+                      </p>
                     </div>
                   )}
                 </div>
