@@ -1575,8 +1575,6 @@ function App() {
       setLikesData(l.data || []);
       setSubscribersData(sub.data || []);
 
-      console.log("Fetched subscribers:", sub.data);
-
     } catch (error) {
       // Catch and log any fatal errors (including those thrown by fetchAllRecords)
       console.error("Data sync error:", error);
