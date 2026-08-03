@@ -1877,8 +1877,8 @@ function App() {
         throw new Error(`Failed to parse AI response JSON: ${parseError.message}`);
       }
 
-      // Save to Supabase (re-throws errors if update fails)
-      await saveArticleToDatabase(place.id, aiJson);
+      // Pass full place object so saveArticleToDatabase has access to place_name
+      await saveArticleToDatabase(place, aiJson);
 
     } catch (err) {
       // Log locally, re-throw for bulk generation pipelines
@@ -2011,31 +2011,46 @@ function App() {
     refreshAllData();
   };
 
-  const saveArticleToDatabase = async (id, articleData) => {
+  const saveArticleToDatabase = async (place, articleData) => {
     try {
+      // 1. Save Article to Database & Update created_at timestamp
       const { error } = await supabaseClient
         .from('travel_bucket_list')
         .update({
           ai_article: articleData,
           status: 'done',
-          is_indexed: false,
+          is_indexed: false, // Set false initially until IndexNow confirms
           created_at: new Date().toISOString(),
         })
-        .eq('id', id);
+        .eq('id', place.id);
 
       if (error) throw error;
 
+      // 2. Trigger IndexNow with place name and dummy array to generate /gallery/ link
+      const indexSuccess = await triggerIndexNow(place.place_name, [1]);
 
-      setPlaces(prev => prev.map(p =>
-        p.id === id ? { ...p, ai_article: articleData, status: 'done' } : p
-      ));
+      // 3. If IndexNow succeeds, set is_indexed to TRUE in Supabase
+      if (indexSuccess) {
+        const { error: indexError } = await supabaseClient
+          .from('travel_bucket_list')
+          .update({ is_indexed: true })
+          .eq('id', place.id);
 
+        if (indexError) {
+          console.error("Failed to update is_indexed flag:", indexError);
+        } else {
+          triggerToast("Article saved and indexed successfully!");
+        }
+      } else {
+        triggerToast("Article saved, but IndexNow submission failed.");
+      }
 
-      triggerToast("Journal entry successfully updated!");
+      // 4. Reload the webpage to show the updated entry
+      window.location.reload();
 
     } catch (err) {
-
       triggerToast("Database update failed.");
+      console.error(err);
     }
   };
 
@@ -2048,7 +2063,7 @@ function App() {
         ...place.ai_article,
         story: newStory
       };
-      saveArticleToDatabase(place.id, updatedData);
+      saveArticleToDatabase(place, updatedData);
     }
   };
 
@@ -3428,29 +3443,12 @@ function App() {
                             if (hasArticle) {
                               manualEditArticle(p);
                             } else {
-                              // 1. Execute generation script first
+                              // Fully handles AI generation, DB update, IndexNow submission, and page refresh
                               await generateTravelArticle(p);
-
-                              // 2. Automatically flip location status to done
-                              await updatePlaceField(p.id, 'status', 'done');
-
-                              // 3. Strict Single-Fire IndexNow Logic
-                              if (!p.is_indexed) {
-                                const indexSuccess = await triggerIndexNow(p.place_name, p.album_photos);
-
-                                // If the serverless proxy successfully logs the link into IndexNow, lock the column
-                                if (indexSuccess) {
-                                  await updatePlaceField(p.id, 'is_indexed', true);
-                                  // Optimistically update the local row instance to prevent immediate double clicks
-                                  p.is_indexed = true;
-                                }
-                              }
-
-                              // 4. Proceed with standard completion broadcast (Now fully guarded against duplicate indexing calls)
-                              await notifySubscribersOnCompletion({ ...p, status: 'done' });
                             }
                           }}
-                          className={`w-8 h-8 rounded-xl flex items-center justify-center hover:bg-white hover:shadow-sm transition-all ${hasArticle ? 'text-orange-500' : 'text-slate-300'}`}
+                          className={`w-8 h-8 rounded-xl flex items-center justify-center hover:bg-white hover:shadow-sm transition-all ${hasArticle ? 'text-orange-500' : 'text-slate-300'
+                            }`}
                           title={hasArticle ? "Edit Article" : "Generate with AI"}
                         >
                           <Icon name={hasArticle ? "file-text" : "sparkles"} className="w-4 h-4" />
