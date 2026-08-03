@@ -2029,6 +2029,8 @@ function App() {
       // 2. Trigger IndexNow with place name and dummy array to generate /gallery/ link
       const indexSuccess = await triggerIndexNow(place.place_name, [1]);
 
+      let isIndexed = false;
+
       // 3. If IndexNow succeeds, set is_indexed to TRUE in Supabase
       if (indexSuccess) {
         const { error: indexError } = await supabaseClient
@@ -2039,13 +2041,27 @@ function App() {
         if (indexError) {
           console.error("Failed to update is_indexed flag:", indexError);
         } else {
+          isIndexed = true;
           triggerToast("Article saved and indexed successfully!");
         }
       } else {
         triggerToast("Article saved, but IndexNow submission failed.");
       }
 
-      // 4. Reload the webpage to show the updated entry
+      // 4. Notify subscribers on completion with the updated payload
+      try {
+        await notifySubscribersOnCompletion({
+          ...place,
+          status: 'done',
+          ai_article: articleData,
+          is_indexed: isIndexed,
+        });
+      } catch (notifyErr) {
+        // Guarded so a notification failure won't halt execution or page reload
+        console.error("Subscriber notification failed:", notifyErr);
+      }
+
+      // 5. Reload the webpage to display the updated entry
       window.location.reload();
 
     } catch (err) {
