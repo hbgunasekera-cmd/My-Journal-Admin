@@ -2011,34 +2011,31 @@ function App() {
     refreshAllData();
   };
 
-  const saveArticleToDatabase = async (id, articleData, updateTimestamp = false) => {
+  const saveArticleToDatabase = async (id, articleData) => {
     try {
-      const updatePayload = {
-        ai_article: articleData,
-        status: 'done',
-      };
-
-      // Conditionally include created_at based on the flag
-      if (updateTimestamp) {
-        updatePayload.created_at = new Date().toISOString();
-      }
-
       const { error } = await supabaseClient
         .from('travel_bucket_list')
-        .update(updatePayload)
+        .update({
+          ai_article: articleData,
+          status: 'done',
+          is_indexed: false,
+          created_at: new Date().toISOString(),
+        })
         .eq('id', id);
 
       if (error) throw error;
+
 
       setPlaces(prev => prev.map(p =>
         p.id === id ? { ...p, ai_article: articleData, status: 'done' } : p
       ));
 
+
       triggerToast("Journal entry successfully updated!");
 
     } catch (err) {
-      triggerToast(`Database update failed: ${err.message}`);
-      throw err; // Crucial: propagates error to parent functions
+
+      triggerToast("Database update failed.");
     }
   };
 
