@@ -1769,38 +1769,26 @@ function App() {
 
 
   const generateTravelArticle = async (place) => {
-
-    // FIX: Dynamically fetch the API key to ensure it captures the populated value after login
+    // Dynamically fetch the API key to ensure it captures the populated value after login
     const currentApiKey = window.ARTICLE_KEY || import.meta.env.VITE_ARTICLE_KEY;
     const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${currentApiKey}`;
 
-    const contextPrompt = `Write an authentic, first-person travel journal entry for a ${place.category} named "${place.place_name}" located in ${place.locality || 'Sri Lanka'}. 
+    const contextPrompt = `Write an authentic backcountry field report and first-person travel journal entry for a ${place.category} named "${place.place_name}" located in ${place.locality || 'Sri Lanka'}.
 
-    CRITICAL TONE & STYLE INSTRUCTIONS:
-    - Write this like a real human sharing a personal travel diary. The tone should be conversational, passionate, and grounded. 
-    - Include the reality of the journey: mention elements like navigating rocky terrain, a long motorcycle road trip, setting up camp, or hunting down hidden waterfalls. 
-    - Focus on sensory details: the mist in the air, the sound of cascading water, or the feeling of the trail underfoot.
-    - Mention capturing the experience on an iPhone and the satisfaction of dialing in the perfect color grades and LUTs on mobile.
-    - Avoid mentioning drones or specific hardware model numbers.
-    - STRICTLY AVOID cliché AI buzzwords. Do NOT use words like: "tapestry," "realm," "nestled," "unveil," "symphony," "breathtaking," "embark," or "delve." Use natural, everyday vocabulary.
+CRITICAL TONE & STYLE INSTRUCTIONS:
+- Write this like a real human sharing a personal travel diary. The tone should be conversational, passionate, and grounded.
+- Include the reality of the journey: mention elements like navigating rocky terrain, a long motorcycle road trip, setting up camp, or hunting down hidden waterfalls.
+- Focus on sensory details: the mist in the air, the sound of cascading water, or the feeling of the trail underfoot.
+- Mention capturing the experience on an iPhone and the satisfaction of dialing in mobile color grades and LUTs.
+- Avoid mentioning drones or specific hardware model numbers.
+- STRICTLY AVOID cliché AI buzzwords. Do NOT use: "tapestry," "realm," "nestled," "unveil," "symphony," "breathtaking," "embark," or "delve." Use natural, everyday vocabulary.
 
-    Return ONLY a JSON object with exactly this structure: 
-    { 
-      "title": "An engaging, natural-sounding title (avoid standard SEO clickbait formatting)", 
-      "story": "A captivating 300-word first-person narrative about the visit, the vibe, and the journey to get there.", 
-      "specs": "Brief, honest technical details about accessibility, terrain, or the best time to visit", 
-      "meta": "A short, conversational meta description",
-      "faq": [
-        {
-          "q": "A precise question focusing on practical travel utility (e.g., 'What is the difficulty level of the trek to ${place.place_name}?', 'When is the best season to visit ${place.place_name}?')",
-          "a": "A direct, helpful response optimized for quick reading (1-2 sentences max)."
-        },
-        {
-          "q": "Another practical user query (e.g., 'Are there specific permits or guides required to access ${place.place_name}?')",
-          "a": "Clear, definitive answer containing localized geographical reference points and guidelines."
-        }
-      ]
-    }`;
+REQUIRED DATA SECTIONS:
+1. 'about': Fill in overview, geography/terrain, access/trailhead info, and conservation/safety rules.
+2. 'metrics': Fill in accurate telemetry numbers and field metrics (elevation in meters, difficulty level, trek distance in km, estimated time in minutes, cell coverage, water safety, permit rules).
+3. 'story': A captivating 300-word first-person narrative about the visit and journey.
+4. 'history': Historical context or local lore.
+5. 'highlights': Array of key visual or expedition highlights.`;
 
     const requestBody = {
       contents: [{
@@ -1808,7 +1796,44 @@ function App() {
       }],
       generationConfig: {
         response_mime_type: "application/json",
-        temperature: 0.75
+        temperature: 0.75,
+        response_schema: {
+          type: "OBJECT",
+          properties: {
+            about: {
+              type: "OBJECT",
+              properties: {
+                overview: { type: "STRING" },
+                geography_terrain: { type: "STRING" },
+                access_and_trailhead: { type: "STRING" },
+                conservation_rules: { type: "STRING" }
+              },
+              required: ["overview", "geography_terrain", "access_and_trailhead", "conservation_rules"]
+            },
+            metrics: {
+              type: "OBJECT",
+              properties: {
+                elevation_m: { type: "NUMBER" },
+                drop_height_m: { type: "NUMBER" },
+                difficulty_level: { type: "STRING" },
+                trek_distance_km: { type: "NUMBER" },
+                estimated_time_mins: { type: "NUMBER" },
+                best_visit_time: { type: "STRING" },
+                cellular_coverage: { type: "STRING" },
+                water_safety_index: { type: "STRING" },
+                permit_required: { type: "STRING" }
+              },
+              required: ["elevation_m", "difficulty_level", "trek_distance_km", "estimated_time_mins", "best_visit_time"]
+            },
+            story: { type: "STRING" },
+            history: { type: "STRING" },
+            highlights: {
+              type: "ARRAY",
+              items: { type: "STRING" }
+            }
+          },
+          required: ["about", "metrics", "story", "history", "highlights"]
+        }
       }
     };
 
@@ -1821,23 +1846,23 @@ function App() {
 
       const data = await response.json();
 
-      // FIX: Throw error if API quota is exceeded or key is blocked
+      // Throw error if API quota is exceeded or key is blocked
       if (data.error) {
         triggerToast("Gemini API Error:", data.error.message);
         throw new Error(data.error.message);
       }
 
-      if (!data.candidates || !data.candidates[0].content.parts[0].text) {
+      if (!data.candidates || !data.candidates[0]?.content?.parts[0]?.text) {
         throw new Error("No content generated by AI.");
       }
 
       const aiJson = JSON.parse(data.candidates[0].content.parts[0].text);
 
-      // Save to Supabase (this function now uses triggerToast internally)
+      // Save to Supabase (this function uses triggerToast internally)
       await saveArticleToDatabase(place.id, aiJson);
 
     } catch (err) {
-      // Log locally, but re-throw so bulkGenerateArticles can catch it
+      // Log locally, re-throw for bulk generation pipelines
       triggerToast("Fetch Error:", err.message);
       throw err;
     }
@@ -1982,22 +2007,37 @@ function App() {
   };
 
 
-  const bulkGenerateArticles = async () => {
-    // 1. Identify items currently missing their story narrative
-    const targets = places.filter(p => p.status === 'done' && !p.ai_article?.story);
+  const bulkGenerateArticles = async (targetPlaces = null) => {
+    // 1. Target provided places or filter all completed locations regardless of existing articles
+    const targets = targetPlaces
+      ? (Array.isArray(targetPlaces) ? targetPlaces : [targetPlaces])
+      : places.filter(p => p.status === 'done');
 
     if (targets.length === 0) {
-      triggerToast("No pending articles found to process.");
+      triggerToast("No completed locations found to process.");
       return;
     }
 
-    triggerToast(`Processing ${targets.length} items...`);
+    triggerToast(`Processing ${targets.length} location(s)...`);
 
-    // 2. Sequential generation with automated safety cooldowns
+    // 2. Sequential article deletion and re-generation with rate-limit retries
     for (const place of targets) {
       let success = false;
-      while (!success) { // Keep trying until this specific place is done
+      let articleCleared = false;
+
+      while (!success) {
         try {
+          // Step A: If an article exists and hasn't been reset yet, clear it from the database
+          if (!articleCleared && place.ai_article) {
+            triggerToast(`Clearing existing article for "${place.place_name}"...`);
+            if (typeof saveArticleToDatabase === 'function') {
+              await saveArticleToDatabase(place.id, null);
+            }
+            place.ai_article = null; // Clear local reference
+            articleCleared = true;
+          }
+
+          // Step B: Re-generate the structured travel article
           await generateTravelArticle(place);
           success = true; // Move to next place
           await new Promise(r => setTimeout(r, 4000)); // 4s safety gap
@@ -2005,20 +2045,20 @@ function App() {
           if (err.message.includes("quota") || err.message.includes("429")) {
             triggerToast("Quota Full. Pausing for 65s...");
             await new Promise(r => setTimeout(r, 65000)); // Wait for API reset window
-            // success remains false, so the 'while' loop will retry this 'place' again
+            // success remains false; while loop retries generation without clearing again
           } else {
-            triggerToast("Skipping due to non-quota error.");
+            triggerToast(`Skipping ${place.place_name} due to error: ${err.message}`);
             success = true; // Skip to avoid infinite loop on bad data
           }
         }
       }
     }
 
-    triggerToast("Bulk generation finished!");
+    triggerToast("Article generation and rebuild completed!");
 
-    // 3. Global state sync to display newly built stories
+    // 3. Global state sync to refresh UI display
     if (typeof refreshAllData === 'function') {
-      refreshAllData();
+      await refreshAllData();
     }
   };
 
@@ -3166,11 +3206,11 @@ function App() {
               </button>
 
               <div className="flex gap-2">
-                {/* ⚡ PENDING ARTICLE GENERATOR: Sequences through visited items missing a story map layer */}
+                {/* ⚡ BULK ARTICLE GENERATOR: Sequences through visited items*/}
                 <button
                   onClick={bulkGenerateArticles}
                   className="flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all border bg-violet-50 border-violet-200 text-violet-600 hover:bg-violet-100 active:scale-95 shadow-sm"
-                  title="Scan for visited locations missing AI stories and batch generate narratives"
+                  title="Regenerate Articles for all visited locations"
                 >
                   <Icon name="sparkles" className="w-3.5 h-3.5 text-violet-500" />
                   <span>Articles</span>
