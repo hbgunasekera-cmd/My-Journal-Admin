@@ -1848,7 +1848,7 @@ REQUIRED DATA SECTIONS:
 
       // Throw error if API quota is exceeded or key is blocked
       if (data.error) {
-        triggerToast("Gemini API Error:", data.error.message);
+        triggerToast(`Gemini API Error: ${data.error.message}`);
         throw new Error(data.error.message);
       }
 
@@ -1858,12 +1858,12 @@ REQUIRED DATA SECTIONS:
 
       const aiJson = JSON.parse(data.candidates[0].content.parts[0].text);
 
-      // Save to Supabase (this function uses triggerToast internally)
+      // Save to Supabase (re-throws errors if update fails)
       await saveArticleToDatabase(place.id, aiJson);
 
     } catch (err) {
       // Log locally, re-throw for bulk generation pipelines
-      triggerToast("Fetch Error:", err.message);
+      triggerToast(`Fetch Error: ${err.message}`);
       throw err;
     }
   };
@@ -1979,17 +1979,15 @@ REQUIRED DATA SECTIONS:
 
       if (error) throw error;
 
-
       setPlaces(prev => prev.map(p =>
         p.id === id ? { ...p, ai_article: articleData, status: 'done' } : p
       ));
 
-
       triggerToast("Journal entry successfully updated!");
 
     } catch (err) {
-
-      triggerToast("Database update failed.");
+      triggerToast(`Database update failed: ${err.message}`);
+      throw err; // Crucial: propagates error to parent functions
     }
   };
 
