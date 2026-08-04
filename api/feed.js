@@ -6,6 +6,20 @@ const supabase = createClient(
   process.env.VITE_SUPABASE_KEY
 );
 
+// Clean slug generator matching App.jsx routing logic
+const generateCleanSlug = (text) => {
+  if (!text) return "";
+  return String(text)
+    .toLowerCase()
+    .trim()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[–—]/g, '-')
+    .replace(/[^a-z0-9\s-]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-');
+};
+
 export default async function handler(req, res) {
   // 1. CORS & Security (Allows Pinterest/RSS readers to fetch data)
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -24,28 +38,37 @@ export default async function handler(req, res) {
 
   if (error) return res.status(500).json({ error: error.message });
 
-  // 3. Construct RSS Items with Attribution Protection
+  // 3. Construct RSS Items formatted with Image, First Paragraph, and Gallery Link
   const rssItems = places.map(place => {
-    // --- REVISED: Generate URL slugs exactly matching generateShareLink in App.jsx ---
-    const formattedName = encodeURIComponent(place.place_name.trim().replace(/\s+/g, '-'));
+    // REVISED: Generate URL slugs matching generateCleanSlug in App.jsx
+    const formattedName = generateCleanSlug(place.place_name);
     const rawUrl = `https://www.myjournalview.com/gallery/${formattedName}`;
     
     // Safety: Escape XML characters
     const escapedUrl = rawUrl.replace(/&/g, '&amp;');
     const escapedMediaUrl = (place.cover_photo_url || "").replace(/&/g, '&amp;');
     
-    // Add visual copyright text to the description that Pinterest scrapes
-    const storyText = place.ai_article?.story 
-      ? place.ai_article.story.substring(0, 400).trim() + "..." 
-      : "Explore this hidden gem in Sri Lanka.";
+    // Extract full text (supports string or object formatted ai_article)
+    const articleText = typeof place.ai_article === 'object' 
+      ? (place.ai_article?.story || place.ai_article?.content || '') 
+      : (place.ai_article || '');
     
-    const protectedDescription = `${storyText} \n\n© My Journal | hasitha-gunasekera. Original photography available only at www.myjournalview.com`;
-    
+    // Extract only the first paragraph
+    const firstParagraph = articleText.split(/\r?\n\r?\n|\r?\n/)[0]?.trim() || "Explore this hidden gem in Sri Lanka.";
+
+    // Build item description layout: Cover Photo -> First Paragraph -> Location Link -> Copyright
+    const formattedContent = `
+      <p><img src="${escapedMediaUrl}" alt="${place.place_name}" style="max-width: 100%; height: auto;" /></p>
+      <p>${firstParagraph}</p>
+      <p>📍Location: <a href="${escapedUrl}">${escapedUrl}</a></p>
+      <p><small>© My Journal | hasitha-gunasekera. Original photography available only at www.myjournalview.com</small></p>
+    `.trim();
+
     return `
       <item>
-        <title><![CDATA[${place.place_name}]]></title>
+        <title><![CDATA[✍️ New Journal Entry: ${place.place_name}]]></title>
         <link>${escapedUrl}</link>
-        <description><![CDATA[${protectedDescription}]]></description>
+        <description><![CDATA[${formattedContent}]]></description>
         <pubDate>${new Date(place.created_at).toUTCString()}</pubDate>
         
         <guid isPermaLink="true">${escapedUrl}</guid>
