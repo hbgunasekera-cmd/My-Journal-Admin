@@ -66,7 +66,7 @@ export default async function handler(req, res) {
       <channel>
         <title>My Journal | Sri Lanka Travel Gallery</title>
         <link>https://www.myjournalview.com/</link>
-        <atom:link href="https://www.myjournalview.com/api/feed" rel="self" type="application/rss+xml" />
+        <atom:link href="https://my-journal-admin.vercel.app/api/feed" rel="self" type="application/rss+xml" />
         <description>Official cinematic drone and iPhone photography by Hasitha Gunasekera.</description>
         <language>en-us</language>
         <lastBuildDate>${new Date().toUTCString()}</lastBuildDate>
