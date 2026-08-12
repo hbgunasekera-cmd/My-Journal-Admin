@@ -2637,7 +2637,7 @@ function App() {
     // Localized Set per recalculation to avoid state leakage across re-renders
     const knownUsers = new Set();
 
-    const parseUA = (v) => {
+    export const parseUA = (v = {}) => {
       const rawUA = v.user_agent || "";
       const lowerUA = rawUA.toLowerCase();
       const referrer = (v.referrer || "").toLowerCase();
@@ -2650,14 +2650,14 @@ function App() {
 
       const fingerprint = `${ip}_${rawUA}`;
 
-      // 1. Loyalty Check (Chronological execution based on sorted created_at)
+      // 1. Loyalty Check
       let loyaltyStatus = "Returning User";
-      if (fingerprint !== "_" && !knownUsers.has(fingerprint)) {
+      if (fingerprint !== "_" && typeof knownUsers !== 'undefined' && !knownUsers.has(fingerprint)) {
         knownUsers.add(fingerprint);
         loyaltyStatus = "Unique Visit";
       }
 
-      // 2. SYNCHRONIZED BOT & NETWORK DETECTION MATRIX
+      // 2. Bot & Network Detection Matrix
       const botPatterns = [
         'bot', 'spider', 'crawl', 'lighthouse', 'slurp',
         'facebookexternalhit', 'twitterbot', 'google-safety',
@@ -2670,7 +2670,6 @@ function App() {
         'ia_archiver', 'screaming frog', 'adsbot'
       ];
 
-      // Data Center IP Prefixes (AWS, Google Cloud, Meta, Azure)
       const isDataCenterNetwork =
         ip.startsWith('66.220.') || ip.startsWith('173.252.') ||
         ip.startsWith('31.13.') || ip.startsWith('66.249.') ||
@@ -2686,7 +2685,7 @@ function App() {
         v.is_webdriver === true ||
         isDataCenterNetwork;
 
-      // 3. SOURCE DETECTION (Incorporating UA, Referrer, UTM Source, and URL Path)
+      // 3. Source Detection
       let finalSource = "Direct";
 
       if (isBot) {
@@ -2702,7 +2701,7 @@ function App() {
           finalSource = 'Automated Crawler';
         }
       } else {
-        // Check for QR Code via UTM source, URL query parameter in page_path, or referrer
+        // Check for QR Code via UTM source, page_path, or referrer
         if (
           utmSource.includes('qrcode') ||
           utmSource.includes('qr') ||
@@ -2750,7 +2749,7 @@ function App() {
         }
       }
 
-      // 4. DEVICE & OS DETECTION
+      // 4. Device & OS Detection
       let type = 'Desktop';
       if (lowerUA.includes('tablet') || lowerUA.includes('ipad')) type = 'Tablet';
       else if (lowerUA.includes('mobile') || lowerUA.includes('android') || lowerUA.includes('iphone')) type = 'Mobile';
@@ -2766,7 +2765,6 @@ function App() {
 
       if (isBot) os = 'Server OS';
 
-      // Normalize page path casing to prevent fragmented route stats
       const normalizedPagePath = rawPath.includes('/')
         ? rawPath.split('/').map(part => part.trim().toLowerCase()).join('/')
         : rawPath;
