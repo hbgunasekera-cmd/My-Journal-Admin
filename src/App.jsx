@@ -2637,7 +2637,7 @@ function App() {
     // Localized Set per recalculation to avoid state leakage across re-renders
     const knownUsers = new Set();
 
-    export const parseUA = (v = {}) => {
+    const parseUA = (v = {}) => {
       const rawUA = v.user_agent || "";
       const lowerUA = rawUA.toLowerCase();
       const referrer = (v.referrer || "").toLowerCase();
