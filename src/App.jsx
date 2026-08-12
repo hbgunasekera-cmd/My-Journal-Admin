@@ -2642,6 +2642,7 @@ function App() {
       const lowerUA = rawUA.toLowerCase();
       const referrer = (v.referrer || "").toLowerCase();
       const utmSource = (v.utm_source || "").toLowerCase();
+      const rawPath = v.page_path || 'Unknown';
 
       const ip = v.ip_address || "";
       const city = v.city || "";
@@ -2685,7 +2686,7 @@ function App() {
         v.is_webdriver === true ||
         isDataCenterNetwork;
 
-      // 3. SOURCE DETECTION (Incorporating UA, Referrer, and UTM Source)
+      // 3. SOURCE DETECTION (Incorporating UA, Referrer, UTM Source, and URL Path)
       let finalSource = "Direct";
 
       if (isBot) {
@@ -2701,10 +2702,18 @@ function App() {
           finalSource = 'Automated Crawler';
         }
       } else {
-        // Check explicit UTM source first
-        if (utmSource) {
-          if (utmSource.includes('qrcode') || utmSource.includes('qr')) finalSource = 'QR Code';
-          else if (utmSource.includes('facebook') || utmSource.includes('fb')) finalSource = 'Facebook';
+        // Check for QR Code via UTM source, URL query parameter in page_path, or referrer
+        if (
+          utmSource.includes('qrcode') ||
+          utmSource.includes('qr') ||
+          rawPath.toLowerCase().includes('utm_source=qrcode') ||
+          rawPath.toLowerCase().includes('utm_source=qr')
+        ) {
+          finalSource = 'QR Scan';
+        }
+        // Explicit UTM sources
+        else if (utmSource) {
+          if (utmSource.includes('facebook') || utmSource.includes('fb')) finalSource = 'Facebook';
           else if (utmSource.includes('instagram') || utmSource.includes('ig')) finalSource = 'Instagram';
           else if (utmSource.includes('twitter') || utmSource.includes('x')) finalSource = 'Twitter(X)';
           else if (utmSource.includes('newsletter') || utmSource.includes('email')) finalSource = 'Email / Newsletter';
@@ -2757,8 +2766,7 @@ function App() {
 
       if (isBot) os = 'Server OS';
 
-      // Normalize page path casing to prevent fragmented route stats (e.g., 'Gallery/diva guhawa')
-      const rawPath = v.page_path || 'Unknown';
+      // Normalize page path casing to prevent fragmented route stats
       const normalizedPagePath = rawPath.includes('/')
         ? rawPath.split('/').map(part => part.trim().toLowerCase()).join('/')
         : rawPath;
