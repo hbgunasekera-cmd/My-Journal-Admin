@@ -2638,6 +2638,7 @@ function App() {
     const knownUsers = new Set();
 
     const parseUA = (v = {}) => {
+
       const rawUA = v.user_agent || "";
       const lowerUA = rawUA.toLowerCase();
       const referrer = (v.referrer || "").toLowerCase();
@@ -2650,14 +2651,14 @@ function App() {
 
       const fingerprint = `${ip}_${rawUA}`;
 
-      // 1. Loyalty Check
+      // 1. Loyalty Tracking
       let loyaltyStatus = "Returning User";
-      if (fingerprint !== "_" && typeof knownUsers !== 'undefined' && !knownUsers.has(fingerprint)) {
+      if (fingerprint !== "_" && !knownUsers.has(fingerprint)) {
         knownUsers.add(fingerprint);
         loyaltyStatus = "Unique Visit";
       }
 
-      // 2. Bot & Network Detection Matrix
+      // 2. Bot & Data-Center Filter
       const botPatterns = [
         'bot', 'spider', 'crawl', 'lighthouse', 'slurp',
         'facebookexternalhit', 'twitterbot', 'google-safety',
@@ -2685,23 +2686,21 @@ function App() {
         v.is_webdriver === true ||
         isDataCenterNetwork;
 
-      // 3. Source Detection
+      // 3. Traffic Source & QR Detection
       let finalSource = "Direct";
 
       if (isBot) {
-        if (lowerUA.includes('facebook') || lowerUA.includes('meta') || ip.startsWith('31.13.') || ip.startsWith('66.220.') || ip.startsWith('69.171.')) {
+        if (lowerUA.includes('facebook') || lowerUA.includes('meta') || ip.startsWith('31.13.') || ip.startsWith('66.220.')) {
           finalSource = 'Meta Scraper';
         } else if (lowerUA.includes('google') || ip.startsWith('66.249.')) {
           finalSource = 'Google Bot';
         } else if (lowerUA.includes('twitter')) {
           finalSource = 'Twitter Bot';
-        } else if (lowerUA.includes('pinterest')) {
-          finalSource = 'Pinterest Bot';
         } else {
           finalSource = 'Automated Crawler';
         }
       } else {
-        // Check for QR Code via UTM source, page_path, or referrer
+        // QR Code Detection logic
         if (
           utmSource.includes('qrcode') ||
           utmSource.includes('qr') ||
@@ -2709,51 +2708,30 @@ function App() {
           rawPath.toLowerCase().includes('utm_source=qr')
         ) {
           finalSource = 'QR Scan';
-        }
-        // Explicit UTM sources
-        else if (utmSource) {
+        } else if (utmSource) {
           if (utmSource.includes('facebook') || utmSource.includes('fb')) finalSource = 'Facebook';
           else if (utmSource.includes('instagram') || utmSource.includes('ig')) finalSource = 'Instagram';
           else if (utmSource.includes('twitter') || utmSource.includes('x')) finalSource = 'Twitter(X)';
           else if (utmSource.includes('newsletter') || utmSource.includes('email')) finalSource = 'Email / Newsletter';
           else finalSource = utmSource.charAt(0).toUpperCase() + utmSource.slice(1);
-        }
-        // Search Engines
-        else if (
+        } else if (
           lowerUA.includes('google') || lowerUA.includes('bing') || lowerUA.includes('yahoo') ||
-          lowerUA.includes('duckduckgo') || lowerUA.includes('ecosia') ||
-          referrer.includes('google.') || referrer.includes('bing.com') || referrer.includes('duckduckgo.com')
+          referrer.includes('google.') || referrer.includes('bing.com')
         ) {
           finalSource = 'Search Engine';
-        }
-        // Meta Ecosystem
-        else if (lowerUA.includes('messenger') || lowerUA.includes('fb_iab')) finalSource = 'Messenger';
-        else if (lowerUA.includes('instagram') || referrer.includes('instagram.com')) finalSource = 'Instagram';
-        else if (lowerUA.includes('threads') || lowerUA.includes('barcelona')) finalSource = 'Threads';
-        else if (lowerUA.includes('fban') || lowerUA.includes('fbav') || referrer.includes('facebook.com')) finalSource = 'Facebook';
-        // Other Social Platforms
-        else if (lowerUA.includes('tiktok') || lowerUA.includes('musical')) finalSource = 'TikTok';
-        else if (lowerUA.includes('whatsapp')) finalSource = 'WhatsApp';
-        else if (lowerUA.includes('surf.social')) finalSource = 'Surf.Social';
-        else if (lowerUA.includes('youtube') || lowerUA.includes('com.google.android.youtube') || referrer.includes('youtube.com')) finalSource = 'YouTube';
-        else if (lowerUA.includes('reddit') || referrer.includes('reddit.com')) finalSource = 'Reddit';
-        else if (lowerUA.includes('unsplash')) finalSource = 'Unsplash';
-        else if (lowerUA.includes('elakiri')) finalSource = 'Elakiri';
-        else if (lowerUA.includes('pinterest') || referrer.includes('pinterest.com')) finalSource = 'Pinterest';
-        else if (lowerUA.includes('flipboard')) finalSource = 'Flipboard';
-        else if (lowerUA.includes('twitter') || lowerUA.includes(' x/') || referrer.includes('t.co') || referrer.includes('twitter.com')) finalSource = 'Twitter(X)';
-        else if (lowerUA.includes('mastodon') || lowerUA.includes('ivory') || lowerUA.includes('tusky')) finalSource = 'Mastodon';
-        else if (lowerUA.includes('bsky') || lowerUA.includes('bluesky')) finalSource = 'Bluesky';
-        else {
+        } else if (lowerUA.includes('instagram') || referrer.includes('instagram.com')) {
+          finalSource = 'Instagram';
+        } else if (lowerUA.includes('fban') || lowerUA.includes('fbav') || referrer.includes('facebook.com')) {
+          finalSource = 'Facebook';
+        } else {
           finalSource = "Direct";
         }
       }
 
-      // 4. Device & OS Detection
+      // 4. Device and OS Resolution
       let type = 'Desktop';
       if (lowerUA.includes('tablet') || lowerUA.includes('ipad')) type = 'Tablet';
       else if (lowerUA.includes('mobile') || lowerUA.includes('android') || lowerUA.includes('iphone')) type = 'Mobile';
-
       if (isBot) type = 'Bot/Server';
 
       let os = 'Other';
@@ -2762,14 +2740,13 @@ function App() {
       else if (rawUA.includes('iPhone') || rawUA.includes('iPad')) os = 'iOS';
       else if (rawUA.includes('Mac OS')) os = 'macOS';
       else if (rawUA.includes('Linux')) os = 'Linux';
-
       if (isBot) os = 'Server OS';
 
       const normalizedPagePath = rawPath.includes('/')
         ? rawPath.split('/').map(part => part.trim().toLowerCase()).join('/')
         : rawPath;
 
-      return { type, source: finalSource, os, isBot, loyaltyStatus, country, normalizedPagePath };
+      return { type, source: finalSource, os, isBot, loyaltyStatus, country, region: v.region || "", city, normalizedPagePath };
     };
 
     // Sort analytics chronologically prior to computing loyalty status
