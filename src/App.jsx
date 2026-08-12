@@ -2703,7 +2703,8 @@ function App() {
       } else {
         // Check explicit UTM source first
         if (utmSource) {
-          if (utmSource.includes('facebook') || utmSource.includes('fb')) finalSource = 'Facebook';
+          if (utmSource.includes('qrcode') || utmSource.includes('qr')) finalSource = 'QR Code';
+          else if (utmSource.includes('facebook') || utmSource.includes('fb')) finalSource = 'Facebook';
           else if (utmSource.includes('instagram') || utmSource.includes('ig')) finalSource = 'Instagram';
           else if (utmSource.includes('twitter') || utmSource.includes('x')) finalSource = 'Twitter(X)';
           else if (utmSource.includes('newsletter') || utmSource.includes('email')) finalSource = 'Email / Newsletter';
