@@ -2133,8 +2133,23 @@ function App() {
         console.error("Subscriber notification failed:", notifyErr);
       }
 
-      // 5. Reload the webpage to display the updated entry
-      window.location.reload();
+      // 5. Update the local state instead of reloading the page
+      setPlaces(prevPlaces =>
+        prevPlaces.map(p =>
+          p.id === place.id
+            ? { ...p, status: 'done', ai_article: articleData, is_indexed: isIndexed }
+            : p
+        )
+      );
+
+      // We also update filteredPlaces so the UI reflects the change instantly if a search/filter is active
+      setFilteredPlaces(prevFiltered =>
+        prevFiltered.map(p =>
+          p.id === place.id
+            ? { ...p, status: 'done', ai_article: articleData, is_indexed: isIndexed }
+            : p
+        )
+      );
 
     } catch (err) {
       triggerToast("Database update failed.");
