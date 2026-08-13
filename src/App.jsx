@@ -1785,20 +1785,29 @@ function App() {
 
     const contextPrompt = `Write an authentic backcountry field report and first-person travel journal entry for a ${place.category} named "${place.place_name}" located in ${place.locality || 'Sri Lanka'}.
 
-   CRITICAL TONE & STYLE INSTRUCTIONS:
-   - Write this like a real human sharing a personal travel diary. The tone should be conversational, passionate, and grounded.
-   - Include the reality of the journey: mention elements like navigating rocky terrain, a long motorcycle road trip, setting up camp, or hunting down hidden waterfalls.
-   - Focus on sensory details: the mist in the air, the sound of cascading water, or the feeling of the trail underfoot.
-   - Mention capturing the experience on an iPhone and the satisfaction of dialing in mobile color grades and LUTs.
-   - Avoid mentioning drones or specific hardware model numbers.
-   - STRICTLY AVOID cliché AI buzzwords. Do NOT use: "tapestry," "realm," "nestled," "unveil," "symphony," "breathtaking," "embark," or "delve." Use natural, everyday vocabulary.
+  CRITICAL TONE & STYLE INSTRUCTIONS:
+- Narrative Voice: Write as an authentic human explorer sharing a grounded, passionate, and conversational travel diary.
+- Sensory Focus: Emphasize vivid sensory details (e.g., mist in the air, the roar of cascading water, changing light).
+- Authentic Journey: Capture two-wheel travel realities—navigating steep ascents, broken pavement, potholes, or off-road tracks on a commuter scooter or motorcycle—along with real weather and road challenges.
+- Photography Workflow: Frame visual notes around capturing photos on an iPhone 12 Pro, refined with minimal color balancing using the native iOS photo editor (no heavy filters or LUTs).
+- Drone Operations: Include practical aerial notes for a compact DJI Neo 2 drone (ideal for waterfall shots), noting wind resistance limitations in misty/cloudy conditions, and respecting drone bans in national parks (e.g., Horton Plains, Knuckles) or exposed mountain summits.
+- Language Constraints: STRICTLY AVOID cliché AI buzzwords. Never use: "tapestry," "realm," "nestled," "unveil," "symphony," "breathtaking," "embark," or "delve." Use natural, unpretentious vocabulary.
 
-    REQUIRED DATA SECTIONS:
-    1. 'about': Fill in overview, geography/terrain, access/trailhead info, and conservation/safety rules.
-    2. 'metrics': Fill in accurate telemetry numbers and field metrics (elevation in meters, difficulty level, trek distance in km, estimated time in minutes, cell coverage, water safety, permit rules).
-    3. 'story': A captivating 300-word first-person narrative about the visit and journey.
-    4. 'history': Historical context or local lore.
-    5. 'highlights': Array of key visual or expedition highlights.`;
+  REQUIRED DATA SECTIONS:
+  Generate a strict JSON object matching the exact schema provided.
+  - 'quick_facts': Core scannable telemetry (elevation, difficulty, access, mobile signal).
+  - 'why_visit': Pros and cons of visiting.
+  - 'story': A captivating 300-word first-person narrative about the visit and journey.
+  - 'explorer_rating': Ratings out of 10 for various factors.
+  - 'photography_notes': Camera, lens, time, and editing tips.
+  - 'drone_notes': Flight conditions, wind, obstacles, and launch points.
+  - 'route_report': Starting point, distance, road condition, and hazards.
+  - 'wish_i_knew': Array of 3-4 highly practical tips for before visiting.
+  - 'best_time': Best month and time of day.
+  - 'history': VERY BRIEF (1-2 sentences) historical context.
+  - 'field_notes': Safety, water, and conservation rules.
+  - 'behind_the_shot': Details on one specific photograph capture.
+  - 'highlights': Array of key visual or expedition highlights.`;
 
     const requestBody = {
       contents: [{
@@ -1810,39 +1819,106 @@ function App() {
         responseSchema: {
           type: "OBJECT",
           properties: {
-            about: {
+            quick_facts: {
               type: "OBJECT",
               properties: {
-                overview: { type: "STRING" },
-                geography_terrain: { type: "STRING" },
-                access_and_trailhead: { type: "STRING" },
-                conservation_rules: { type: "STRING" }
-              },
-              required: ["overview", "geography_terrain", "access_and_trailhead", "conservation_rules"]
-            },
-            metrics: {
-              type: "OBJECT",
-              properties: {
+                location: { type: "STRING" },
                 elevation_m: { type: "NUMBER" },
-                drop_height_m: { type: "NUMBER" },
-                difficulty_level: { type: "STRING" },
-                trek_distance_km: { type: "NUMBER" },
-                estimated_time_mins: { type: "NUMBER" },
-                best_visit_time: { type: "STRING" },
-                cellular_coverage: { type: "STRING" },
-                water_safety_index: { type: "STRING" },
-                permit_required: { type: "STRING" }
-              },
-              required: ["elevation_m", "difficulty_level", "trek_distance_km", "estimated_time_mins", "best_visit_time"]
+                difficulty: { type: "STRING" },
+                vehicle_access: { type: "STRING" },
+                motorcycle_friendly: { type: "STRING" },
+                mobile_coverage: { type: "STRING" },
+                drone_potential: { type: "STRING" },
+                recommended_time: { type: "STRING" },
+                time_required: { type: "STRING" }
+              }
+            },
+            why_visit: {
+              type: "OBJECT",
+              properties: {
+                summary: { type: "STRING" },
+                best_for: { type: "ARRAY", items: { type: "STRING" } },
+                less_suitable_for: { type: "ARRAY", items: { type: "STRING" } }
+              }
             },
             story: { type: "STRING" },
+            highlights: { type: "ARRAY", items: { type: "STRING" } },
+            explorer_rating: {
+              type: "OBJECT",
+              properties: {
+                photography: { type: "NUMBER" },
+                adventure: { type: "NUMBER" },
+                family_friendly: { type: "NUMBER" },
+                drone: { type: "NUMBER" },
+                crowd_level: { type: "NUMBER" },
+                overall: { type: "NUMBER" }
+              }
+            },
+            photography_notes: {
+              type: "OBJECT",
+              properties: {
+                best_time: { type: "STRING" },
+                lighting: { type: "STRING" },
+                best_composition: { type: "STRING" },
+                lens_recommendation: { type: "STRING" },
+                mobile_notes: { type: "STRING" }
+              }
+            },
+            drone_notes: {
+              type: "OBJECT",
+              properties: {
+                flight_conditions: { type: "STRING" },
+                wind: { type: "STRING" },
+                launch_area: { type: "STRING" },
+                obstacles: { type: "STRING" },
+                restrictions: { type: "STRING" }
+              }
+            },
+            route_report: {
+              type: "OBJECT",
+              properties: {
+                starting_point: { type: "STRING" },
+                distance_km: { type: "NUMBER" },
+                travel_time: { type: "STRING" },
+                road_condition: { type: "STRING" },
+                hazards: { type: "STRING" },
+                fuel_parking: { type: "STRING" }
+              }
+            },
+            wish_i_knew: { type: "ARRAY", items: { type: "STRING" } },
+            best_time_to_visit: {
+              type: "OBJECT",
+              properties: {
+                best_months: { type: "STRING" },
+                best_time_of_day: { type: "STRING" },
+                avoid: { type: "STRING" }
+              }
+            },
             history: { type: "STRING" },
-            highlights: {
-              type: "ARRAY",
-              items: { type: "STRING" }
+            field_notes: {
+              type: "OBJECT",
+              properties: {
+                checklist: { type: "ARRAY", items: { type: "STRING" } },
+                weather_risk: { type: "STRING" },
+                child_friendly: { type: "STRING" }
+              }
+            },
+            behind_the_shot: {
+              type: "OBJECT",
+              properties: {
+                captured_time: { type: "STRING" },
+                device: { type: "STRING" },
+                conditions: { type: "STRING" },
+                editing: { type: "STRING" },
+                why_i_took_it: { type: "STRING" }
+              }
             }
           },
-          required: ["about", "metrics", "story", "history", "highlights"]
+          required: [
+            "quick_facts", "why_visit", "story", "highlights", "explorer_rating",
+            "photography_notes", "drone_notes", "route_report", "wish_i_knew",
+            "best_time_to_visit", "history", "field_notes", "behind_the_shot"
+          ]
         }
       }
     };
@@ -1856,7 +1932,6 @@ function App() {
 
       const data = await response.json();
 
-      // Throw error if API quota is exceeded or key is blocked
       if (data.error) {
         triggerToast(`Gemini API Error: ${data.error.message}`);
         throw new Error(data.error.message);
@@ -1866,7 +1941,6 @@ function App() {
         throw new Error("No content generated by AI.");
       }
 
-      // Clean markdown formatting if present before parsing JSON
       const rawText = data.candidates[0].content.parts[0].text;
       const cleanedText = rawText.replace(/```json\n?|```/g, '').trim();
 
@@ -1877,11 +1951,9 @@ function App() {
         throw new Error(`Failed to parse AI response JSON: ${parseError.message}`);
       }
 
-      // Pass full place object so saveArticleToDatabase has access to place_name
       await saveArticleToDatabase(place, aiJson);
 
     } catch (err) {
-      // Log locally, re-throw for bulk generation pipelines
       triggerToast(`Fetch Error: ${err.message}`);
       throw err;
     }
