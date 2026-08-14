@@ -1781,11 +1781,12 @@ function App() {
       throw new Error("API key not valid. Please pass a valid API key.");
     }
 
+    // Target Gemini 2.5 Flash endpoint
     const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${currentApiKey}`;
 
     const contextPrompt = `Write an authentic backcountry field report and first-person travel journal entry for a ${place.category} named "${place.place_name}" located in ${place.locality || 'Sri Lanka'}.
 
-  CRITICAL TONE & STYLE INSTRUCTIONS:
+CRITICAL TONE & STYLE INSTRUCTIONS:
 - Narrative Voice: Write as an authentic human explorer sharing a grounded, passionate, and conversational travel diary.
 - Sensory Focus: Emphasize vivid sensory details (e.g., mist in the air, the roar of cascading water, changing light).
 - Authentic Journey: Capture two-wheel travel realities—navigating steep ascents, broken pavement, potholes, or off-road tracks on a commuter scooter or motorcycle—along with real weather and road challenges.
@@ -1793,21 +1794,24 @@ function App() {
 - Drone Operations: Include practical aerial notes for a compact DJI Neo 2 drone (ideal for waterfall shots), noting wind resistance limitations in misty/cloudy conditions, and respecting drone bans in national parks (e.g., Horton Plains, Knuckles) or exposed mountain summits.
 - Language Constraints: STRICTLY AVOID cliché AI buzzwords. Never use: "tapestry," "realm," "nestled," "unveil," "symphony," "breathtaking," "embark," or "delve." Use natural, unpretentious vocabulary.
 
-  REQUIRED DATA SECTIONS:
-  Generate a strict JSON object matching the exact schema provided.
-  - 'quick_facts': Core scannable telemetry (elevation, difficulty, access, mobile signal).
-  - 'why_visit': Pros and cons of visiting.
-  - 'story': A captivating 300-word first-person narrative about the visit and journey.
-  - 'explorer_rating': Ratings out of 10 for various factors.
-  - 'photography_notes': Camera, lens, time, and editing tips.
-  - 'drone_notes': Flight conditions, wind, obstacles, and launch points.
-  - 'route_report': Starting point, distance, road condition, and hazards.
-  - 'wish_i_knew': Array of 3-4 highly practical tips for before visiting.
-  - 'best_time': Best month and time of day.
-  - 'history': VERY BRIEF (1-2 sentences) historical context.
-  - 'field_notes': Safety, water, and conservation rules.
-  - 'behind_the_shot': Details on one specific photograph capture.
-  - 'highlights': Array of key visual or expedition highlights.`;
+REQUIRED DATA SECTIONS:
+Generate a strict JSON object matching the exact schema provided.
+- 'target_keywords': Array of 3-5 strategic SEO long-tail keywords for search targeting.
+- 'seo_intro': A punchy 2-3 sentence SEO-optimized introductory hook summarizing the spot and setting the stage.
+- 'faqs': Array of 3-5 clear Q&A pairs covering key logistics (access, permits, best times, safety).
+- 'quick_facts': Core scannable telemetry (elevation, difficulty, access, mobile signal).
+- 'why_visit': Pros and cons of visiting.
+- 'story': A captivating 300-word first-person narrative about the visit and journey.
+- 'explorer_rating': Ratings out of 10 for various factors.
+- 'photography_notes': Camera, lens, time, and editing tips.
+- 'drone_notes': Flight conditions, wind, obstacles, and launch points.
+- 'route_report': Starting point, distance, road condition, and hazards.
+- 'wish_i_knew': Array of 3-4 highly practical tips for before visiting.
+- 'best_time': Best month and time of day.
+- 'history': VERY BRIEF (1-2 sentences) historical context.
+- 'field_notes': Safety, water, and conservation rules.
+- 'behind_the_shot': Details on one specific photograph capture.
+- 'highlights': Array of key visual or expedition highlights.`;
 
     const requestBody = {
       contents: [{
@@ -1816,9 +1820,26 @@ function App() {
       generationConfig: {
         responseMimeType: "application/json",
         temperature: 0.75,
+        maxOutputTokens: 65536, // Prevents JSON truncation on large responses
         responseSchema: {
           type: "OBJECT",
           properties: {
+            target_keywords: {
+              type: "ARRAY",
+              items: { type: "STRING" }
+            },
+            seo_intro: { type: "STRING" },
+            faqs: {
+              type: "ARRAY",
+              items: {
+                type: "OBJECT",
+                properties: {
+                  question: { type: "STRING" },
+                  answer: { type: "STRING" }
+                },
+                required: ["question", "answer"]
+              }
+            },
             quick_facts: {
               type: "OBJECT",
               properties: {
@@ -1915,9 +1936,10 @@ function App() {
             }
           },
           required: [
-            "quick_facts", "why_visit", "story", "highlights", "explorer_rating",
-            "photography_notes", "drone_notes", "route_report", "wish_i_knew",
-            "best_time_to_visit", "history", "field_notes", "behind_the_shot"
+            "target_keywords", "seo_intro", "faqs", "quick_facts", "why_visit",
+            "story", "highlights", "explorer_rating", "photography_notes",
+            "drone_notes", "route_report", "wish_i_knew", "best_time_to_visit",
+            "history", "field_notes", "behind_the_shot"
           ]
         }
       }
@@ -1974,34 +1996,35 @@ function App() {
       return false;
     }
 
+    // Target Gemini 2.5 Flash REST endpoint
     const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${currentApiKey}`;
 
     const metaPrompt = `Act as a Sri Lankan Geography & Environmental Regulation Expert. 
- Analyze the location: "${place.place_name}" (Locality: ${place.locality || 'Not Specified'}, Category: ${place.category}).
+Analyze the location: "${place.place_name}" (Locality: ${place.locality || 'Not Specified'}, Category: ${place.category}).
 
- STEP 1: Determine if this place is located within a larger protected area or reserve.
- Examples: 
- - "Chimney Pool" is inside "Horton Plains National Park".
- - "Dothaluoya Trail" or "Duwili Ella" is inside "Knuckles Forest Reserve".
- - "Piduruthalagala" is a "Strict Natural Reserve".
+STEP 1: Determine if this place is located within a larger protected area or reserve.
+Examples: 
+- "Chimney Pool" is inside "Horton Plains National Park".
+- "Dothaluoya Trail" or "Duwili Ella" is inside "Knuckles Forest Reserve".
+- "Piduruthalagala" is a "Strict Natural Reserve".
 
- STEP 2: Assign Governing Body based on the PARENT location:
- - National Parks/Sanctuaries -> "Department of Wildlife Conservation"
- - Forest Reserves/Sinharaja/Knuckles -> "Department of Forest Conservation"
- - Heritage Sites (Sigiriya/Anuradhapura) -> "Central Cultural Fund" or "Department of Archaeology"
+STEP 2: Assign Governing Body based on the PARENT location:
+- National Parks/Sanctuaries -> "Department of Wildlife Conservation"
+- Forest Reserves/Sinharaja/Knuckles -> "Department of Forest Conservation"
+- Heritage Sites (Sigiriya/Anuradhapura) -> "Central Cultural Fund" or "Department of Archaeology"
 
- STEP 3: Set Restriction Level:
- - "None": Public areas/beaches.
- - "Low": Local trails with no entry fee.
- - "High": National Parks/Reserves requiring tickets/permits.
- - "Restricted": Strict Natural Reserves (e.g., Ritigala Peak, Hakgala SNR).
+STEP 3: Set Restriction Level:
+- "None": Public areas/beaches.
+- "Low": Local trails with no entry fee.
+- "High": National Parks/Reserves requiring tickets/permits.
+- "Restricted": Strict Natural Reserves (e.g., Ritigala Peak, Hakgala SNR).
 
- Return ONLY this JSON structure:
- {
+Return ONLY this JSON structure:
+{
   "parent_area": "Name of the National Park or Reserve if applicable",
   "restriction_level": "None" | "Low" | "High" | "Restricted",
   "governing_org": "Open" | "Department of Wildlife Conservation" | "Department of Forest Conservation" | "Central Cultural Fund" | "Department of Archaeology" | "Department of National Botanic Gardens" | "National Livestock Development Board" | "Local Authorities"
- }`;
+}`;
 
     try {
       const response = await fetch(API_URL, {
@@ -2010,9 +2033,9 @@ function App() {
         body: JSON.stringify({
           contents: [{ parts: [{ text: metaPrompt }] }],
           generationConfig: {
-            // camelCase prevents HTTP 400 errors from Google REST API
             responseMimeType: "application/json",
-            temperature: 0.1
+            temperature: 0.1,
+            maxOutputTokens: 65536 // Prevents token truncation on Gemini 2.5 Flash calls
           }
         })
       });
@@ -2085,68 +2108,33 @@ function App() {
 
   const saveArticleToDatabase = async (place, articleData) => {
     try {
-      // 1. Save Article to Database & Update created_at timestamp
+      // 1. Save Article & Update Status in Database
       const { error } = await supabaseClient
         .from('travel_bucket_list')
         .update({
           ai_article: articleData,
           status: 'done',
-          is_indexed: false, // Set false initially until IndexNow confirms
-          created_at: new Date().toISOString(),
         })
         .eq('id', place.id);
 
       if (error) throw error;
 
-      // 2. Trigger IndexNow with place name and dummy array to generate /gallery/ link
-      const indexSuccess = await triggerIndexNow(place.place_name, [1]);
+      triggerToast("Article saved successfully!");
 
-      let isIndexed = false;
-
-      // 3. If IndexNow succeeds, set is_indexed to TRUE in Supabase
-      if (indexSuccess) {
-        const { error: indexError } = await supabaseClient
-          .from('travel_bucket_list')
-          .update({ is_indexed: true })
-          .eq('id', place.id);
-
-        if (indexError) {
-          console.error("Failed to update is_indexed flag:", indexError);
-        } else {
-          isIndexed = true;
-          triggerToast("Article saved and indexed successfully!");
-        }
-      } else {
-        triggerToast("Article saved, but IndexNow submission failed.");
-      }
-
-      // 4. Notify subscribers on completion with the updated payload
-      try {
-        await notifySubscribersOnCompletion({
-          ...place,
-          status: 'done',
-          ai_article: articleData,
-          is_indexed: isIndexed,
-        });
-      } catch (notifyErr) {
-        // Guarded so a notification failure won't halt execution or page reload
-        console.error("Subscriber notification failed:", notifyErr);
-      }
-
-      // 5. Update the local state instead of reloading the page
+      // 2. Update local state for immediate UI reflection without reloads
       setPlaces(prevPlaces =>
         prevPlaces.map(p =>
           p.id === place.id
-            ? { ...p, status: 'done', ai_article: articleData, is_indexed: isIndexed }
+            ? { ...p, status: 'done', ai_article: articleData }
             : p
         )
       );
 
-      // We also update filteredPlaces so the UI reflects the change instantly if a search/filter is active
+      // 3. Sync filtered state for active searches/filters
       setFilteredPlaces(prevFiltered =>
         prevFiltered.map(p =>
           p.id === place.id
-            ? { ...p, status: 'done', ai_article: articleData, is_indexed: isIndexed }
+            ? { ...p, status: 'done', ai_article: articleData }
             : p
         )
       );
