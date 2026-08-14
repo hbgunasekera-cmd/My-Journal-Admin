@@ -2108,33 +2108,68 @@ Return ONLY this JSON structure:
 
   const saveArticleToDatabase = async (place, articleData) => {
     try {
-      // 1. Save Article & Update Status in Database
+      // 1. Save Article to Database & Update created_at timestamp
       const { error } = await supabaseClient
         .from('travel_bucket_list')
         .update({
           ai_article: articleData,
           status: 'done',
+          is_indexed: false, // Set false initially until IndexNow confirms
+          created_at: new Date().toISOString(),
         })
         .eq('id', place.id);
 
       if (error) throw error;
 
-      triggerToast("Article saved successfully!");
+      // 2. Trigger IndexNow with place name and dummy array to generate /gallery/ link
+      const indexSuccess = await triggerIndexNow(place.place_name, [1]);
 
-      // 2. Update local state for immediate UI reflection without reloads
+      let isIndexed = false;
+
+      // 3. If IndexNow succeeds, set is_indexed to TRUE in Supabase
+      if (indexSuccess) {
+        const { error: indexError } = await supabaseClient
+          .from('travel_bucket_list')
+          .update({ is_indexed: true })
+          .eq('id', place.id);
+
+        if (indexError) {
+          console.error("Failed to update is_indexed flag:", indexError);
+        } else {
+          isIndexed = true;
+          triggerToast("Article saved and indexed successfully!");
+        }
+      } else {
+        triggerToast("Article saved, but IndexNow submission failed.");
+      }
+
+      // 4. Notify subscribers on completion with the updated payload
+      try {
+        await notifySubscribersOnCompletion({
+          ...place,
+          status: 'done',
+          ai_article: articleData,
+          is_indexed: isIndexed,
+        });
+      } catch (notifyErr) {
+        // Guarded so a notification failure won't halt execution or page reload
+        console.error("Subscriber notification failed:", notifyErr);
+      }
+
+      // 5. Update the local state instead of reloading the page
       setPlaces(prevPlaces =>
         prevPlaces.map(p =>
           p.id === place.id
-            ? { ...p, status: 'done', ai_article: articleData }
+            ? { ...p, status: 'done', ai_article: articleData, is_indexed: isIndexed }
             : p
         )
       );
 
-      // 3. Sync filtered state for active searches/filters
+      // We also update filteredPlaces so the UI reflects the change instantly if a search/filter is active
       setFilteredPlaces(prevFiltered =>
         prevFiltered.map(p =>
           p.id === place.id
-            ? { ...p, status: 'done', ai_article: articleData }
+            ? { ...p, status: 'done', ai_article: articleData, is_indexed: isIndexed }
             : p
         )
       );
