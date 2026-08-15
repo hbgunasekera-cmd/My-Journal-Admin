@@ -847,7 +847,6 @@ function App() {
 
     // --- FIX: Check if this location's cover image was already downloaded ---
     if (downloadedImagesRef.current.has(locationName)) {
-      console.log(`Cover image for ${locationName} already downloaded in this session. Skipping duplicate.`);
       return;
     }
 
@@ -869,9 +868,7 @@ function App() {
       // Force read the exact Content-Type from the proxy response
       const mimeType = response.headers.get('content-type') || blob.type || '';
 
-      // --- DEBUGGING LOGS --- 
-      console.log("DEBUG - Downloaded File Size:", blob.size, "bytes");
-      console.log("DEBUG - Detected MIME Type:", mimeType);
+
       // ----------------------
 
       let ext = 'jpg';
@@ -992,9 +989,6 @@ function App() {
       return;
     }
 
-    console.log(`[DEBUG] Platform: ${platform}`);
-    console.log(`[DEBUG] Token Value:`, accessToken);
-    console.log(`[DEBUG] Token Length:`, accessToken ? accessToken.length : 'N/A');
 
     const locationName = p.place_name || "Island Vignette";
     const shareLink = generateGalleryLink(locationName);
@@ -2254,7 +2248,6 @@ Return ONLY this JSON structure:
 
       if (subError) throw subError;
       if (!subscribers || subscribers.length === 0) {
-        console.log("No active subscribers found in database. Email dispatch aborted.");
         return;
       }
 
@@ -2343,7 +2336,6 @@ Return ONLY this JSON structure:
         throw new Error(result.error || `Server proxy error encountered with status code: ${response.status}`);
       }
 
-      console.log(`Successfully broadcasted field update notification to ${emailList.length} subscribers via serverless API proxy.`);
     } catch (err) {
       console.error("Background Email Notification Dispatch Failed:", err.message || err);
     }
