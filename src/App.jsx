@@ -2369,8 +2369,9 @@ Return ONLY this JSON structure:
             fadeAnimation: true
           }).setView([HomePoint.lat, HomePoint.lng], 8); // Centered on Sri Lanka
 
-          L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png')
-            .addTo(map);
+          L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
+            attribution: 'Tiles &copy; Esri'
+          }).addTo(map);
 
           markersLayer.current.addTo(map);
           mapRef.current = map;
