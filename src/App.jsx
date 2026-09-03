@@ -2100,6 +2100,82 @@ Return ONLY this JSON structure:
     refreshAllData();
   };
 
+  const syncYouTubeVideos = async () => {
+    try {
+      triggerToast("Starting YouTube sync...");
+
+      // 1. Fetch existing video URLs from Supabase to prevent duplicates
+      const { data: existingRecords, error: fetchError } = await supabaseClient
+        .from('hub_videos')
+        .select('url');
+
+      if (fetchError) throw fetchError;
+
+      // Create a Set for O(1) lookup speed
+      const existingUrls = new Set(existingRecords.map(record => record.url));
+
+      // 2. Call your backend proxy (which now uses the YouTube Data API instead of yt-dlp)
+      const response = await fetch('/api/sync-youtube', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targetUrl: 'https://www.youtube.com/@Its-My-Journal' })
+      });
+
+      // Read raw text first to safely handle empty or HTML error pages (e.g., 504 timeouts)
+      const rawText = await response.text();
+      let responseData;
+
+      try {
+        responseData = rawText ? JSON.parse(rawText) : {};
+      } catch (parseError) {
+        console.error("Raw server response:", rawText);
+        throw new Error(`Server returned invalid data (Status: ${response.status}). Check backend logs.`);
+      }
+
+      if (!response.ok) {
+        throw new Error(responseData.error || `HTTP Error ${response.status} - Failed to fetch from YouTube proxy`);
+      }
+
+      const { videos } = responseData;
+
+      if (!videos || !Array.isArray(videos)) {
+        throw new Error("Invalid response format: 'videos' array missing from server response.");
+      }
+
+      // 3. Filter out videos that already exist in the database and map to schema
+      const newVideos = videos
+        .filter(v => !existingUrls.has(v.url))
+        .map((v, index) => ({
+          title: v.title,
+          url: v.url,
+          custom_thumbnail_url: v.thumbnail || null,
+          is_active: true,
+          display_order: index
+          // 'id' and 'created_at' are handled automatically by the DB schema defaults
+        }));
+
+      if (newVideos.length === 0) {
+        triggerToast("No new YouTube videos found.");
+        return;
+      }
+
+      triggerToast(`Inserting ${newVideos.length} new videos...`);
+
+      // 4. Insert strictly the new records into hub_videos
+      const { error: insertError } = await supabaseClient
+        .from('hub_videos')
+        .insert(newVideos);
+
+      if (insertError) throw insertError;
+
+      triggerToast(`Successfully imported ${newVideos.length} YouTube videos!`);
+
+    } catch (error) {
+      console.error("YouTube Sync Error:", error);
+      triggerToast(`Sync Error: ${error.message}`);
+    }
+  };
+
   const saveArticleToDatabase = async (place, articleData) => {
     try {
       // 1. Save Article to Database & Update created_at timestamp
@@ -3343,19 +3419,23 @@ Return ONLY this JSON structure:
                 <option value="distance">Nearest First</option>
               </select>
 
-              <button
-                onClick={() => setLocationSource(prev => prev === 'device' ? 'home' : 'device')}
-                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all border ${locationSource === 'device'
-                  ? 'bg-blue-50 border-blue-200 text-blue-600'
-                  : 'bg-amber-50 border-amber-200 text-amber-600'
-                  }`}
-              >
-                <Icon name={locationSource === 'device' ? 'navigation-2' : 'home'} className="w-3.5 h-3.5" />
-                {locationSource === 'device' ? 'Live GPS' : 'Home'}
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                {/* LOCATION SOURCE TOGGLE */}
+                <button
+                  onClick={() => setLocationSource(prev => prev === 'device' ? 'home' : 'device')}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all border active:scale-95 shadow-sm ${locationSource === 'device'
+                    ? 'bg-blue-50 border-blue-200 text-blue-600 hover:bg-blue-100'
+                    : 'bg-amber-50 border-amber-200 text-amber-600 hover:bg-amber-100'
+                    }`}
+                >
+                  <Icon
+                    name={locationSource === 'device' ? 'navigation-2' : 'home'}
+                    className={`w-3.5 h-3.5 ${locationSource === 'device' ? 'text-blue-500' : 'text-amber-500'}`}
+                  />
+                  <span>{locationSource === 'device' ? 'Live GPS' : 'Home'}</span>
+                </button>
 
-              <div className="flex gap-2">
-                {/* ⚡ BULK ARTICLE GENERATOR: Sequences through visited items*/}
+                {/* ⚡ BULK ARTICLE GENERATOR */}
                 <button
                   onClick={bulkGenerateArticles}
                   className="flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all border bg-violet-50 border-violet-200 text-violet-600 hover:bg-violet-100 active:scale-95 shadow-sm"
@@ -3372,6 +3452,15 @@ Return ONLY this JSON structure:
                 >
                   <Icon name="shield-check" className="w-3.5 h-3.5 text-emerald-500" />
                   <span>Audit Meta</span>
+                </button>
+
+                {/* YOUTUBE SYNC */}
+                <button
+                  onClick={syncYouTubeVideos}
+                  className="flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all border bg-rose-50 border-rose-200 text-rose-600 hover:bg-rose-100 active:scale-95 shadow-sm"
+                >
+                  <Icon name="video" className="w-3.5 h-3.5 text-rose-500" />
+                  <span>Sync YouTube</span>
                 </button>
               </div>
 
