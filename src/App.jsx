@@ -2818,7 +2818,7 @@ Return ONLY this JSON structure:
 
     const parseUA = (v = {}) => {
 
-      const rawUA = (v.user_agent || "").toLowerCase();
+      const rawUA = v.user_agent || "";
       const lowerUA = rawUA.toLowerCase();
       const referrer = (v.referrer || "").toLowerCase();
       const utmSource = (v.utm_source || "").toLowerCase();
