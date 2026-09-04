@@ -2818,11 +2818,11 @@ Return ONLY this JSON structure:
 
     const parseUA = (v = {}) => {
 
-      const rawUA = v.user_agent || "";
+      const rawUA = (v.user_agent || "").toLowerCase();
       const lowerUA = rawUA.toLowerCase();
       const referrer = (v.referrer || "").toLowerCase();
       const utmSource = (v.utm_source || "").toLowerCase();
-      const rawPath = v.page_path || 'Unknown';
+      const rawPath = (v.page_path || 'Unknown').toLowerCase();
 
       const ip = v.ip_address || "";
       const city = v.city || "";
