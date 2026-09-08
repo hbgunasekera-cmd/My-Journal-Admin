@@ -223,16 +223,17 @@ const WeatherIcon = ({ condition }) => {
  * Converts to lowercase, removes special characters, and replaces spaces with hyphens.
  */
 export const generateCleanSlug = (text) => {
-  if (!text) return "";
+  if (!text) return '';
   return String(text)
     .toLowerCase()
     .trim()
-    .normalize('NFD')                   // Decompose accented characters (e.g., "é" -> "e" + "´")
+    .normalize('NFD')                    // Decompose accented characters
     .replace(/[\u0300-\u036f]/g, '')    // Strip diacritic mark overlays
     .replace(/[–—]/g, '-')              // Convert En-dash & Em-dash to standard hyphens
-    .replace(/[^a-z0-9\s-]/g, '')       // Remove non-alphanumeric characters except spaces & hyphens
-    .replace(/\s+/g, '-')               // Replace spaces with hyphens
-    .replace(/-+/g, '-');               // Collapse multiple hyphens into a single hyphen
+    .replace(/[^a-z0-9\s-]/g, '')       // Keep only alphanumeric characters, spaces, and hyphens
+    .replace(/\s+/g, '-')               // Replace spaces with single hyphens
+    .replace(/-+/g, '-')                // Collapse multiple hyphens into a single hyphen
+    .replace(/^-+|-+$/g, '');           // Strip leading and trailing hyphens
 };
 
 
