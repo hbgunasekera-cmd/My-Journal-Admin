@@ -3500,10 +3500,10 @@ Return ONLY this JSON structure:
                 {/* GENERATE SLUGS */}
                 <button
                   onClick={bulkGenerateSlugs}
-                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+                  className="flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all border bg-sky-50 border-sky-200 text-sky-600 hover:bg-sky-100 active:scale-95 shadow-sm"
                 >
-                  <RefreshCw className="w-4 h-4" />
-                  Sync Slugs
+                  <Icon name="link" className="w-3.5 h-3.5 text-sky-500" />
+                  <span>Sync Slugs</span>
                 </button>
 
                 {/* YOUTUBE SYNC */}
