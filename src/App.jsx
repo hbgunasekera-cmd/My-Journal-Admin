@@ -227,13 +227,48 @@ export const generateCleanSlug = (text) => {
   return String(text)
     .toLowerCase()
     .trim()
-    .normalize('NFD')                    // Decompose accented characters
-    .replace(/[\u0300-\u036f]/g, '')    // Strip diacritic mark overlays
+    .normalize('NFD')                   // Strip accents/diacritics for backend parity
+    .replace(/[\u0300-\u036f]/g, '')    // Remove diacritic marks
     .replace(/[–—]/g, '-')              // Convert En-dash & Em-dash to standard hyphens
     .replace(/[^a-z0-9\s-]/g, '')       // Keep only alphanumeric characters, spaces, and hyphens
     .replace(/\s+/g, '-')               // Replace spaces with single hyphens
-    .replace(/-+/g, '-')                // Collapse multiple hyphens into a single hyphen
+    .replace(/-+/g, '-')                // Collapse multiple hyphens
     .replace(/^-+|-+$/g, '');           // Strip leading and trailing hyphens
+};
+
+const bulkGenerateSlugs = async () => {
+  // Target places that are 'done' but missing a slug in the database
+  const targets = places.filter(p => p.status === 'done' && !p.slug);
+
+  if (targets.length === 0) {
+    triggerToast("No 'Done' places need slug updates.");
+    return;
+  }
+
+  triggerToast(`Generating and syncing slugs for ${targets.length} locations...`);
+
+  let updatedCount = 0;
+
+  for (const place of targets) {
+    const generatedSlug = generateCleanSlug(place.place_name);
+
+    const { error } = await supabaseClient
+      .from('travel_bucket_list')
+      .update({ slug: generatedSlug })
+      .eq('id', place.id);
+
+    if (!error) {
+      updatedCount++;
+    } else {
+      console.error(`Failed to update slug for ${place.place_name}:`, error);
+    }
+
+    // Brief 200ms delay to respect potential database rate limits
+    await new Promise(r => setTimeout(r, 200));
+  }
+
+  triggerToast(`Successfully synced slugs for ${updatedCount} locations!`);
+  refreshAllData(); // Refresh UI global state
 };
 
 
@@ -2179,12 +2214,16 @@ Return ONLY this JSON structure:
 
   const saveArticleToDatabase = async (place, articleData) => {
     try {
-      // 1. Save Article to Database & Update created_at timestamp
+      // Generate clean URL slug for the place
+      const generatedSlug = generateCleanSlug(place.place_name);
+
+      // 1. Save Article to Database with slug & update created_at timestamp
       const { error } = await supabaseClient
         .from('travel_bucket_list')
         .update({
           ai_article: articleData,
           status: 'done',
+          slug: generatedSlug,
           is_indexed: false, // Set false initially until IndexNow confirms
           created_at: new Date().toISOString(),
         })
@@ -2214,11 +2253,12 @@ Return ONLY this JSON structure:
         triggerToast("Article saved, but IndexNow submission failed.");
       }
 
-      // 4. Notify subscribers on completion with the updated payload
+      // 4. Notify subscribers on completion with the updated payload including slug
       try {
         await notifySubscribersOnCompletion({
           ...place,
           status: 'done',
+          slug: generatedSlug,
           ai_article: articleData,
           is_indexed: isIndexed,
         });
@@ -2227,21 +2267,23 @@ Return ONLY this JSON structure:
         console.error("Subscriber notification failed:", notifyErr);
       }
 
-      // 5. Update the local state instead of reloading the page
+      // 5. Update local state (setPlaces & setFilteredPlaces) with slug
+      const updatedPlacePayload = {
+        status: 'done',
+        slug: generatedSlug,
+        ai_article: articleData,
+        is_indexed: isIndexed,
+      };
+
       setPlaces(prevPlaces =>
         prevPlaces.map(p =>
-          p.id === place.id
-            ? { ...p, status: 'done', ai_article: articleData, is_indexed: isIndexed }
-            : p
+          p.id === place.id ? { ...p, ...updatedPlacePayload } : p
         )
       );
 
-      // We also update filteredPlaces so the UI reflects the change instantly if a search/filter is active
       setFilteredPlaces(prevFiltered =>
         prevFiltered.map(p =>
-          p.id === place.id
-            ? { ...p, status: 'done', ai_article: articleData, is_indexed: isIndexed }
-            : p
+          p.id === place.id ? { ...p, ...updatedPlacePayload } : p
         )
       );
 
@@ -3453,6 +3495,15 @@ Return ONLY this JSON structure:
                 >
                   <Icon name="shield-check" className="w-3.5 h-3.5 text-emerald-500" />
                   <span>Audit Meta</span>
+                </button>
+
+                {/* GENERATE SLUGS */}
+                <button
+                  onClick={bulkGenerateSlugs}
+                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                  Sync Slugs
                 </button>
 
                 {/* YOUTUBE SYNC */}
