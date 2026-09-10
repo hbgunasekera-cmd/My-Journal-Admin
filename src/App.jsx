@@ -236,40 +236,7 @@ export const generateCleanSlug = (text) => {
     .replace(/^-+|-+$/g, '');           // Strip leading and trailing hyphens
 };
 
-const bulkGenerateSlugs = async () => {
-  // Target places that are 'done' but missing a slug in the database
-  const targets = places.filter(p => p.status === 'done' && !p.slug);
 
-  if (targets.length === 0) {
-    triggerToast("No 'Done' places need slug updates.");
-    return;
-  }
-
-  triggerToast(`Generating and syncing slugs for ${targets.length} locations...`);
-
-  let updatedCount = 0;
-
-  for (const place of targets) {
-    const generatedSlug = generateCleanSlug(place.place_name);
-
-    const { error } = await supabaseClient
-      .from('travel_bucket_list')
-      .update({ slug: generatedSlug })
-      .eq('id', place.id);
-
-    if (!error) {
-      updatedCount++;
-    } else {
-      console.error(`Failed to update slug for ${place.place_name}:`, error);
-    }
-
-    // Brief 200ms delay to respect potential database rate limits
-    await new Promise(r => setTimeout(r, 200));
-  }
-
-  triggerToast(`Successfully synced slugs for ${updatedCount} locations!`);
-  refreshAllData(); // Refresh UI global state
-};
 
 
 const formatPageName = (path) => {
@@ -1610,6 +1577,41 @@ function App() {
       console.error("Data sync error:", error);
       triggerToast("Failed to sync database.");
     }
+  };
+
+  const bulkGenerateSlugs = async () => {
+    // Target places that are 'done' but missing a slug in the database
+    const targets = places.filter(p => p.status === 'done' && !p.slug);
+
+    if (targets.length === 0) {
+      triggerToast("No 'Done' places need slug updates.");
+      return;
+    }
+
+    triggerToast(`Generating and syncing slugs for ${targets.length} locations...`);
+
+    let updatedCount = 0;
+
+    for (const place of targets) {
+      const generatedSlug = generateCleanSlug(place.place_name);
+
+      const { error } = await supabaseClient
+        .from('travel_bucket_list')
+        .update({ slug: generatedSlug })
+        .eq('id', place.id);
+
+      if (!error) {
+        updatedCount++;
+      } else {
+        console.error(`Failed to update slug for ${place.place_name}:`, error);
+      }
+
+      // Brief 200ms delay to respect potential database rate limits
+      await new Promise(r => setTimeout(r, 200));
+    }
+
+    triggerToast(`Successfully synced slugs for ${updatedCount} locations!`);
+    refreshAllData(); // Refresh UI global state
   };
 
 
