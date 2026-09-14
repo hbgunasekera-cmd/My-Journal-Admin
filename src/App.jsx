@@ -3026,6 +3026,29 @@ Return ONLY this JSON structure:
     };
   }, [analyticsData, likesData, subscribersData]);
 
+  // Dashboard Summary Calculation
+  const dashboardSummary = useMemo(() => {
+    // 1. Total Likes
+    const totalLikes = likesData?.length || 0;
+
+    // 2. Total Subscribers
+    const totalSubscribers = subscribersData?.length || 0;
+
+    // 3. Pending Comments 
+    // (Adjust the .status check based on your exact location_comments schema)
+    const pendingCommentsCount = (allComments || []).filter(
+      comment => comment.status === 'pending' || comment.is_approved === false
+    ).length;
+
+    // 4. Total Suggestions (Staged Locations)
+    // Maps to your saveStagedLocation logic which sets status: 'pending'
+    const suggestionsCount = (places || []).filter(
+      place => place.status === 'pending'
+    ).length;
+
+    return { totalLikes, totalSubscribers, pendingCommentsCount, suggestionsCount };
+  }, [likesData, subscribersData, allComments, places]);
+
   /**
    * Circular Progress Ring Indicator for Dashboard Refresh Countdown
    */
@@ -4442,13 +4465,69 @@ Return ONLY this JSON structure:
         {activeTab === 'dashboard' && (
           <div className="h-full w-full overflow-y-auto p-8 no-scrollbar bg-slate-50">
 
-            {/* HEADER */}
-            <div className="max-w-full mx-auto mb-8 flex justify-between items-center">
+            {/* HEADER & QUICK SUMMARY TOOLBAR */}
+            <div className="max-w-full mx-auto mb-8 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
               <div>
                 <h1 className="text-2xl font-black text-slate-900 italic uppercase tracking-tighter">System Overview</h1>
                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Real-time journal analytics</p>
               </div>
 
+              {/* Quick Metric Pills */}
+              <div className="flex items-center gap-4 bg-white/80 backdrop-blur-md px-5 py-2 rounded-full border border-slate-200/80 shadow-sm">
+                {/* Total Likes */}
+                <div className="flex items-center gap-1.5 cursor-help group" title="Total Likes">
+                  <Icon name="heart" className="w-4 h-4 text-rose-500 fill-rose-500/20 group-hover:scale-110 transition-transform" />
+                  <span className="text-[11px] font-black text-slate-700">
+                    {dashboardStats.likesSummary ? dashboardStats.likesSummary.reduce((a, b) => a + b.hits, 0) : 0}
+                  </span>
+                </div>
+
+                <div className="w-px h-3 bg-slate-200" />
+
+                {/* Total Subscribers */}
+                <div className="flex items-center gap-1.5 cursor-help group" title="Total Subscribers">
+                  <Icon name="mail" className="w-4 h-4 text-indigo-500 group-hover:scale-110 transition-transform" />
+                  <span className="text-[11px] font-black text-slate-700">
+                    {(subscribersData || []).length}
+                  </span>
+                </div>
+
+                <div className="w-px h-3 bg-slate-200" />
+
+                {/* Pending Comments */}
+                <div className="flex items-center gap-1.5 cursor-help group" title="Pending Comments">
+                  <div className="relative">
+                    <Icon name="message-square" className="w-4 h-4 text-amber-500 group-hover:scale-110 transition-transform" />
+                    {allComments.filter(c => !c.reply_text).length > 0 && (
+                      <span className="absolute -top-1 -right-1 flex h-2 w-2">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500" />
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-[11px] font-black text-slate-700">
+                    {allComments.filter(c => !c.reply_text).length}
+                  </span>
+                </div>
+
+                <div className="w-px h-3 bg-slate-200" />
+
+                {/* Pending Suggestions */}
+                <div className="flex items-center gap-1.5 cursor-help group" title="Pending Suggestions">
+                  <div className="relative">
+                    <Icon name="shield-alert" className="w-4 h-4 text-orange-500 group-hover:scale-110 transition-transform" />
+                    {pendingApprovals.length > 0 && (
+                      <span className="absolute -top-1 -right-1 flex h-2 w-2">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-orange-400 opacity-75" />
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-orange-500" />
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-[11px] font-black text-slate-700">
+                    {pendingApprovals.length}
+                  </span>
+                </div>
+              </div>
             </div>
 
             <div className="max-w-full mx-auto grid grid-cols-1 lg:grid-cols-2 gap-6 pb-20">
@@ -4457,12 +4536,9 @@ Return ONLY this JSON structure:
               <div className="bg-slate-900 rounded-[2.5rem] p-8 text-white shadow-xl relative overflow-hidden lg:col-span-2">
                 <div className="absolute -top-20 -right-20 w-64 h-64 bg-indigo-500 rounded-full blur-3xl opacity-20" />
 
-                {/* Header Logic: Deriving totals from breakdown to ensure sync */}
                 {(() => {
                   const trafficEntries = dashboardStats.trafficType || [];
                   const realCount = trafficEntries.find(([type]) => type === 'Real Person')?.[1] || 0;
-
-                  // Summing all types ensures the total matches the breakdown exactly
                   const calculatedTotal = trafficEntries.reduce((acc, [_, count]) => acc + count, 0);
 
                   const verifiedPercentage = calculatedTotal > 0
@@ -4481,10 +4557,8 @@ Return ONLY this JSON structure:
                       </div>
 
                       <div className="text-right flex flex-col items-end gap-2">
-                        {/* Container grouping Badge, Refresh button, and Delete button */}
                         <div className="flex items-center gap-2">
-
-                          {/* 1. Human Verification Badge */}
+                          {/* Human Verification Badge */}
                           <div className="flex items-center gap-2 bg-white/5 px-3 py-1.5 rounded-full border border-white/10">
                             <RefreshProgressCircle
                               timeLeft={timeLeft}
@@ -4498,7 +4572,7 @@ Return ONLY this JSON structure:
                             </span>
                           </div>
 
-                          {/* 2. Refresh Button (Middle - Styled to match badge/delete button) */}
+                          {/* Manual Refresh Button */}
                           <button
                             onClick={handleManualRefresh || refreshAllData}
                             title="Refresh data"
@@ -4507,7 +4581,7 @@ Return ONLY this JSON structure:
                             <Icon name="refresh-cw" className="w-3.5 h-3.5 text-indigo-400 group-active:animate-spin" />
                           </button>
 
-                          {/* 3. Icon-Only Delete Button */}
+                          {/* Clear History Button */}
                           <button
                             onClick={handleClearDashboardData}
                             title="Clear all page visits history"
@@ -4515,7 +4589,6 @@ Return ONLY this JSON structure:
                           >
                             <Icon name="trash-2" className="w-3.5 h-3.5 text-rose-400" />
                           </button>
-
                         </div>
                       </div>
                     </div>
@@ -4572,7 +4645,6 @@ Return ONLY this JSON structure:
                     </p>
                     <div className="space-y-2">
                       {(dashboardStats.trafficType || []).map(([type, count]) => {
-                        // Matches 'Real Person' or Bot categories with the latest log state
                         const isLatestTraffic =
                           dashboardStats.latest &&
                           ((dashboardStats.latest.isBot && type !== 'Real Person') ||
@@ -4607,8 +4679,7 @@ Return ONLY this JSON structure:
                 </div>
               </div>
 
-              {/* 2. LIKES METRICS*/}
-
+              {/* 2. LIKES METRICS */}
               <div className="bg-rose-500 rounded-[2.5rem] p-8 text-white shadow-xl flex flex-col h-[450px]">
                 <div className="flex justify-between items-start mb-6">
                   <div>
@@ -4619,11 +4690,10 @@ Return ONLY this JSON structure:
                     </p>
                   </div>
                   <div className="w-12 h-12 bg-white/20 rounded-2xl flex items-center justify-center backdrop-blur-md">
-                    <Icon name="heart" className="w-6 h-6 fill-white text-white lucide" />
+                    <Icon name="heart" className="w-6 h-6 fill-white text-white" />
                   </div>
                 </div>
 
-                {/* Inner List - Matched to Block 2's dark transparent style */}
                 <div className="bg-white/10 rounded-[2rem] p-5 flex-1 flex flex-col min-h-0 border border-white/5">
                   <div className="overflow-y-auto custom-scrollbar pr-2 flex-1 space-y-1">
                     {dashboardStats.likesSummary.map((item, i) => {
@@ -4646,7 +4716,6 @@ Return ONLY this JSON structure:
                             </div>
                             <div className="text-right shrink-0 flex items-center gap-2">
                               <p className="text-sm font-black tracking-tighter text-white">{item.hits}</p>
-                              {/* Small indicator arrow */}
                               <Icon
                                 name="navigation"
                                 className={`w-3 h-3 text-white/30 transition-transform ${isExpanded ? 'rotate-180' : 'rotate-90'}`}
@@ -4654,7 +4723,7 @@ Return ONLY this JSON structure:
                             </div>
                           </div>
 
-                          {/* Expanded Country Breakdown */}
+                          {/* Country Breakdown */}
                           {isExpanded && (
                             <div className="pb-3 animate-in fade-in slide-in-from-top-2">
                               <div className="bg-black/20 rounded-xl p-3 space-y-2 border border-white/5 shadow-inner">
@@ -4663,7 +4732,7 @@ Return ONLY this JSON structure:
                                 </p>
                                 <div className="space-y-1.5 max-h-32 overflow-y-auto custom-scrollbar pr-1">
                                   {Object.entries(item.countries)
-                                    .sort((a, b) => b[1] - a[1]) // Sort highest to lowest
+                                    .sort((a, b) => b[1] - a[1])
                                     .map(([country, count]) => (
                                       <div key={country} className="flex justify-between items-center">
                                         <span className="text-[9px] font-bold text-white/80">{country}</span>
@@ -4685,7 +4754,7 @@ Return ONLY this JSON structure:
               <div className="bg-white rounded-[2.5rem] p-8 border border-slate-100 shadow-sm flex flex-col h-[450px]">
                 <div className="flex justify-between items-center mb-6">
                   <h2 className="text-[10px] font-black uppercase text-indigo-600 flex items-center gap-2 tracking-widest">
-                    <Icon name="mail" className="w-4 h-4 lucide" /> Subscribers
+                    <Icon name="mail" className="w-4 h-4" /> Subscribers
                   </h2>
                   <span className="px-3 py-1 bg-indigo-50 text-indigo-600 rounded-full text-[9px] font-black uppercase tracking-tighter border border-indigo-100">
                     {(subscribersData || []).length} Total
@@ -4705,11 +4774,9 @@ Return ONLY this JSON structure:
                       >
                         <div className="flex flex-col truncate pr-4">
                           <div className="flex items-center gap-2">
-                            {/* Increased font size from text-[10px] to text-xs */}
                             <p className="text-xs font-black text-slate-800 truncate font-mono">
                               {isRevealed ? sub.email : maskEmail(sub.email)}
                             </p>
-                            {/* Eye Icon Indicator */}
                             <Icon
                               name={isRevealed ? "eye-off" : "eye"}
                               className="w-3.5 h-3.5 text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
@@ -4720,9 +4787,7 @@ Return ONLY this JSON structure:
                           </p>
                         </div>
 
-                        {/* Action Buttons Container */}
                         <div className="flex items-center shrink-0 gap-2">
-                          {/* 1. Status Toggle Button */}
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
@@ -4737,12 +4802,11 @@ Return ONLY this JSON structure:
                             {sub.is_active ? 'Active' : 'Inactive'}
                           </button>
 
-                          {/* 2. Delete Subscriber Button */}
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
                               if (window.confirm("Are you sure you want to delete this subscriber?")) {
-                                handleDeleteSubscriber(sub.id); // Call your database delete handler
+                                handleDeleteSubscriber(sub.id);
                               }
                             }}
                             title="Delete subscriber permanently"
@@ -4757,7 +4821,7 @@ Return ONLY this JSON structure:
 
                   {(!subscribersData || subscribersData.length === 0) && (
                     <div className="flex flex-col items-center justify-center h-full opacity-30">
-                      <Icon name="mail" className="w-10 h-10 mb-2 lucide" />
+                      <Icon name="mail" className="w-10 h-10 mb-2" />
                       <p className="text-[10px] font-black uppercase tracking-widest text-center">
                         No Subscribers Yet
                       </p>
@@ -4770,7 +4834,7 @@ Return ONLY this JSON structure:
               <div className="bg-white rounded-[2.5rem] p-8 border border-slate-100 shadow-sm flex flex-col h-[450px]">
                 <div className="flex justify-between items-center mb-6">
                   <h2 className="text-[10px] font-black uppercase text-slate-800 flex items-center gap-2 tracking-widest">
-                    <Icon name="message-square" className="w-4 h-4 lucide text-indigo-500" /> Pending Comments
+                    <Icon name="message-square" className="w-4 h-4 text-indigo-500" /> Pending Comments
                   </h2>
                   <span className="px-3 py-1 bg-indigo-100 text-indigo-600 rounded-full text-[9px] font-black uppercase tracking-tighter">
                     {allComments.filter(c => !c.reply_text).length} New
@@ -4815,7 +4879,7 @@ Return ONLY this JSON structure:
                   ))}
                   {allComments.filter(c => !c.reply_text).length === 0 && (
                     <div className="flex flex-col items-center justify-center h-full opacity-30">
-                      <Icon name="check-circle" className="w-10 h-10 mb-2 lucide" />
+                      <Icon name="check-circle" className="w-10 h-10 mb-2" />
                       <p className="text-[10px] font-black uppercase tracking-widest text-center">Inbox Cleared</p>
                     </div>
                   )}
@@ -4826,7 +4890,7 @@ Return ONLY this JSON structure:
               <div className="bg-white rounded-[2.5rem] p-8 border border-slate-100 shadow-sm flex flex-col h-[450px]">
                 <div className="flex justify-between items-center mb-6">
                   <h2 className="text-[10px] font-black uppercase text-orange-600 flex items-center gap-2 tracking-widest">
-                    <Icon name="shield-alert" className="w-4 h-4 lucide" /> Suggestions
+                    <Icon name="shield-alert" className="w-4 h-4" /> Suggestions
                   </h2>
                   <span className="px-3 py-1 bg-orange-100 text-orange-600 rounded-full text-[9px] font-black uppercase tracking-tighter">
                     {pendingApprovals.length} Pending
@@ -4847,18 +4911,17 @@ Return ONLY this JSON structure:
                   ))}
                   {pendingApprovals.length === 0 && (
                     <div className="flex flex-col items-center justify-center h-full opacity-30">
-                      <Icon name="activity" className="w-10 h-10 mb-2 lucide" />
+                      <Icon name="activity" className="w-10 h-10 mb-2" />
                       <p className="text-[10px] font-black uppercase tracking-widest text-center">No Pending Audits</p>
                     </div>
                   )}
                 </div>
               </div>
 
-
-
             </div>
           </div>
         )}
+
       </main>
 
       {/* TOAST */}
