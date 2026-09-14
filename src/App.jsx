@@ -4462,465 +4462,467 @@ Return ONLY this JSON structure:
 
         {/* TAB 4: DASHBOARD */}
 
-        {activeTab === 'dashboard' && (
-          <div className="h-full w-full overflow-y-auto p-8 no-scrollbar bg-slate-50">
+        {activeTab === 'dashboard' && (() => {
+          // Centralized Traffic calculations for sharing across Summary Bar & Traffic Block
+          const trafficEntries = dashboardStats.trafficType || [];
+          const realCount = trafficEntries.find(([type]) => type === 'Real Person')?.[1] || 0;
+          const calculatedTotal = trafficEntries.reduce((acc, [_, count]) => acc + count, 0);
+          const verifiedPercentage = calculatedTotal > 0
+            ? Math.min(Math.round((realCount / calculatedTotal) * 100), 100)
+            : 0;
 
-            {/* HEADER & QUICK SUMMARY TOOLBAR */}
-            <div className="max-w-full mx-auto mb-8 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-              <div>
-                <h1 className="text-2xl font-black text-slate-900 italic uppercase tracking-tighter">System Overview</h1>
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Real-time journal analytics</p>
+          return (
+            <div className="h-full w-full overflow-y-auto p-8 no-scrollbar bg-slate-50">
+
+              {/* HEADER & QUICK SUMMARY TOOLBAR */}
+              <div className="max-w-full mx-auto mb-8 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-slate-200/60 backdrop-blur-md p-4 sm:px-6 sm:py-4 rounded-[2rem] border border-slate-300/50 shadow-sm">
+                <div>
+                  <h1 className="text-2xl font-black text-slate-900 italic uppercase tracking-tighter">System Overview</h1>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Real-time journal analytics</p>
+                </div>
+
+                {/* Quick Metric Pills */}
+                <div className="flex items-center gap-4 bg-slate-900 px-5 py-2.5 rounded-full border border-slate-800 shadow-lg text-white">
+
+                  {/* Verified Person & Progress Circle Badge */}
+                  <div className="flex items-center gap-2 cursor-help group" title="Verified Persons">
+                    <RefreshProgressCircle
+                      timeLeft={timeLeft}
+                      totalTime={REFRESH_INTERVAL_SECONDS}
+                    />
+                    <span className="text-emerald-400 font-black italic text-[11px]">
+                      {verifiedPercentage}%
+                    </span>
+                    <span className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">
+                      (Verified Person)
+                    </span>
+                  </div>
+
+                  <div className="w-px h-3.5 bg-slate-800" />
+
+                  {/* Total Likes */}
+                  <div className="flex items-center gap-1.5 cursor-help group" title="Total Likes">
+                    <Icon name="heart" className="w-4 h-4 text-rose-400 fill-rose-500/20 group-hover:scale-110 transition-transform" />
+                    <span className="text-[11px] font-black text-white">
+                      {dashboardStats.likesSummary ? dashboardStats.likesSummary.reduce((a, b) => a + b.hits, 0) : 0}
+                    </span>
+                  </div>
+
+                  <div className="w-px h-3.5 bg-slate-800" />
+
+                  {/* Total Subscribers */}
+                  <div className="flex items-center gap-1.5 cursor-help group" title="Total Subscribers">
+                    <Icon name="mail" className="w-4 h-4 text-indigo-400 group-hover:scale-110 transition-transform" />
+                    <span className="text-[11px] font-black text-white">
+                      {(subscribersData || []).length}
+                    </span>
+                  </div>
+
+                  <div className="w-px h-3.5 bg-slate-800" />
+
+                  {/* Pending Comments */}
+                  <div className="flex items-center gap-1.5 cursor-help group" title="Pending Comments">
+                    <div className="relative">
+                      <Icon name="message-square" className="w-4 h-4 text-amber-400 group-hover:scale-110 transition-transform" />
+                      {allComments.filter(c => !c.reply_text).length > 0 && (
+                        <span className="absolute -top-1 -right-1 flex h-2 w-2">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
+                          <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500" />
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-[11px] font-black text-white">
+                      {allComments.filter(c => !c.reply_text).length}
+                    </span>
+                  </div>
+
+                  <div className="w-px h-3.5 bg-slate-800" />
+
+                  {/* Pending Suggestions */}
+                  <div className="flex items-center gap-1.5 cursor-help group" title="Pending Suggestions">
+                    <div className="relative">
+                      <Icon name="shield-alert" className="w-4 h-4 text-orange-400 group-hover:scale-110 transition-transform" />
+                      {pendingApprovals.length > 0 && (
+                        <span className="absolute -top-1 -right-1 flex h-2 w-2">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-orange-400 opacity-75" />
+                          <span className="relative inline-flex rounded-full h-2 w-2 bg-orange-500" />
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-[11px] font-black text-white">
+                      {pendingApprovals.length}
+                    </span>
+                  </div>
+
+                </div>
               </div>
 
-              {/* Quick Metric Pills */}
-              <div className="flex items-center gap-4 bg-white/80 backdrop-blur-md px-5 py-2 rounded-full border border-slate-200/80 shadow-sm">
-                {/* Total Likes */}
-                <div className="flex items-center gap-1.5 cursor-help group" title="Total Likes">
-                  <Icon name="heart" className="w-4 h-4 text-rose-500 fill-rose-500/20 group-hover:scale-110 transition-transform" />
-                  <span className="text-[11px] font-black text-slate-700">
-                    {dashboardStats.likesSummary ? dashboardStats.likesSummary.reduce((a, b) => a + b.hits, 0) : 0}
-                  </span>
-                </div>
+              <div className="max-w-full mx-auto grid grid-cols-1 lg:grid-cols-2 gap-6 pb-20">
 
-                <div className="w-px h-3 bg-slate-200" />
+                {/* 1. PAGE VISITS BLOCK (TRAFFIC INTELLIGENCE) */}
+                <div className="bg-slate-900 rounded-[2.5rem] p-8 text-white shadow-xl relative overflow-hidden lg:col-span-2">
+                  <div className="absolute -top-20 -right-20 w-64 h-64 bg-indigo-500 rounded-full blur-3xl opacity-20" />
 
-                {/* Total Subscribers */}
-                <div className="flex items-center gap-1.5 cursor-help group" title="Total Subscribers">
-                  <Icon name="mail" className="w-4 h-4 text-indigo-500 group-hover:scale-110 transition-transform" />
-                  <span className="text-[11px] font-black text-slate-700">
-                    {(subscribersData || []).length}
-                  </span>
-                </div>
+                  <div className="flex justify-between items-start mb-10 relative z-10">
+                    <div>
+                      <p className="text-[10px] font-black uppercase text-indigo-400 mb-1 tracking-widest">
+                        Traffic Intelligence
+                      </p>
+                      <p className="text-6xl font-black italic tracking-tighter">
+                        {calculatedTotal}
+                      </p>
+                    </div>
 
-                <div className="w-px h-3 bg-slate-200" />
+                    <div className="text-right flex flex-col items-end gap-2">
+                      <div className="flex items-center gap-2">
+                        {/* Manual Refresh Button */}
+                        <button
+                          onClick={handleManualRefresh || refreshAllData}
+                          title="Refresh data"
+                          className="flex items-center justify-center bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 p-2 rounded-full transition-all duration-150 active:scale-95 group"
+                        >
+                          <Icon name="refresh-cw" className="w-3.5 h-3.5 text-indigo-400 group-active:animate-spin" />
+                        </button>
 
-                {/* Pending Comments */}
-                <div className="flex items-center gap-1.5 cursor-help group" title="Pending Comments">
-                  <div className="relative">
-                    <Icon name="message-square" className="w-4 h-4 text-amber-500 group-hover:scale-110 transition-transform" />
-                    {allComments.filter(c => !c.reply_text).length > 0 && (
-                      <span className="absolute -top-1 -right-1 flex h-2 w-2">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
-                        <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500" />
-                      </span>
-                    )}
-                  </div>
-                  <span className="text-[11px] font-black text-slate-700">
-                    {allComments.filter(c => !c.reply_text).length}
-                  </span>
-                </div>
-
-                <div className="w-px h-3 bg-slate-200" />
-
-                {/* Pending Suggestions */}
-                <div className="flex items-center gap-1.5 cursor-help group" title="Pending Suggestions">
-                  <div className="relative">
-                    <Icon name="shield-alert" className="w-4 h-4 text-orange-500 group-hover:scale-110 transition-transform" />
-                    {pendingApprovals.length > 0 && (
-                      <span className="absolute -top-1 -right-1 flex h-2 w-2">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-orange-400 opacity-75" />
-                        <span className="relative inline-flex rounded-full h-2 w-2 bg-orange-500" />
-                      </span>
-                    )}
-                  </div>
-                  <span className="text-[11px] font-black text-slate-700">
-                    {pendingApprovals.length}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            <div className="max-w-full mx-auto grid grid-cols-1 lg:grid-cols-2 gap-6 pb-20">
-
-              {/* 1. PAGE VISITS BLOCK (TRAFFIC INTELLIGENCE) */}
-              <div className="bg-slate-900 rounded-[2.5rem] p-8 text-white shadow-xl relative overflow-hidden lg:col-span-2">
-                <div className="absolute -top-20 -right-20 w-64 h-64 bg-indigo-500 rounded-full blur-3xl opacity-20" />
-
-                {(() => {
-                  const trafficEntries = dashboardStats.trafficType || [];
-                  const realCount = trafficEntries.find(([type]) => type === 'Real Person')?.[1] || 0;
-                  const calculatedTotal = trafficEntries.reduce((acc, [_, count]) => acc + count, 0);
-
-                  const verifiedPercentage = calculatedTotal > 0
-                    ? Math.min(Math.round((realCount / calculatedTotal) * 100), 100)
-                    : 0;
-
-                  return (
-                    <div className="flex justify-between items-start mb-10 relative z-10">
-                      <div>
-                        <p className="text-[10px] font-black uppercase text-indigo-400 mb-1 tracking-widest">
-                          Traffic Intelligence
-                        </p>
-                        <p className="text-6xl font-black italic tracking-tighter">
-                          {calculatedTotal}
-                        </p>
-                      </div>
-
-                      <div className="text-right flex flex-col items-end gap-2">
-                        <div className="flex items-center gap-2">
-                          {/* Human Verification Badge */}
-                          <div className="flex items-center gap-2 bg-white/5 px-3 py-1.5 rounded-full border border-white/10">
-                            <RefreshProgressCircle
-                              timeLeft={timeLeft}
-                              totalTime={REFRESH_INTERVAL_SECONDS}
-                            />
-                            <span className="text-emerald-400 font-black italic text-sm">
-                              {verifiedPercentage}%
-                            </span>
-                            <span className="text-[8px] text-slate-400 uppercase font-bold tracking-tighter">
-                              Verified Person
-                            </span>
-                          </div>
-
-                          {/* Manual Refresh Button */}
-                          <button
-                            onClick={handleManualRefresh || refreshAllData}
-                            title="Refresh data"
-                            className="flex items-center justify-center bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 p-2 rounded-full transition-all duration-150 active:scale-95 group"
-                          >
-                            <Icon name="refresh-cw" className="w-3.5 h-3.5 text-indigo-400 group-active:animate-spin" />
-                          </button>
-
-                          {/* Clear History Button */}
-                          <button
-                            onClick={handleClearDashboardData}
-                            title="Clear all page visits history"
-                            className="flex items-center justify-center bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 p-2 rounded-full transition-all duration-150 active:scale-95"
-                          >
-                            <Icon name="trash-2" className="w-3.5 h-3.5 text-rose-400" />
-                          </button>
-                        </div>
+                        {/* Clear History Button */}
+                        <button
+                          onClick={handleClearDashboardData}
+                          title="Clear all page visits history"
+                          className="flex items-center justify-center bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 p-2 rounded-full transition-all duration-150 active:scale-95"
+                        >
+                          <Icon name="trash-2" className="w-3.5 h-3.5 text-rose-400" />
+                        </button>
                       </div>
                     </div>
-                  );
-                })()}
+                  </div>
 
-                {/* Metrics Grid */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-x-8 gap-y-10 relative z-10">
-                  <MetricColumn
-                    title="Countries"
-                    data={dashboardStats.countries}
-                    highlightValue={dashboardStats.latest?.country}
-                  />
-                  <MetricColumn
-                    title="Regions"
-                    data={dashboardStats.regions}
-                    highlightValue={dashboardStats.latest?.region}
-                  />
-                  <MetricColumn
-                    title="Cities"
-                    data={dashboardStats.cities}
-                    highlightValue={dashboardStats.latest?.city}
-                  />
-                  <MetricColumn
-                    title="Device Type"
-                    data={dashboardStats.deviceTypes}
-                    highlightValue={dashboardStats.latest?.type}
-                  />
-                  <MetricColumn
-                    title="Operating System"
-                    data={dashboardStats.os}
-                    highlightValue={dashboardStats.latest?.os}
-                  />
-                  <MetricColumn
-                    title="App / Source"
-                    data={dashboardStats.sources}
-                    highlightValue={dashboardStats.latest?.source}
-                  />
-                  <MetricColumn
-                    title="Visit Loyalty"
-                    data={dashboardStats.loyalty}
-                    highlightValue={dashboardStats.latest?.loyaltyStatus}
-                  />
-                  <MetricColumn
-                    title="Visit History"
-                    data={dashboardStats.pageHistory}
-                    highlightValue={dashboardStats.latest?.normalizedPagePath}
-                  />
+                  {/* Metrics Grid */}
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-x-8 gap-y-10 relative z-10">
+                    <MetricColumn
+                      title="Countries"
+                      data={dashboardStats.countries}
+                      highlightValue={dashboardStats.latest?.country}
+                    />
+                    <MetricColumn
+                      title="Regions"
+                      data={dashboardStats.regions}
+                      highlightValue={dashboardStats.latest?.region}
+                    />
+                    <MetricColumn
+                      title="Cities"
+                      data={dashboardStats.cities}
+                      highlightValue={dashboardStats.latest?.city}
+                    />
+                    <MetricColumn
+                      title="Device Type"
+                      data={dashboardStats.deviceTypes}
+                      highlightValue={dashboardStats.latest?.type}
+                    />
+                    <MetricColumn
+                      title="Operating System"
+                      data={dashboardStats.os}
+                      highlightValue={dashboardStats.latest?.os}
+                    />
+                    <MetricColumn
+                      title="App / Source"
+                      data={dashboardStats.sources}
+                      highlightValue={dashboardStats.latest?.source}
+                    />
+                    <MetricColumn
+                      title="Visit Loyalty"
+                      data={dashboardStats.loyalty}
+                      highlightValue={dashboardStats.latest?.loyaltyStatus}
+                    />
+                    <MetricColumn
+                      title="Visit History"
+                      data={dashboardStats.pageHistory}
+                      highlightValue={dashboardStats.latest?.normalizedPagePath}
+                    />
 
-                  {/* Traffic Type Breakdown */}
-                  <div>
-                    <p className="text-[9px] font-black uppercase text-slate-500 mb-3 border-b border-slate-700 pb-1 tracking-wider">
-                      Traffic Type
-                    </p>
-                    <div className="space-y-2">
-                      {(dashboardStats.trafficType || []).map(([type, count]) => {
-                        const isLatestTraffic =
-                          dashboardStats.latest &&
-                          ((dashboardStats.latest.isBot && type !== 'Real Person') ||
-                            (!dashboardStats.latest.isBot && type === 'Real Person'));
+                    {/* Traffic Type Breakdown */}
+                    <div>
+                      <p className="text-[9px] font-black uppercase text-slate-500 mb-3 border-b border-slate-700 pb-1 tracking-wider">
+                        Traffic Type
+                      </p>
+                      <div className="space-y-2">
+                        {(dashboardStats.trafficType || []).map(([type, count]) => {
+                          const isLatestTraffic =
+                            dashboardStats.latest &&
+                            ((dashboardStats.latest.isBot && type !== 'Real Person') ||
+                              (!dashboardStats.latest.isBot && type === 'Real Person'));
+
+                          return (
+                            <div
+                              key={type}
+                              className="flex justify-between items-center text-[10px] font-bold"
+                            >
+                              <span
+                                className={
+                                  type === 'Real Person' ? 'text-emerald-400' : 'text-rose-400'
+                                }
+                              >
+                                {type}
+                              </span>
+                              <span
+                                className={
+                                  isLatestTraffic
+                                    ? 'text-orange-400 font-black'
+                                    : 'text-white font-black'
+                                }
+                              >
+                                {count}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 2. LIKES METRICS */}
+                <div className="bg-rose-500 rounded-[2.5rem] p-8 text-white shadow-xl flex flex-col h-[450px]">
+                  <div className="flex justify-between items-start mb-6">
+                    <div>
+                      <p className="text-[10px] font-black uppercase text-pink-900 mb-1 tracking-widest">Popular Locations</p>
+                      <p className="text-4xl font-black italic tracking-tighter">
+                        {dashboardStats.likesSummary.reduce((a, b) => a + b.hits, 0)}
+                        <span className="text-sm opacity-60 ml-2 font-bold uppercase tracking-widest">Likes</span>
+                      </p>
+                    </div>
+                    <div className="w-12 h-12 bg-white/20 rounded-2xl flex items-center justify-center backdrop-blur-md">
+                      <Icon name="heart" className="w-6 h-6 fill-white text-white" />
+                    </div>
+                  </div>
+
+                  <div className="bg-white/10 rounded-[2rem] p-5 flex-1 flex flex-col min-h-0 border border-white/5">
+                    <div className="overflow-y-auto custom-scrollbar pr-2 flex-1 space-y-1">
+                      {dashboardStats.likesSummary.map((item, i) => {
+                        const isExpanded = expandedLikeLoc === item.name;
 
                         return (
                           <div
-                            key={type}
-                            className="flex justify-between items-center text-[10px] font-bold"
+                            key={i}
+                            className="flex flex-col border-b border-white/10 last:border-0 group cursor-pointer transition-colors hover:bg-white/5 rounded-xl px-2 -mx-2"
+                            onClick={() => setExpandedLikeLoc(isExpanded ? null : item.name)}
                           >
-                            <span
-                              className={
-                                type === 'Real Person' ? 'text-emerald-400' : 'text-rose-400'
-                              }
-                            >
-                              {type}
-                            </span>
-                            <span
-                              className={
-                                isLatestTraffic
-                                  ? 'text-orange-400 font-black'
-                                  : 'text-white font-black'
-                              }
-                            >
-                              {count}
-                            </span>
+                            <div className="flex justify-between items-center py-3">
+                              <div className="flex flex-col truncate pr-4">
+                                <p className="text-[11px] font-black uppercase truncate text-white group-hover:text-rose-200 transition-colors">
+                                  {item.name}
+                                </p>
+                                <p className="text-[8px] font-bold text-white/50 uppercase tracking-widest">
+                                  {item.category}
+                                </p>
+                              </div>
+                              <div className="text-right shrink-0 flex items-center gap-2">
+                                <p className="text-sm font-black tracking-tighter text-white">{item.hits}</p>
+                                <Icon
+                                  name="navigation"
+                                  className={`w-3 h-3 text-white/30 transition-transform ${isExpanded ? 'rotate-180' : 'rotate-90'}`}
+                                />
+                              </div>
+                            </div>
+
+                            {/* Country Breakdown */}
+                            {isExpanded && (
+                              <div className="pb-3 animate-in fade-in slide-in-from-top-2">
+                                <div className="bg-black/20 rounded-xl p-3 space-y-2 border border-white/5 shadow-inner">
+                                  <p className="text-[8px] font-black uppercase tracking-widest text-white/40 mb-2 border-b border-white/10 pb-1">
+                                    Country Breakdown
+                                  </p>
+                                  <div className="space-y-1.5 max-h-32 overflow-y-auto custom-scrollbar pr-1">
+                                    {Object.entries(item.countries)
+                                      .sort((a, b) => b[1] - a[1])
+                                      .map(([country, count]) => (
+                                        <div key={country} className="flex justify-between items-center">
+                                          <span className="text-[9px] font-bold text-white/80">{country}</span>
+                                          <span className="text-[9px] font-black text-rose-300">{count}</span>
+                                        </div>
+                                      ))}
+                                  </div>
+                                </div>
+                              </div>
+                            )}
                           </div>
                         );
                       })}
                     </div>
                   </div>
                 </div>
-              </div>
 
-              {/* 2. LIKES METRICS */}
-              <div className="bg-rose-500 rounded-[2.5rem] p-8 text-white shadow-xl flex flex-col h-[450px]">
-                <div className="flex justify-between items-start mb-6">
-                  <div>
-                    <p className="text-[10px] font-black uppercase text-pink-900 mb-1 tracking-widest">Popular Locations</p>
-                    <p className="text-4xl font-black italic tracking-tighter">
-                      {dashboardStats.likesSummary.reduce((a, b) => a + b.hits, 0)}
-                      <span className="text-sm opacity-60 ml-2 font-bold uppercase tracking-widest">Likes</span>
-                    </p>
+                {/* 3. NEWSLETTER SUBSCRIBERS */}
+                <div className="bg-white rounded-[2.5rem] p-8 border border-slate-100 shadow-sm flex flex-col h-[450px]">
+                  <div className="flex justify-between items-center mb-6">
+                    <h2 className="text-[10px] font-black uppercase text-indigo-600 flex items-center gap-2 tracking-widest">
+                      <Icon name="mail" className="w-4 h-4" /> Subscribers
+                    </h2>
+                    <span className="px-3 py-1 bg-indigo-50 text-indigo-600 rounded-full text-[9px] font-black uppercase tracking-tighter border border-indigo-100">
+                      {(subscribersData || []).length} Total
+                    </span>
                   </div>
-                  <div className="w-12 h-12 bg-white/20 rounded-2xl flex items-center justify-center backdrop-blur-md">
-                    <Icon name="heart" className="w-6 h-6 fill-white text-white" />
-                  </div>
-                </div>
 
-                <div className="bg-white/10 rounded-[2rem] p-5 flex-1 flex flex-col min-h-0 border border-white/5">
-                  <div className="overflow-y-auto custom-scrollbar pr-2 flex-1 space-y-1">
-                    {dashboardStats.likesSummary.map((item, i) => {
-                      const isExpanded = expandedLikeLoc === item.name;
+                  <div className="space-y-3 overflow-y-auto custom-scrollbar flex-1 pr-2 min-h-0">
+                    {(subscribersData || []).map((sub) => {
+                      const isRevealed = !!revealedEmails[sub.id];
 
                       return (
                         <div
-                          key={i}
-                          className="flex flex-col border-b border-white/10 last:border-0 group cursor-pointer transition-colors hover:bg-white/5 rounded-xl px-2 -mx-2"
-                          onClick={() => setExpandedLikeLoc(isExpanded ? null : item.name)}
+                          key={sub.id}
+                          onClick={() => toggleEmailVisibility(sub.id)}
+                          title={isRevealed ? "Click to mask email" : "Click to reveal email"}
+                          className="p-4 bg-slate-50/50 hover:bg-slate-100/70 rounded-2xl border border-slate-100 flex justify-between items-center group cursor-pointer transition-all duration-150 select-none"
                         >
-                          <div className="flex justify-between items-center py-3">
-                            <div className="flex flex-col truncate pr-4">
-                              <p className="text-[11px] font-black uppercase truncate text-white group-hover:text-rose-200 transition-colors">
-                                {item.name}
+                          <div className="flex flex-col truncate pr-4">
+                            <div className="flex items-center gap-2">
+                              <p className="text-xs font-black text-slate-800 truncate font-mono">
+                                {isRevealed ? sub.email : maskEmail(sub.email)}
                               </p>
-                              <p className="text-[8px] font-bold text-white/50 uppercase tracking-widest">
-                                {item.category}
-                              </p>
-                            </div>
-                            <div className="text-right shrink-0 flex items-center gap-2">
-                              <p className="text-sm font-black tracking-tighter text-white">{item.hits}</p>
                               <Icon
-                                name="navigation"
-                                className={`w-3 h-3 text-white/30 transition-transform ${isExpanded ? 'rotate-180' : 'rotate-90'}`}
+                                name={isRevealed ? "eye-off" : "eye"}
+                                className="w-3.5 h-3.5 text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
                               />
                             </div>
+                            <p className="text-[8px] font-bold text-slate-400 mt-0.5 tracking-widest uppercase">
+                              {new Date(sub.subscribed_at).toLocaleDateString()}
+                            </p>
                           </div>
 
-                          {/* Country Breakdown */}
-                          {isExpanded && (
-                            <div className="pb-3 animate-in fade-in slide-in-from-top-2">
-                              <div className="bg-black/20 rounded-xl p-3 space-y-2 border border-white/5 shadow-inner">
-                                <p className="text-[8px] font-black uppercase tracking-widest text-white/40 mb-2 border-b border-white/10 pb-1">
-                                  Country Breakdown
-                                </p>
-                                <div className="space-y-1.5 max-h-32 overflow-y-auto custom-scrollbar pr-1">
-                                  {Object.entries(item.countries)
-                                    .sort((a, b) => b[1] - a[1])
-                                    .map(([country, count]) => (
-                                      <div key={country} className="flex justify-between items-center">
-                                        <span className="text-[9px] font-bold text-white/80">{country}</span>
-                                        <span className="text-[9px] font-black text-rose-300">{count}</span>
-                                      </div>
-                                    ))}
-                                </div>
-                              </div>
-                            </div>
-                          )}
+                          <div className="flex items-center shrink-0 gap-2">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleSubscriberStatus(sub.id, sub.is_active);
+                              }}
+                              title={`Click to mark as ${sub.is_active ? 'Inactive' : 'Active'}`}
+                              className={`px-3 py-1.5 rounded-xl text-[8px] font-black uppercase tracking-widest transition-all transform active:scale-95 hover:scale-105 ${sub.is_active
+                                ? 'bg-emerald-100 text-emerald-700 border border-emerald-200 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 group-hover:shadow-sm'
+                                : 'bg-rose-100 text-rose-700 border border-rose-200 hover:bg-emerald-50 hover:text-emerald-600 hover:border-emerald-200 group-hover:shadow-sm'
+                                }`}
+                            >
+                              {sub.is_active ? 'Active' : 'Inactive'}
+                            </button>
+
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (window.confirm("Are you sure you want to delete this subscriber?")) {
+                                  handleDeleteSubscriber(sub.id);
+                                }
+                              }}
+                              title="Delete subscriber permanently"
+                              className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 rounded-xl transition-all transform active:scale-95 hover:scale-105 group-hover:shadow-sm"
+                            >
+                              <Icon name="trash-2" className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                         </div>
                       );
                     })}
+
+                    {(!subscribersData || subscribersData.length === 0) && (
+                      <div className="flex flex-col items-center justify-center h-full opacity-30">
+                        <Icon name="mail" className="w-10 h-10 mb-2" />
+                        <p className="text-[10px] font-black uppercase tracking-widest text-center">
+                          No Subscribers Yet
+                        </p>
+                      </div>
+                    )}
                   </div>
                 </div>
-              </div>
 
-              {/* 3. NEWSLETTER SUBSCRIBERS */}
-              <div className="bg-white rounded-[2.5rem] p-8 border border-slate-100 shadow-sm flex flex-col h-[450px]">
-                <div className="flex justify-between items-center mb-6">
-                  <h2 className="text-[10px] font-black uppercase text-indigo-600 flex items-center gap-2 tracking-widest">
-                    <Icon name="mail" className="w-4 h-4" /> Subscribers
-                  </h2>
-                  <span className="px-3 py-1 bg-indigo-50 text-indigo-600 rounded-full text-[9px] font-black uppercase tracking-tighter border border-indigo-100">
-                    {(subscribersData || []).length} Total
-                  </span>
-                </div>
-
-                <div className="space-y-3 overflow-y-auto custom-scrollbar flex-1 pr-2 min-h-0">
-                  {(subscribersData || []).map((sub) => {
-                    const isRevealed = !!revealedEmails[sub.id];
-
-                    return (
-                      <div
-                        key={sub.id}
-                        onClick={() => toggleEmailVisibility(sub.id)}
-                        title={isRevealed ? "Click to mask email" : "Click to reveal email"}
-                        className="p-4 bg-slate-50/50 hover:bg-slate-100/70 rounded-2xl border border-slate-100 flex justify-between items-center group cursor-pointer transition-all duration-150 select-none"
-                      >
-                        <div className="flex flex-col truncate pr-4">
-                          <div className="flex items-center gap-2">
-                            <p className="text-xs font-black text-slate-800 truncate font-mono">
-                              {isRevealed ? sub.email : maskEmail(sub.email)}
-                            </p>
-                            <Icon
-                              name={isRevealed ? "eye-off" : "eye"}
-                              className="w-3.5 h-3.5 text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
-                            />
-                          </div>
-                          <p className="text-[8px] font-bold text-slate-400 mt-0.5 tracking-widest uppercase">
-                            {new Date(sub.subscribed_at).toLocaleDateString()}
+                {/* 4. PENDING COMMENTS */}
+                <div className="bg-white rounded-[2.5rem] p-8 border border-slate-100 shadow-sm flex flex-col h-[450px]">
+                  <div className="flex justify-between items-center mb-6">
+                    <h2 className="text-[10px] font-black uppercase text-slate-800 flex items-center gap-2 tracking-widest">
+                      <Icon name="message-square" className="w-4 h-4 text-indigo-500" /> Pending Comments
+                    </h2>
+                    <span className="px-3 py-1 bg-indigo-100 text-indigo-600 rounded-full text-[9px] font-black uppercase tracking-tighter">
+                      {allComments.filter(c => !c.reply_text).length} New
+                    </span>
+                  </div>
+                  <div className="space-y-4 overflow-y-auto custom-scrollbar flex-1 pr-2 min-h-0">
+                    {allComments.filter(c => !c.reply_text).map(c => (
+                      <div key={c.id} className="p-4 bg-slate-50 rounded-2xl border border-slate-100 group hover:border-indigo-200 transition-colors">
+                        <div className="flex justify-between items-start mb-2">
+                          <p className="text-[9px] font-black uppercase text-indigo-500 truncate">
+                            {c.travel_bucket_list?.place_name || 'General Entry'}
+                          </p>
+                          <p className="text-[8px] font-bold text-slate-400 uppercase">
+                            {new Date(c.created_at).toLocaleDateString()}
                           </p>
                         </div>
-
-                        <div className="flex items-center shrink-0 gap-2">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              toggleSubscriberStatus(sub.id, sub.is_active);
-                            }}
-                            title={`Click to mark as ${sub.is_active ? 'Inactive' : 'Active'}`}
-                            className={`px-3 py-1.5 rounded-xl text-[8px] font-black uppercase tracking-widest transition-all transform active:scale-95 hover:scale-105 ${sub.is_active
-                              ? 'bg-emerald-100 text-emerald-700 border border-emerald-200 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 group-hover:shadow-sm'
-                              : 'bg-rose-100 text-rose-700 border border-rose-200 hover:bg-emerald-50 hover:text-emerald-600 hover:border-emerald-200 group-hover:shadow-sm'
-                              }`}
-                          >
-                            {sub.is_active ? 'Active' : 'Inactive'}
-                          </button>
-
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (window.confirm("Are you sure you want to delete this subscriber?")) {
-                                handleDeleteSubscriber(sub.id);
-                              }
-                            }}
-                            title="Delete subscriber permanently"
-                            className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 rounded-xl transition-all transform active:scale-95 hover:scale-105 group-hover:shadow-sm"
-                          >
-                            <Icon name="trash-2" className="w-3.5 h-3.5" />
-                          </button>
+                        <p className="text-xs text-slate-700 font-medium italic mb-3">"{c.comment_text}"</p>
+                        <div className="flex flex-col gap-2">
+                          <div className="flex gap-2">
+                            <input
+                              id={`reply-input-${c.id}`}
+                              className="flex-1 bg-white border border-slate-200 rounded-xl px-3 py-2 text-[10px] outline-none focus:ring-1 focus:ring-indigo-400 placeholder:uppercase placeholder:text-[8px] placeholder:font-bold"
+                              placeholder="Type reply..."
+                            />
+                            <button
+                              onClick={() => submitCommentReply(c.id, `reply-input-${c.id}`)}
+                              className="px-4 bg-indigo-600 text-white rounded-xl text-[9px] font-black uppercase transition-all hover:bg-indigo-700 active:scale-95 shadow-lg shadow-indigo-100"
+                            >
+                              Reply
+                            </button>
+                          </div>
+                          <div className="flex justify-end">
+                            <button
+                              onClick={() => deleteLocationComment(c.id)}
+                              className="text-[8px] font-black uppercase text-rose-400 hover:text-rose-600 transition-colors"
+                            >
+                              Delete Thread
+                            </button>
+                          </div>
                         </div>
                       </div>
-                    );
-                  })}
-
-                  {(!subscribersData || subscribersData.length === 0) && (
-                    <div className="flex flex-col items-center justify-center h-full opacity-30">
-                      <Icon name="mail" className="w-10 h-10 mb-2" />
-                      <p className="text-[10px] font-black uppercase tracking-widest text-center">
-                        No Subscribers Yet
-                      </p>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* 4. PENDING COMMENTS */}
-              <div className="bg-white rounded-[2.5rem] p-8 border border-slate-100 shadow-sm flex flex-col h-[450px]">
-                <div className="flex justify-between items-center mb-6">
-                  <h2 className="text-[10px] font-black uppercase text-slate-800 flex items-center gap-2 tracking-widest">
-                    <Icon name="message-square" className="w-4 h-4 text-indigo-500" /> Pending Comments
-                  </h2>
-                  <span className="px-3 py-1 bg-indigo-100 text-indigo-600 rounded-full text-[9px] font-black uppercase tracking-tighter">
-                    {allComments.filter(c => !c.reply_text).length} New
-                  </span>
-                </div>
-                <div className="space-y-4 overflow-y-auto custom-scrollbar flex-1 pr-2 min-h-0">
-                  {allComments.filter(c => !c.reply_text).map(c => (
-                    <div key={c.id} className="p-4 bg-slate-50 rounded-2xl border border-slate-100 group hover:border-indigo-200 transition-colors">
-                      <div className="flex justify-between items-start mb-2">
-                        <p className="text-[9px] font-black uppercase text-indigo-500 truncate">
-                          {c.travel_bucket_list?.place_name || 'General Entry'}
-                        </p>
-                        <p className="text-[8px] font-bold text-slate-400 uppercase">
-                          {new Date(c.created_at).toLocaleDateString()}
-                        </p>
+                    ))}
+                    {allComments.filter(c => !c.reply_text).length === 0 && (
+                      <div className="flex flex-col items-center justify-center h-full opacity-30">
+                        <Icon name="check-circle" className="w-10 h-10 mb-2" />
+                        <p className="text-[10px] font-black uppercase tracking-widest text-center">Inbox Cleared</p>
                       </div>
-                      <p className="text-xs text-slate-700 font-medium italic mb-3">"{c.comment_text}"</p>
-                      <div className="flex flex-col gap-2">
+                    )}
+                  </div>
+                </div>
+
+                {/* 5. SUGGESTIONS */}
+                <div className="bg-white rounded-[2.5rem] p-8 border border-slate-100 shadow-sm flex flex-col h-[450px]">
+                  <div className="flex justify-between items-center mb-6">
+                    <h2 className="text-[10px] font-black uppercase text-orange-600 flex items-center gap-2 tracking-widest">
+                      <Icon name="shield-alert" className="w-4 h-4" /> Suggestions
+                    </h2>
+                    <span className="px-3 py-1 bg-orange-100 text-orange-600 rounded-full text-[9px] font-black uppercase tracking-tighter">
+                      {pendingApprovals.length} Pending
+                    </span>
+                  </div>
+                  <div className="space-y-3 overflow-y-auto custom-scrollbar flex-1 pr-2 min-h-0">
+                    {pendingApprovals.map(a => (
+                      <div key={a.id} className="p-4 bg-orange-50/50 rounded-2xl border border-orange-100 flex justify-between items-center group hover:bg-orange-50 transition-all">
+                        <div>
+                          <p className="text-[10px] font-black uppercase text-slate-800">{a.place_name}</p>
+                          <p className="text-[8px] font-bold text-slate-500 mt-0.5 tracking-widest uppercase">{a.category || 'New Location'}</p>
+                        </div>
                         <div className="flex gap-2">
-                          <input
-                            id={`reply-input-${c.id}`}
-                            className="flex-1 bg-white border border-slate-200 rounded-xl px-3 py-2 text-[10px] outline-none focus:ring-1 focus:ring-indigo-400 placeholder:uppercase placeholder:text-[8px] placeholder:font-bold"
-                            placeholder="Type reply..."
-                          />
-                          <button
-                            onClick={() => submitCommentReply(c.id, `reply-input-${c.id}`)}
-                            className="px-4 bg-indigo-600 text-white rounded-xl text-[9px] font-black uppercase transition-all hover:bg-indigo-700 active:scale-95 shadow-lg shadow-indigo-100"
-                          >
-                            Reply
-                          </button>
-                        </div>
-                        <div className="flex justify-end">
-                          <button
-                            onClick={() => deleteLocationComment(c.id)}
-                            className="text-[8px] font-black uppercase text-rose-400 hover:text-rose-600 transition-colors"
-                          >
-                            Delete Thread
-                          </button>
+                          <button onClick={() => handleSuggestionAction(a.id, 'approved')} className="px-3 py-1.5 bg-emerald-500 text-white rounded-lg text-[8px] font-black uppercase shadow-lg shadow-emerald-100 hover:scale-105 transition-transform">Approve</button>
+                          <button onClick={() => handleSuggestionAction(a.id, 'rejected')} className="px-3 py-1.5 bg-rose-100 text-rose-600 rounded-lg text-[8px] font-black uppercase hover:bg-rose-200">Dismiss</button>
                         </div>
                       </div>
-                    </div>
-                  ))}
-                  {allComments.filter(c => !c.reply_text).length === 0 && (
-                    <div className="flex flex-col items-center justify-center h-full opacity-30">
-                      <Icon name="check-circle" className="w-10 h-10 mb-2" />
-                      <p className="text-[10px] font-black uppercase tracking-widest text-center">Inbox Cleared</p>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* 5. SUGGESTIONS */}
-              <div className="bg-white rounded-[2.5rem] p-8 border border-slate-100 shadow-sm flex flex-col h-[450px]">
-                <div className="flex justify-between items-center mb-6">
-                  <h2 className="text-[10px] font-black uppercase text-orange-600 flex items-center gap-2 tracking-widest">
-                    <Icon name="shield-alert" className="w-4 h-4" /> Suggestions
-                  </h2>
-                  <span className="px-3 py-1 bg-orange-100 text-orange-600 rounded-full text-[9px] font-black uppercase tracking-tighter">
-                    {pendingApprovals.length} Pending
-                  </span>
-                </div>
-                <div className="space-y-3 overflow-y-auto custom-scrollbar flex-1 pr-2 min-h-0">
-                  {pendingApprovals.map(a => (
-                    <div key={a.id} className="p-4 bg-orange-50/50 rounded-2xl border border-orange-100 flex justify-between items-center group hover:bg-orange-50 transition-all">
-                      <div>
-                        <p className="text-[10px] font-black uppercase text-slate-800">{a.place_name}</p>
-                        <p className="text-[8px] font-bold text-slate-500 mt-0.5 tracking-widest uppercase">{a.category || 'New Location'}</p>
+                    ))}
+                    {pendingApprovals.length === 0 && (
+                      <div className="flex flex-col items-center justify-center h-full opacity-30">
+                        <Icon name="activity" className="w-10 h-10 mb-2" />
+                        <p className="text-[10px] font-black uppercase tracking-widest text-center">No Pending Audits</p>
                       </div>
-                      <div className="flex gap-2">
-                        <button onClick={() => handleSuggestionAction(a.id, 'approved')} className="px-3 py-1.5 bg-emerald-500 text-white rounded-lg text-[8px] font-black uppercase shadow-lg shadow-emerald-100 hover:scale-105 transition-transform">Approve</button>
-                        <button onClick={() => handleSuggestionAction(a.id, 'rejected')} className="px-3 py-1.5 bg-rose-100 text-rose-600 rounded-lg text-[8px] font-black uppercase hover:bg-rose-200">Dismiss</button>
-                      </div>
-                    </div>
-                  ))}
-                  {pendingApprovals.length === 0 && (
-                    <div className="flex flex-col items-center justify-center h-full opacity-30">
-                      <Icon name="activity" className="w-10 h-10 mb-2" />
-                      <p className="text-[10px] font-black uppercase tracking-widest text-center">No Pending Audits</p>
-                    </div>
-                  )}
+                    )}
+                  </div>
                 </div>
-              </div>
 
+              </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
       </main>
 
