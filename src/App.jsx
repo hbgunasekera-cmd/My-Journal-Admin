@@ -2150,13 +2150,14 @@ Return ONLY this JSON structure:
       if (fetchError) throw fetchError;
 
       // Create a Set for O(1) lookup speed
-      const existingUrls = new Set(existingRecords.map(record => record.url));
+      const existingUrls = new Set((existingRecords || []).map((record) => record.url));
+      const existingCount = existingRecords?.length || 0;
 
-      // 2. Call your backend proxy (which now uses the YouTube Data API instead of yt-dlp)
+      // 2. Call backend proxy endpoint (paginated YouTube API)
       const response = await fetch('/api/sync-youtube', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ targetUrl: 'https://www.youtube.com/@myjournalview' })
+        body: JSON.stringify({ targetUrl: 'https://www.youtube.com/@myjournalview' }),
       });
 
       // Read raw text first to safely handle empty or HTML error pages (e.g., 504 timeouts)
@@ -2167,39 +2168,46 @@ Return ONLY this JSON structure:
         responseData = rawText ? JSON.parse(rawText) : {};
       } catch (parseError) {
         console.error("Raw server response:", rawText);
-        throw new Error(`Server returned invalid data (Status: ${response.status}). Check backend logs.`);
+        throw new Error(
+          `Server returned invalid response format (Status: ${response.status}). Check server logs.`
+        );
       }
 
       if (!response.ok) {
-        throw new Error(responseData.error || `HTTP Error ${response.status} - Failed to fetch from YouTube proxy`);
+        throw new Error(
+          responseData.error ||
+          `HTTP Error ${response.status} - Failed to fetch from YouTube proxy`
+        );
       }
 
       const { videos } = responseData;
 
       if (!videos || !Array.isArray(videos)) {
-        throw new Error("Invalid response format: 'videos' array missing from server response.");
+        throw new Error(
+          "Invalid response format: 'videos' array missing from server response."
+        );
       }
 
       // 3. Filter out videos that already exist in the database and map to schema
       const newVideos = videos
-        .filter(v => !existingUrls.has(v.url))
+        .filter((v) => v?.url && !existingUrls.has(v.url))
         .map((v, index) => ({
-          title: v.title,
+          title: v.title || "Untitled Video",
           url: v.url,
           custom_thumbnail_url: v.thumbnail || null,
           is_active: true,
-          display_order: index
-          // 'id' and 'created_at' are handled automatically by the DB schema defaults
+          display_order: existingCount + index,
+          // 'id' and 'created_at' are handled automatically by DB defaults
         }));
 
       if (newVideos.length === 0) {
-        triggerToast("No new YouTube videos found.");
+        triggerToast(`All ${videos.length} YouTube videos & shorts are already up-to-date!`);
         return;
       }
 
-      triggerToast(`Inserting ${newVideos.length} new videos...`);
+      triggerToast(`Inserting ${newVideos.length} new videos (out of ${videos.length} found)...`);
 
-      // 4. Insert strictly the new records into hub_videos
+      // 4. Insert strictly new records into hub_videos table
       const { error: insertError } = await supabaseClient
         .from('hub_videos')
         .insert(newVideos);
@@ -2207,6 +2215,11 @@ Return ONLY this JSON structure:
       if (insertError) throw insertError;
 
       triggerToast(`Successfully imported ${newVideos.length} YouTube videos!`);
+
+      // Optional: Trigger state refresh if function exists in your component context
+      if (typeof refreshAllData === 'function') {
+        refreshAllData();
+      }
 
     } catch (error) {
       console.error("YouTube Sync Error:", error);

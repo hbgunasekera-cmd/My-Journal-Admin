@@ -115,89 +115,104 @@ export default async function handler(req, res) {
     );
 
     // ---------------------------------------------------------
-    // 4. Get Videos From Uploads Playlist
+    // 4. Get ALL Videos From Uploads Playlist (Paginated Loop)
     // ---------------------------------------------------------
-    const playlistUrl =
-      `https://www.googleapis.com/youtube/v3/playlistItems` +
-      `?part=snippet` +
-      `&maxResults=50` +
-      `&playlistId=${encodeURIComponent(uploadsPlaylistId)}` +
-      `&key=${encodeURIComponent(API_KEY)}`;
+    const videos = [];
+    let pageToken = "";
 
-    const playlistRes = await fetch(playlistUrl);
+    do {
+      let playlistUrl =
+        `https://www.googleapis.com/youtube/v3/playlistItems` +
+        `?part=snippet` +
+        `&maxResults=50` +
+        `&playlistId=${encodeURIComponent(uploadsPlaylistId)}` +
+        `&key=${encodeURIComponent(API_KEY)}`;
 
-    let playlistData;
+      if (pageToken) {
+        playlistUrl += `&pageToken=${encodeURIComponent(pageToken)}`;
+      }
 
-    try {
-      playlistData = await playlistRes.json();
-    } catch (jsonError) {
-      console.error(
-        "YouTube Playlist API returned invalid JSON:",
-        jsonError
+      const playlistRes = await fetch(playlistUrl);
+
+      let playlistData;
+
+      try {
+        playlistData = await playlistRes.json();
+      } catch (jsonError) {
+        console.error(
+          "YouTube Playlist API returned invalid JSON:",
+          jsonError
+        );
+
+        return res.status(502).json({
+          error: `YouTube API returned an invalid response (HTTP ${playlistRes.status})`,
+        });
+      }
+
+      console.log(
+        "YouTube Playlist API Status:",
+        playlistRes.status
       );
 
-      return res.status(502).json({
-        error: `YouTube API returned an invalid response (HTTP ${playlistRes.status})`,
-      });
-    }
+      // IMPORTANT:
+      // Expose actual Google API errors.
+      if (!playlistRes.ok) {
+        console.error(
+          "YouTube Playlist API Error:",
+          playlistData
+        );
 
-    console.log(
-      "YouTube Playlist API Status:",
-      playlistRes.status
-    );
+        return res.status(playlistRes.status).json({
+          error:
+            playlistData?.error?.message ||
+            `YouTube API returned HTTP ${playlistRes.status}`,
+          details:
+            playlistData?.error?.errors || null,
+        });
+      }
 
-    // IMPORTANT:
-    // Expose actual Google API errors.
-    if (!playlistRes.ok) {
-      console.error(
-        "YouTube Playlist API Error:",
-        playlistData
-      );
+      // ---------------------------------------------------------
+      // 5. Convert YouTube Items To App Video Format
+      // ---------------------------------------------------------
+      const pageVideos = (playlistData?.items || [])
+        .map((item) => {
+          const videoId =
+            item?.snippet?.resourceId?.videoId;
 
-      return res.status(playlistRes.status).json({
-        error:
-          playlistData?.error?.message ||
-          `YouTube API returned HTTP ${playlistRes.status}`,
-        details:
-          playlistData?.error?.errors || null,
-      });
-    }
+          // Ignore malformed playlist items
+          if (!videoId) {
+            return null;
+          }
 
-    // ---------------------------------------------------------
-    // 5. Convert YouTube Items To App Video Format
-    // ---------------------------------------------------------
-    const videos = (playlistData?.items || [])
-      .map((item) => {
-        const videoId =
-          item?.snippet?.resourceId?.videoId;
+          return {
+            title:
+              item?.snippet?.title ||
+              "Untitled Video",
 
-        // Ignore malformed playlist items
-        if (!videoId) {
-          return null;
-        }
+            url:
+              `https://www.youtube.com/watch?v=${videoId}`,
 
-        return {
-          title:
-            item?.snippet?.title ||
-            "Untitled Video",
+            thumbnail:
+              item?.snippet?.thumbnails?.high?.url ||
+              item?.snippet?.thumbnails?.medium?.url ||
+              item?.snippet?.thumbnails?.default?.url ||
+              null,
+          };
+        })
+        .filter(Boolean);
 
-          url:
-            `https://www.youtube.com/watch?v=${videoId}`,
+      videos.push(...pageVideos);
 
-          thumbnail:
-            item?.snippet?.thumbnails?.high?.url ||
-            item?.snippet?.thumbnails?.medium?.url ||
-            item?.snippet?.thumbnails?.default?.url ||
-            null,
-        };
-      })
-      .filter(Boolean);
+      // Check for next page token
+      pageToken = playlistData?.nextPageToken || "";
+
+    } while (pageToken);
 
     // ---------------------------------------------------------
     // 6. Return Results
     // ---------------------------------------------------------
     console.log(
-      `YouTube Sync: Successfully fetched ${videos.length} videos`
+      `YouTube Sync: Successfully fetched total ${videos.length} videos/shorts`
     );
 
     return res.status(200).json({
