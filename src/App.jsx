@@ -2156,7 +2156,7 @@ Return ONLY this JSON structure:
       const response = await fetch('/api/sync-youtube', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ targetUrl: 'https://www.youtube.com/@Its-My-Journal' })
+        body: JSON.stringify({ targetUrl: 'https://www.youtube.com/@myjournalview' })
       });
 
       // Read raw text first to safely handle empty or HTML error pages (e.g., 504 timeouts)
@@ -4474,92 +4474,92 @@ Return ONLY this JSON structure:
           return (
             <div className="h-full w-full overflow-y-auto p-8 no-scrollbar bg-slate-50">
 
-            {/* HEADER & QUICK SUMMARY TOOLBAR */}
-<div className="max-w-full mx-auto mb-8 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-slate-200/60 backdrop-blur-md p-4 sm:px-6 sm:py-4 rounded-[2rem] border border-slate-300/50 shadow-sm">
-  <div>
-    <h1 className="text-2xl font-black text-slate-900 italic uppercase tracking-tighter">System Overview</h1>
-    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Real-time journal analytics</p>
-  </div>
+              {/* HEADER & QUICK SUMMARY TOOLBAR */}
+              <div className="max-w-full mx-auto mb-8 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-slate-200/60 backdrop-blur-md p-4 sm:px-6 sm:py-4 rounded-[2rem] border border-slate-300/50 shadow-sm">
+                <div>
+                  <h1 className="text-2xl font-black text-slate-900 italic uppercase tracking-tighter">System Overview</h1>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Real-time journal analytics</p>
+                </div>
 
-  {/* Quick Metric Pills */}
-  <div className="flex items-center gap-4 bg-slate-900 px-5 py-2.5 rounded-full border border-slate-800 shadow-lg text-white">
+                {/* Quick Metric Pills */}
+                <div className="flex items-center gap-4 bg-slate-900 px-5 py-2.5 rounded-full border border-slate-800 shadow-lg text-white">
 
-    {/* Verified Person & Progress Circle Badge */}
-    <div className="flex items-center gap-2.5 cursor-help group" title="Verified Persons">
-      <RefreshProgressCircle
-        timeLeft={timeLeft}
-        totalTime={REFRESH_INTERVAL_SECONDS}
-      />
+                  {/* Verified Person & Progress Circle Badge */}
+                  <div className="flex items-center gap-2.5 cursor-help group" title="Verified Persons">
+                    <RefreshProgressCircle
+                      timeLeft={timeLeft}
+                      totalTime={REFRESH_INTERVAL_SECONDS}
+                    />
 
-      {/* Divider */}
-      <div className="w-px h-3.5 bg-slate-800" />
+                    {/* Divider */}
+                    <div className="w-px h-3.5 bg-slate-800" />
 
-      <div className="flex items-center gap-1.5">
-        <Icon name="check-circle" className="w-4 h-4 text-emerald-400 group-hover:scale-110 transition-transform" />
-        <span className="text-emerald-400 font-black italic text-[11px]">
-          {verifiedPercentage}%
-        </span>
-      </div>
-    </div>
+                    <div className="flex items-center gap-1.5">
+                      <Icon name="check-circle" className="w-4 h-4 text-emerald-400 group-hover:scale-110 transition-transform" />
+                      <span className="text-emerald-400 font-black italic text-[11px]">
+                        {verifiedPercentage}%
+                      </span>
+                    </div>
+                  </div>
 
-    <div className="w-px h-3.5 bg-slate-800" />
+                  <div className="w-px h-3.5 bg-slate-800" />
 
-    {/* Total Likes */}
-    <div className="flex items-center gap-1.5 cursor-help group" title="Total Likes">
-      <Icon name="heart" className="w-4 h-4 text-rose-400 fill-rose-500/20 group-hover:scale-110 transition-transform" />
-      <span className="text-[11px] font-black text-white">
-        {dashboardStats.likesSummary ? dashboardStats.likesSummary.reduce((a, b) => a + b.hits, 0) : 0}
-      </span>
-    </div>
+                  {/* Total Likes */}
+                  <div className="flex items-center gap-1.5 cursor-help group" title="Total Likes">
+                    <Icon name="heart" className="w-4 h-4 text-rose-400 fill-rose-500/20 group-hover:scale-110 transition-transform" />
+                    <span className="text-[11px] font-black text-white">
+                      {dashboardStats.likesSummary ? dashboardStats.likesSummary.reduce((a, b) => a + b.hits, 0) : 0}
+                    </span>
+                  </div>
 
-    <div className="w-px h-3.5 bg-slate-800" />
+                  <div className="w-px h-3.5 bg-slate-800" />
 
-    {/* Total Subscribers */}
-    <div className="flex items-center gap-1.5 cursor-help group" title="Total Subscribers">
-      <Icon name="mail" className="w-4 h-4 text-indigo-400 group-hover:scale-110 transition-transform" />
-      <span className="text-[11px] font-black text-white">
-        {(subscribersData || []).length}
-      </span>
-    </div>
+                  {/* Total Subscribers */}
+                  <div className="flex items-center gap-1.5 cursor-help group" title="Total Subscribers">
+                    <Icon name="mail" className="w-4 h-4 text-indigo-400 group-hover:scale-110 transition-transform" />
+                    <span className="text-[11px] font-black text-white">
+                      {(subscribersData || []).length}
+                    </span>
+                  </div>
 
-    <div className="w-px h-3.5 bg-slate-800" />
+                  <div className="w-px h-3.5 bg-slate-800" />
 
-    {/* Pending Comments */}
-    <div className="flex items-center gap-1.5 cursor-help group" title="Pending Comments">
-      <div className="relative">
-        <Icon name="message-square" className="w-4 h-4 text-amber-400 group-hover:scale-110 transition-transform" />
-        {allComments.filter(c => !c.reply_text).length > 0 && (
-          <span className="absolute -top-1 -right-1 flex h-2 w-2">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
-            <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500" />
-          </span>
-        )}
-      </div>
-      <span className="text-[11px] font-black text-white">
-        {allComments.filter(c => !c.reply_text).length}
-      </span>
-    </div>
+                  {/* Pending Comments */}
+                  <div className="flex items-center gap-1.5 cursor-help group" title="Pending Comments">
+                    <div className="relative">
+                      <Icon name="message-square" className="w-4 h-4 text-amber-400 group-hover:scale-110 transition-transform" />
+                      {allComments.filter(c => !c.reply_text).length > 0 && (
+                        <span className="absolute -top-1 -right-1 flex h-2 w-2">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
+                          <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500" />
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-[11px] font-black text-white">
+                      {allComments.filter(c => !c.reply_text).length}
+                    </span>
+                  </div>
 
-    <div className="w-px h-3.5 bg-slate-800" />
+                  <div className="w-px h-3.5 bg-slate-800" />
 
-    {/* Pending Suggestions */}
-    <div className="flex items-center gap-1.5 cursor-help group" title="Pending Suggestions">
-      <div className="relative">
-        <Icon name="shield-alert" className="w-4 h-4 text-orange-400 group-hover:scale-110 transition-transform" />
-        {pendingApprovals.length > 0 && (
-          <span className="absolute -top-1 -right-1 flex h-2 w-2">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-orange-400 opacity-75" />
-            <span className="relative inline-flex rounded-full h-2 w-2 bg-orange-500" />
-          </span>
-        )}
-      </div>
-      <span className="text-[11px] font-black text-white">
-        {pendingApprovals.length}
-      </span>
-    </div>
+                  {/* Pending Suggestions */}
+                  <div className="flex items-center gap-1.5 cursor-help group" title="Pending Suggestions">
+                    <div className="relative">
+                      <Icon name="shield-alert" className="w-4 h-4 text-orange-400 group-hover:scale-110 transition-transform" />
+                      {pendingApprovals.length > 0 && (
+                        <span className="absolute -top-1 -right-1 flex h-2 w-2">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-orange-400 opacity-75" />
+                          <span className="relative inline-flex rounded-full h-2 w-2 bg-orange-500" />
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-[11px] font-black text-white">
+                      {pendingApprovals.length}
+                    </span>
+                  </div>
 
-  </div>
-</div>
+                </div>
+              </div>
 
               <div className="max-w-full mx-auto grid grid-cols-1 lg:grid-cols-2 gap-6 pb-20">
 
