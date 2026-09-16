@@ -2395,18 +2395,19 @@ Return ONLY this JSON structure:
         emailCoverImageUrl = `${baseUrl}=w600-h338-c`;
       }
 
-      // Construct the exact dynamic URL to open the gallery on your website
       const locationName = locationData.place_name || 'Remote Target Location';
 
-      // REVISED: Changed to /gallery/ routing scheme using the utility slug function
-      const galleryLink = `https://www.myjournalview.com/gallery/${generateCleanSlug(locationName)}`;
-
       // 3. Construct the batch delivery payload container array mapping over each subscriber
-      const emailPayload = emailList.map(subscriberEmail => ({
-        from: 'My Journal Expedition Logs <notifications@info.myjournalview.com>',
-        to: [subscriberEmail],
-        subject: `🧭 New Horizon Unlocked: ${locationName} is Live`,
-        html: `
+      const emailPayload = emailList.map(subscriberEmail => {
+        // Dynamic tracking link per subscriber using generateGalleryLink with UTM parameters
+        const subscriberToken = btoa(subscriberEmail);
+        const galleryLink = `${generateGalleryLink(locationName, 'newsletter')}&utm_medium=email&sub_id=${subscriberToken}`;
+
+        return {
+          from: 'My Journal Expedition Logs <notifications@info.myjournalview.com>',
+          to: [subscriberEmail],
+          subject: `🧭 New Horizon Unlocked: ${locationName} is Live`,
+          html: `
    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; padding: 24px; color: #1e293b; max-width: 600px; margin: 0 auto; background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 24px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
 
    ${emailCoverImageUrl ? `
@@ -2447,13 +2448,13 @@ Return ONLY this JSON structure:
    </table>
 
    <div style="margin-top: 28px; margin-bottom: 12px;">
-    <!-- REVISED: Updated href to galleryLink and inner text to View Gallery -->
     <a href="${galleryLink}" target="_blank" style="background-color: #4f46e5; color: #ffffff; padding: 14px 28px; text-decoration: none; font-weight: 900; border-radius: 14px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; display: inline-block; box-shadow: 0 4px 12px rgba(79, 70, 229, 0.25);">
   View Gallery
     </a>
    </div>
    </div> `
-      }));
+        };
+      });
 
       // 4. Securely dispatch the payload to your internal backend proxy handler
       const response = await fetch('/api/send-email', {
@@ -2875,12 +2876,15 @@ Return ONLY this JSON structure:
     const knownUsers = new Set();
 
     const parseUA = (v = {}) => {
-
       const rawUA = v.user_agent || "";
       const lowerUA = rawUA.toLowerCase();
       const referrer = (v.referrer || "").toLowerCase();
-      const utmSource = (v.utm_source || "").toLowerCase();
       const rawPath = (v.page_path || 'Unknown').toLowerCase();
+
+      // Source/Medium & Subscriber tracking resolution
+      const utmSource = (v.utm_source || v.source || "").toLowerCase();
+      const utmMedium = (v.utm_medium || v.medium || "").toLowerCase();
+      const subscriberToken = v.subscriber_email || v.sub_id || "";
 
       const ip = v.ip_address || "";
       const city = v.city || "";
@@ -2923,7 +2927,7 @@ Return ONLY this JSON structure:
         v.is_webdriver === true ||
         isDataCenterNetwork;
 
-      // 3. Traffic Source & QR Detection
+      // 3. Traffic Source, Email & QR Detection
       let finalSource = "Direct";
 
       if (isBot) {
@@ -2937,19 +2941,30 @@ Return ONLY this JSON structure:
           finalSource = 'Automated Crawler';
         }
       } else {
-        // QR Code Detection logic
+        // Newsletter & Subscriber Detection
         if (
+          utmSource.includes('newsletter') ||
+          utmSource.includes('email') ||
+          utmMedium.includes('email') ||
+          Boolean(subscriberToken) ||
+          rawPath.includes('utm_source=newsletter') ||
+          rawPath.includes('utm_medium=email') ||
+          rawPath.includes('sub_id=')
+        ) {
+          finalSource = 'Newsletter';
+        }
+        // QR Code Detection logic
+        else if (
           utmSource.includes('qrcode') ||
           utmSource.includes('qr') ||
-          rawPath.toLowerCase().includes('utm_source=qrcode') ||
-          rawPath.toLowerCase().includes('utm_source=qr')
+          rawPath.includes('utm_source=qrcode') ||
+          rawPath.includes('utm_source=qr')
         ) {
           finalSource = 'QR Scan';
         } else if (utmSource) {
           if (utmSource.includes('facebook') || utmSource.includes('fb')) finalSource = 'Facebook';
           else if (utmSource.includes('instagram') || utmSource.includes('ig')) finalSource = 'Instagram';
           else if (utmSource.includes('twitter') || utmSource.includes('x')) finalSource = 'Twitter(X)';
-          else if (utmSource.includes('newsletter') || utmSource.includes('email')) finalSource = 'Email / Newsletter';
           else finalSource = utmSource.charAt(0).toUpperCase() + utmSource.slice(1);
         } else if (
           lowerUA.includes('google') || lowerUA.includes('bing') || lowerUA.includes('yahoo') ||
@@ -2979,11 +2994,24 @@ Return ONLY this JSON structure:
       else if (rawUA.includes('Linux')) os = 'Linux';
       if (isBot) os = 'Server OS';
 
-      const normalizedPagePath = rawPath.includes('/')
-        ? rawPath.split('/').map(part => part.trim().toLowerCase()).join('/')
-        : rawPath;
+      // Strip query strings (e.g. utm & sub_id params) to aggregate clean page paths
+      const cleanPath = rawPath.split('?')[0];
+      const normalizedPagePath = cleanPath.includes('/')
+        ? cleanPath.split('/').map(part => part.trim().toLowerCase()).join('/')
+        : cleanPath;
 
-      return { type, source: finalSource, os, isBot, loyaltyStatus, country, region: v.region || "", city, normalizedPagePath };
+      return {
+        type,
+        source: finalSource,
+        os,
+        isBot,
+        loyaltyStatus,
+        country,
+        region: v.region || "",
+        city,
+        normalizedPagePath,
+        subscriberToken
+      };
     };
 
     // Sort analytics chronologically prior to computing loyalty status
