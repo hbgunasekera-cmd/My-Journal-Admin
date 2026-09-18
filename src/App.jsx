@@ -41,6 +41,7 @@ import {
   PlusCircle,
   RefreshCw,
   Save,
+  Share2,
   Shield,
   ShieldAlert,
   ShieldCheck,
@@ -172,6 +173,7 @@ const Icon = React.memo(({ name, className = "w-4 h-4" }) => {
     'navigation-2': Navigation2,
     'plus-circle': PlusCircle,
     'refresh-cw': RefreshCw,
+    'share-2': Share2,
     'shield': Shield,
     'shield-alert': ShieldAlert,
     'shield-check': ShieldCheck,
@@ -329,8 +331,10 @@ function App() {
   const [analyticsData, setAnalyticsData] = useState([]);
   const [allComments, setAllComments] = useState([]);
   const [likesData, setLikesData] = useState([]);
+  const [sharesData, setSharesData] = useState([]);
   const [subscribersData, setSubscribersData] = useState([]);
   const [expandedLikeLoc, setExpandedLikeLoc] = useState(null);
+  const [expandedShareLoc, setExpandedShareLoc] = useState(null);
   const [weatherData, setWeatherData] = useState({});
 
   // --- UI, Search & Filter States ---
@@ -1538,9 +1542,6 @@ function App() {
    */
   const refreshAllData = async () => {
     try {
-      // Fetch all data concurrently. 
-      // Note: fetchAllRecords returns the data array directly, 
-      // while standard Supabase queries return an object: { data, error }
       const [
         placesData,
         sr,
@@ -1548,22 +1549,23 @@ function App() {
         a,
         c,
         l,
-        sub
+        sub,
+        sh // 1. Add this variable for shares
       ] = await Promise.all([
-        fetchAllRecords('travel_bucket_list'), // Uses helper for >1000 records
+        fetchAllRecords('travel_bucket_list'),
         supabaseClient.from('saved_travel_routes').select('*').order('sort_order', { ascending: true }).order('created_at', { ascending: false }),
         supabaseClient.from('page_visits').select('*').limit(20000),
         supabaseClient.from('pending_approvals').select('*').order('created_at', { ascending: false }),
         supabaseClient.from('location_comments').select('*, travel_bucket_list(place_name)').order('created_at', { ascending: false }),
         supabaseClient.from('location_likes').select('*, travel_bucket_list(place_name)'),
-        supabaseClient.from('subscribers').select('*').order('subscribed_at', { ascending: false })
+        supabaseClient.from('subscribers').select('*').order('subscribed_at', { ascending: false }),
+        supabaseClient.from('location_shares').select('*, travel_bucket_list(place_name)') // 2. Add the shares query
       ]);
 
-      // Handle specific non-fatal errors for standard queries
       if (sub.error) console.error("Subscribers fetch error:", sub.error);
       if (sr.error) console.error("Saved routes fetch error:", sr.error);
+      if (sh.error) console.error("Shares fetch error:", sh.error); // Optional error handling
 
-      // Update state with fetched data, falling back to empty arrays if undefined
       setPlaces(placesData || []);
       setSavedRoutes(sr.data || []);
       setAnalyticsData(v.data || []);
@@ -1571,9 +1573,9 @@ function App() {
       setAllComments(c.data || []);
       setLikesData(l.data || []);
       setSubscribersData(sub.data || []);
+      setSharesData(sh.data || []); // 3. Set the state
 
     } catch (error) {
-      // Catch and log any fatal errors (including those thrown by fetchAllRecords)
       console.error("Data sync error:", error);
       triggerToast("Failed to sync database.");
     }
@@ -1782,6 +1784,18 @@ function App() {
     });
 
   }, [places, debouncedSearch, filterCategory, filterStatus, sortBy, sortCenter]);
+
+  const processedShares = useMemo(() => {
+    const counts = {};
+    (sharesData || []).forEach(share => {
+      // Safely access the joined foreign key data from Supabase
+      const placeName = share.travel_bucket_list?.place_name || 'Unknown Location';
+      counts[placeName] = (counts[placeName] || 0) + 1;
+    });
+
+    // Convert to an array of [name, count] and sort from highest to lowest
+    return Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  }, [sharesData]);
 
   const deleteLocation = async (id, name) => {
     if (confirm(`Are you sure you want to delete "${name}"?`)) {
@@ -2871,6 +2885,7 @@ Return ONLY this JSON structure:
     const safeAnalytics = Array.isArray(analyticsData) ? analyticsData : [];
     const safeLikes = Array.isArray(likesData) ? likesData : [];
     const safeSubscribers = Array.isArray(subscribersData) ? subscribersData : [];
+    const safeShares = Array.isArray(sharesData) ? sharesData : [];
 
     // Localized Set per recalculation to avoid state leakage across re-renders
     const knownUsers = new Set();
@@ -2994,7 +3009,7 @@ Return ONLY this JSON structure:
       else if (rawUA.includes('Linux')) os = 'Linux';
       if (isBot) os = 'Server OS';
 
-      // Strip query strings (e.g. utm & sub_id params) to aggregate clean page paths
+      // Strip query strings to aggregate clean page paths
       const cleanPath = rawPath.split('?')[0];
       const normalizedPagePath = cleanPath.includes('/')
         ? cleanPath.split('/').map(part => part.trim().toLowerCase()).join('/')
@@ -3030,25 +3045,12 @@ Return ONLY this JSON structure:
       return Object.entries(counts).sort((a, b) => b[1] - a[1]);
     };
 
-    return {
-      latest: latestMetrics,
-      totalVisits: parsedData.length,
-      totalSubscribers: safeSubscribers.length,
-      countries: getSortedMetrics(parsedData, 'country'),
-      regions: getSortedMetrics(parsedData, 'region'),
-      cities: getSortedMetrics(parsedData, 'city'),
-      sources: getSortedMetrics(parsedData, 'source'),
-      deviceTypes: getSortedMetrics(parsedData, 'type'),
-      loyalty: getSortedMetrics(parsedData, 'loyaltyStatus'),
-      pageHistory: getSortedMetrics(parsedData, 'normalizedPagePath')
-        .filter(([path, count]) => count > 0 && path && path !== 'unknown'),
-      os: getSortedMetrics(parsedData, 'os'),
-      trafficType: getSortedMetrics(parsedData, v => v.isBot ? 'Bot/Crawler' : 'Real Person'),
-
-      likesSummary: safeLikes.reduce((acc, l) => {
-        const locName = l.travel_bucket_list?.place_name || 'Unknown Location';
-        const category = l.travel_bucket_list?.category || 'General';
-        const country = l.country || 'Unknown';
+    // Helper function to aggregate location-based metrics (Likes & Shares)
+    const aggregateLocationData = (dataset) => {
+      return dataset.reduce((acc, item) => {
+        const locName = item.travel_bucket_list?.place_name || 'Unknown Location';
+        const category = item.travel_bucket_list?.category || 'General';
+        const country = item.country || 'Unknown';
 
         const existing = acc.find(x => x.name === locName);
         if (existing) {
@@ -3063,32 +3065,58 @@ Return ONLY this JSON structure:
           });
         }
         return acc;
-      }, []).sort((a, b) => b.hits - a.hits)
+      }, []).sort((a, b) => b.hits - a.hits);
     };
-  }, [analyticsData, likesData, subscribersData]);
+
+    return {
+      latest: latestMetrics,
+      totalVisits: parsedData.length,
+      totalSubscribers: safeSubscribers.length,
+      totalShares: safeShares.length,
+      countries: getSortedMetrics(parsedData, 'country'),
+      regions: getSortedMetrics(parsedData, 'region'),
+      cities: getSortedMetrics(parsedData, 'city'),
+      sources: getSortedMetrics(parsedData, 'source'),
+      deviceTypes: getSortedMetrics(parsedData, 'type'),
+      loyalty: getSortedMetrics(parsedData, 'loyaltyStatus'),
+      pageHistory: getSortedMetrics(parsedData, 'normalizedPagePath')
+        .filter(([path, count]) => count > 0 && path && path !== 'unknown'),
+      os: getSortedMetrics(parsedData, 'os'),
+      trafficType: getSortedMetrics(parsedData, v => v.isBot ? 'Bot/Crawler' : 'Real Person'),
+      likesSummary: aggregateLocationData(safeLikes),
+      sharesSummary: aggregateLocationData(safeShares)
+    };
+  }, [analyticsData, likesData, subscribersData, sharesData]);
 
   // Dashboard Summary Calculation
-  const dashboardSummary = useMemo(() => {
+  const dashboardSummary = React.useMemo(() => {
     // 1. Total Likes
     const totalLikes = likesData?.length || 0;
 
-    // 2. Total Subscribers
+    // 2. Total Shares
+    const totalShares = sharesData?.length || 0;
+
+    // 3. Total Subscribers
     const totalSubscribers = subscribersData?.length || 0;
 
-    // 3. Pending Comments 
-    // (Adjust the .status check based on your exact location_comments schema)
+    // 4. Pending Comments
     const pendingCommentsCount = (allComments || []).filter(
       comment => comment.status === 'pending' || comment.is_approved === false
     ).length;
 
-    // 4. Total Suggestions (Staged Locations)
-    // Maps to your saveStagedLocation logic which sets status: 'pending'
+    // 5. Total Suggestions (Staged Locations)
     const suggestionsCount = (places || []).filter(
       place => place.status === 'pending'
     ).length;
 
-    return { totalLikes, totalSubscribers, pendingCommentsCount, suggestionsCount };
-  }, [likesData, subscribersData, allComments, places]);
+    return {
+      totalLikes,
+      totalShares,
+      totalSubscribers,
+      pendingCommentsCount,
+      suggestionsCount
+    };
+  }, [likesData, sharesData, subscribersData, allComments, places]);
 
   /**
    * Circular Progress Ring Indicator for Dashboard Refresh Countdown
@@ -4555,6 +4583,16 @@ Return ONLY this JSON structure:
 
                   <div className="w-px h-3.5 bg-slate-800" />
 
+                  {/* Total Shares */}
+                  <div className="flex items-center gap-1.5 cursor-help group" title="Total Shares">
+                    <Icon name="share-2" className="w-4 h-4 text-cyan-400 group-hover:scale-110 transition-transform" />
+                    <span className="text-[11px] font-black text-white">
+                      {dashboardStats.sharesSummary ? dashboardStats.sharesSummary.reduce((a, b) => a + b.hits, 0) : 0}
+                    </span>
+                  </div>
+
+                  <div className="w-px h-3.5 bg-slate-800" />
+
                   {/* Total Subscribers */}
                   <div className="flex items-center gap-1.5 cursor-help group" title="Total Subscribers">
                     <Icon name="mail" className="w-4 h-4 text-indigo-400 group-hover:scale-110 transition-transform" />
@@ -4795,6 +4833,78 @@ Return ONLY this JSON structure:
                     </div>
                   </div>
                 </div>
+
+                {/* 3. SHARES METRICS */}
+                <div className="bg-emerald-500 rounded-[2.5rem] p-8 text-white shadow-xl flex flex-col h-[450px]">
+                  <div className="flex justify-between items-start mb-6">
+                    <div>
+                      <p className="text-[10px] font-black uppercase text-emerald-900 mb-1 tracking-widest">Shared Locations</p>
+                      <p className="text-4xl font-black italic tracking-tighter">
+                        {dashboardStats?.sharesSummary?.reduce((a, b) => a + b.hits, 0) || 0}
+                        <span className="text-sm opacity-60 ml-2 font-bold uppercase tracking-widest">Shares</span>
+                      </p>
+                    </div>
+                    <div className="w-12 h-12 bg-white/20 rounded-2xl flex items-center justify-center backdrop-blur-md">
+                      <Icon name="share-2" className="w-6 h-6 text-white" />
+                    </div>
+                  </div>
+
+                  <div className="bg-white/10 rounded-[2rem] p-5 flex-1 flex flex-col min-h-0 border border-white/5">
+                    <div className="overflow-y-auto custom-scrollbar pr-2 flex-1 space-y-1">
+                      {dashboardStats?.sharesSummary?.map((item, i) => {
+                        const isExpanded = expandedShareLoc === item.name;
+
+                        return (
+                          <div
+                            key={i}
+                            className="flex flex-col border-b border-white/10 last:border-0 group cursor-pointer transition-colors hover:bg-white/5 rounded-xl px-2 -mx-2"
+                            onClick={() => setExpandedShareLoc(isExpanded ? null : item.name)}
+                          >
+                            <div className="flex justify-between items-center py-3">
+                              <div className="flex flex-col truncate pr-4">
+                                <p className="text-[11px] font-black uppercase truncate text-white group-hover:text-emerald-200 transition-colors">
+                                  {item.name}
+                                </p>
+                                <p className="text-[8px] font-bold text-white/50 uppercase tracking-widest">
+                                  {item.category}
+                                </p>
+                              </div>
+                              <div className="text-right shrink-0 flex items-center gap-2">
+                                <p className="text-sm font-black tracking-tighter text-white">{item.hits}</p>
+                                <Icon
+                                  name="navigation"
+                                  className={`w-3 h-3 text-white/30 transition-transform ${isExpanded ? 'rotate-180' : 'rotate-90'}`}
+                                />
+                              </div>
+                            </div>
+
+                            {/* Country Breakdown */}
+                            {isExpanded && (
+                              <div className="pb-3 animate-in fade-in slide-in-from-top-2">
+                                <div className="bg-black/20 rounded-xl p-3 space-y-2 border border-white/5 shadow-inner">
+                                  <p className="text-[8px] font-black uppercase tracking-widest text-white/40 mb-2 border-b border-white/10 pb-1">
+                                    Country Breakdown
+                                  </p>
+                                  <div className="space-y-1.5 max-h-32 overflow-y-auto custom-scrollbar pr-1">
+                                    {Object.entries(item.countries || {})
+                                      .sort((a, b) => b[1] - a[1])
+                                      .map(([country, count]) => (
+                                        <div key={country} className="flex justify-between items-center">
+                                          <span className="text-[9px] font-bold text-white/80">{country}</span>
+                                          <span className="text-[9px] font-black text-emerald-300">{count}</span>
+                                        </div>
+                                      ))}
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+
 
                 {/* 3. NEWSLETTER SUBSCRIBERS */}
                 <div className="bg-white rounded-[2.5rem] p-8 border border-slate-100 shadow-sm flex flex-col h-[450px]">
