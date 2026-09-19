@@ -2156,14 +2156,14 @@ Return ONLY this JSON structure:
     try {
       triggerToast("Starting YouTube sync...");
 
-      // 1. Fetch existing video URLs from Supabase to prevent duplicates
+      // 1. Fetch existing video URLs from Supabase to prevent duplicates & find deletions
       const { data: existingRecords, error: fetchError } = await supabaseClient
         .from('hub_videos')
         .select('url');
 
       if (fetchError) throw fetchError;
 
-      // Create a Set for O(1) lookup speed
+      // Create a Set for O(1) lookup speed of what's already in the DB
       const existingUrls = new Set((existingRecords || []).map((record) => record.url));
       const existingCount = existingRecords?.length || 0;
 
@@ -2202,7 +2202,27 @@ Return ONLY this JSON structure:
         );
       }
 
-      // 3. Filter out videos that already exist in the database and map to schema
+      // 3. IDENTIFY & REMOVE OBSOLETE VIDEOS
+      // Create a Set of URLs currently active on the YouTube channel
+      const activeYouTubeUrls = new Set(videos.map((v) => v.url).filter(Boolean));
+
+      // Find database records that are NO LONGER present in the fetched YouTube payload
+      const urlsToDelete = (existingRecords || [])
+        .filter((record) => !activeYouTubeUrls.has(record.url))
+        .map((record) => record.url);
+
+      if (urlsToDelete.length > 0) {
+        triggerToast(`Removing ${urlsToDelete.length} obsolete videos/shorts...`);
+
+        const { error: deleteError } = await supabaseClient
+          .from('hub_videos')
+          .delete()
+          .in('url', urlsToDelete);
+
+        if (deleteError) throw deleteError;
+      }
+
+      // 4. Filter out videos that already exist in the database and map to schema
       const newVideos = videos
         .filter((v) => v?.url && !existingUrls.has(v.url))
         .map((v, index) => ({
@@ -2215,20 +2235,26 @@ Return ONLY this JSON structure:
         }));
 
       if (newVideos.length === 0) {
-        triggerToast(`All ${videos.length} YouTube videos & shorts are already up-to-date!`);
+        const deleteMsg = urlsToDelete.length > 0 ? `Removed ${urlsToDelete.length} obsolete videos.` : '';
+        triggerToast(`Sync complete! ${deleteMsg} All ${videos.length} YouTube videos are up-to-date!`);
+
+        // Ensure UI refreshes if deletions happened, even if no new videos were added
+        if (urlsToDelete.length > 0 && typeof refreshAllData === 'function') {
+          refreshAllData();
+        }
         return;
       }
 
       triggerToast(`Inserting ${newVideos.length} new videos (out of ${videos.length} found)...`);
 
-      // 4. Insert strictly new records into hub_videos table
+      // 5. Insert strictly new records into hub_videos table
       const { error: insertError } = await supabaseClient
         .from('hub_videos')
         .insert(newVideos);
 
       if (insertError) throw insertError;
 
-      triggerToast(`Successfully imported ${newVideos.length} YouTube videos!`);
+      triggerToast(`Successfully synced! Added ${newVideos.length} videos, removed ${urlsToDelete.length}.`);
 
       // Optional: Trigger state refresh if function exists in your component context
       if (typeof refreshAllData === 'function') {
