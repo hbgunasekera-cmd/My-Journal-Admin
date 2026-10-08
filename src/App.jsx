@@ -49,7 +49,7 @@ import {
   X
 } from 'lucide-react';
 
-// --- Initialization ---
+// ---- Initialization ----
 
 const CONFIG = {
   SUPABASE: {
