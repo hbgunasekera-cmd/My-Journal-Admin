@@ -23,6 +23,7 @@ dist-ssr
 *.sln
 *.sw?
 .vercel
+# Environment variables and secrets
 .env
-.env*.local
-.env*
+.env.*
+!.env.example

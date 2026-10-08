@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createClient } from '@supabase/supabase-js';
+import { generateCleanSlug } from './utils.js';
 
 // --- Leaflet & Routing ---
 import L from 'leaflet';
@@ -48,7 +49,6 @@ import {
   X
 } from 'lucide-react';
 
-
 // --- Initialization ---
 
 const CONFIG = {
@@ -67,8 +67,6 @@ const CONFIG = {
 const { URL: SUPABASE_URL, KEY: SUPABASE_KEY } = CONFIG.SUPABASE;
 const { WEATHER: WEATHER_KEY } = CONFIG.API_KEYS;
 const supabaseClient = createClient(SUPABASE_URL, SUPABASE_KEY, {
-  // This frontend uses Supabase's data APIs with the anon key; it has no Auth
-  // sign-in flow, so don't start the background token refresh/session handling.
   auth: {
     autoRefreshToken: false,
     persistSession: false,
@@ -220,24 +218,6 @@ const WeatherIcon = ({ condition }) => {
   return <WIcon className={`w-5 h-5 ${color} shrink-0`} strokeWidth={1.75} />;
 };
 
-/**
- * Generates a clean, URL-safe slug from any string.
- * Converts to lowercase, removes special characters, and replaces spaces with hyphens.
- */
-const generateCleanSlug = (text) => {
-  if (!text) return '';
-  return String(text)
-    .toLowerCase()
-    .trim()
-    .normalize('NFD')                   // Strip accents/diacritics for backend parity
-    .replace(/[\u0300-\u036f]/g, '')    // Remove diacritic marks
-    .replace(/[–—]/g, '-')              // Convert En-dash & Em-dash to standard hyphens
-    .replace(/[^a-z0-9\s-]/g, '')       // Keep only alphanumeric characters, spaces, and hyphens
-    .replace(/\s+/g, '-')               // Replace spaces with single hyphens
-    .replace(/-+/g, '-')                // Collapse multiple hyphens
-    .replace(/^-+|-+$/g, '');           // Strip leading and trailing hyphens
-};
-
 const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (character) => ({
   '&': '&amp;',
   '<': '&lt;',
@@ -247,12 +227,26 @@ const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (character
 })[character]);
 
 const getCoordinates = (point) => {
-  const lat = Number.parseFloat(point?.latitude ?? point?.lt);
-  const lng = Number.parseFloat(point?.longitude ?? point?.ln);
+  const firstValidNumber = (...values) => values
+    .map((value) => Number.parseFloat(value))
+    .find((value) => Number.isFinite(value));
+  const lat = firstValidNumber(point?.latitude, point?.lt);
+  const lng = firstValidNumber(point?.longitude, point?.ln);
   if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
     return null;
   }
   return { lat, lng };
+};
+
+const getRouteWaypoints = (route) => {
+  try {
+    const waypoints = typeof route?.waypoints === 'string'
+      ? JSON.parse(route.waypoints)
+      : route?.waypoints;
+    return Array.isArray(waypoints) ? waypoints : [];
+  } catch {
+    return [];
+  }
 };
 
 let googleMapsLoadPromise;
@@ -364,6 +358,8 @@ function App() {
 
   // --- Core Data States ---
   const [places, setPlaces] = useState([]);
+
+  // --- Core Data States ---
   const [savedRoutes, setSavedRoutes] = useState([]);
   const [pendingApprovals, setPendingApprovals] = useState([]);
   const [analyticsData, setAnalyticsData] = useState([]);
@@ -385,11 +381,16 @@ function App() {
     return places.filter((place) => [place?.place_name, place?.category, place?.locality]
       .some((value) => String(value || '').toLowerCase().includes(query)));
   }, [places, searchTerm]);
+
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [filterCategory, setFilterCategory] = useState('All');
   const [filterStatus, setFilterStatus] = useState('All');
   const [sortBy, setSortBy] = useState('newest');
   const [toast, setToast] = useState({ show: false, msg: '' });
+  const triggerToast = React.useCallback((msg) => {
+    setToast({ show: true, msg });
+    setTimeout(() => setToast({ show: false, msg: '' }), 2500);
+  }, []);
 
   // --- Active Trip & Route Planning States ---
   const [selectedTrip, setSelectedTrip] = useState([]);
@@ -397,7 +398,9 @@ function App() {
 
   // --- Location & Add Location Flow States ---
   const [userCoords, setUserCoords] = useState(null);
-  const [locationSource, setLocationSource] = useState(() => ('geolocation' in navigator ? 'device' : 'home'));
+  const [locationSource, setLocationSource] = useState(() => (
+    'geolocation' in navigator ? 'device' : 'home'
+  ));
   const sortCenter = locationSource === 'device' && userCoords ? userCoords : HomePoint;
   const [stagedLocation, setStagedLocation] = useState(null);
   const [mapReady, setMapReady] = useState(false);
@@ -408,19 +411,27 @@ function App() {
   const routingControl = useRef(null);
   const autocompleteRef = useRef(null);
   const autocompleteInstanceRef = useRef(null);
+  const autocompleteListenerRef = useRef(null);
+  const downloadedImagesRef = useRef(new Set());
   const activeSharesRef = useRef(new Set());
   const REFRESH_INTERVAL_SECONDS = 600;
   const [timeLeft, setTimeLeft] = useState(REFRESH_INTERVAL_SECONDS);
-  const isMounted = useRef(true);
-
-  useEffect(() => {
-    isMounted.current = true;
-    return () => {
-      isMounted.current = false;
-    };
-  }, []);
 
   // --- 1. GPS & DATA INITIALIZATION ---
+
+  // Update the Geolocation effect to just store coordinates
+  useEffect(() => {
+    if (!isLoggedIn || locationSource !== 'device') return;
+
+    if ("geolocation" in navigator) {
+      navigator.geolocation.getCurrentPosition((pos) => {
+        setUserCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+      }, () => {
+        triggerToast("GPS Access Denied, falling back to HomePoint");
+        setLocationSource('home'); // Auto-fallback
+      });
+    }
+  }, [isLoggedIn, locationSource, triggerToast]);
 
   // Optional Helper: Reset countdown when manual refresh occurs
   const handleManualRefresh = () => {
@@ -447,10 +458,9 @@ function App() {
       const weatherPromises = fetchList.map(async (wp) => {
         const coordinates = getCoordinates(wp);
         if (!coordinates) return null;
-        const { lat, lng } = coordinates;
 
         const response = await fetch(
-          `https://api.openweathermap.org/data/2.5/forecast?lat=${lat}&lon=${lng}&units=metric&appid=${WEATHER_KEY}`
+          `https://api.openweathermap.org/data/2.5/forecast?lat=${coordinates.lat}&lon=${coordinates.lng}&units=metric&appid=${WEATHER_KEY}`
         );
         const data = await response.json();
 
@@ -485,29 +495,27 @@ function App() {
   // Automatically resets active route metadata when trip is cleared and triggers weather fetches.
   React.useEffect(() => {
     if (selectedTrip.length > 0 && activeTab === 'map') {
-      // This starts a network request; weather state updates after the response resolves.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      fetchRouteWeather(selectedTrip);
+      const timer = window.setTimeout(() => fetchRouteWeather(selectedTrip), 0);
+      return () => window.clearTimeout(timer);
     }
+    return undefined;
   }, [selectedTrip, activeTab, fetchRouteWeather]);
 
 
   // --- 3. STEADY OSRM ROUTING EFFECT ---
   // Draws directional routing polyline lines between origin and selected waypoints.
   React.useEffect(() => {
-    // Helper to safely detach and clear existing routing control from Leaflet instance
     const removeRoutingControl = () => {
       if (routingControl.current && mapRef.current) {
         try {
           mapRef.current.removeControl(routingControl.current);
-        } catch (e) {
-          console.warn("Routing control cleanup error ignored:", e);
+        } catch (error) {
+          console.warn("Routing control cleanup error ignored:", error);
         }
         routingControl.current = null;
       }
     };
 
-    // 1. Teardown and abort if tab is inactive, map is not ready, or map instance is missing
     if (activeTab !== 'map' || !mapReady || !mapRef.current) {
       removeRoutingControl();
       return;
@@ -522,13 +530,12 @@ function App() {
         .map(({ lat, lng }) => L.latLng(lat, lng))
     ];
 
-    // 2. Remove stale polyline if there are fewer than 2 points to route between
     if (waypoints.length < 2) {
       removeRoutingControl();
       return;
     }
 
-    // 3. Debounce routing calculations (600ms) to prevent OSRM API rate-limiting
+    // Debounce routing calculations (600ms) to prevent OSRM API rate-limiting
     const routingTimeout = setTimeout(() => {
       try {
         if (routingControl.current) {
@@ -557,7 +564,6 @@ function App() {
       }
     }, 600);
 
-    // 4. Unconditional teardown on effect cleanup / re-render
     return () => {
       clearTimeout(routingTimeout);
       removeRoutingControl();
@@ -589,17 +595,16 @@ function App() {
     setSavedRoutes(items);
 
     try {
-      const updateResults = await Promise.all(items.map((route, index) =>
+      const updatePromises = items.map((route, index) =>
         supabaseClient
           .from('saved_travel_routes')
           .update({ sort_order: index })
           .eq('id', route.id)
-      ));
-      const failedUpdate = updateResults.find(({ error }) => error)?.error;
-      if (failedUpdate) throw failedUpdate;
+      );
+
+      await Promise.all(updatePromises);
     } catch (err) {
       console.error("Error saving route order:", err);
-      setSavedRoutes(savedRoutes);
       triggerToast("Failed to save the new route order.");
       refreshAllData();
     }
@@ -622,9 +627,9 @@ function App() {
 
     // Helper: Renders customizable Leaflet circle markers
     const addDot = (lat, lng, color, title, subtitle, routePlanName = null) => {
-      const coordinates = getCoordinates({ latitude: lat, longitude: lng });
-      if (!coordinates) return;
-      const { lat: pLat, lng: pLng } = coordinates;
+      const pLat = parseFloat(lat);
+      const pLng = parseFloat(lng);
+      if (isNaN(pLat) || isNaN(pLng)) return;
 
       const marker = L.circleMarker([pLat, pLng], {
         radius: 7,
@@ -635,9 +640,10 @@ function App() {
         fillOpacity: 0.9
       });
 
-      const tooltipContent = routePlanName
-        ? `${escapeHtml(title)} (Plan: ${escapeHtml(routePlanName)})`
-        : escapeHtml(title);
+      const safeTitle = escapeHtml(title);
+      const safeSubtitle = escapeHtml(subtitle);
+      const safeRoutePlanName = escapeHtml(routePlanName);
+      const tooltipContent = routePlanName ? `${safeTitle} (Plan: ${safeRoutePlanName})` : safeTitle;
       marker.bindTooltip(tooltipContent, {
         direction: 'top',
         sticky: true,
@@ -647,12 +653,12 @@ function App() {
 
       marker.bindPopup(`
       <div style="padding: 4px; font-family: sans-serif; min-width: 120px;">
-        <b style="font-size: 11px; color: ${color}; text-transform: uppercase;">${escapeHtml(title)}</b><br/>
-        <span style="font-size: 9px; color: #64748b; font-weight: bold; text-transform: uppercase;">${escapeHtml(subtitle)}</span>
+        <b style="font-size: 11px; color: ${color}; text-transform: uppercase;">${safeTitle}</b><br/>
+        <span style="font-size: 9px; color: #64748b; font-weight: bold; text-transform: uppercase;">${safeSubtitle}</span>
         ${routePlanName ? `
           <div style="margin-top: 4px; border-top: 1px dashed #e2e8f0; padding-top: 4px;">
             <span style="font-size: 9px; color: #a855f7; font-weight: 900; text-transform: uppercase; tracking-tight: 0.05em; display: inline-block; background: #f3e8ff; padding: 1px 4px; border-radius: 3px;">★ Reserved</span>
-            <div style="font-size: 9px; color: #7c3aed; font-weight: bold; font-style: italic; margin-top: 1px;">Plan: ${escapeHtml(routePlanName)}</div>
+            <div style="font-size: 9px; color: #7c3aed; font-weight: bold; font-style: italic; margin-top: 1px;">Plan: ${safeRoutePlanName}</div>
           </div>
         ` : ''}
       </div>
@@ -664,15 +670,9 @@ function App() {
     // Render Places (Filtered / Search list)
     const displayList = searchTerm ? filteredPlaces : places;
     displayList.forEach(p => {
-      const matchingRoute = savedRoutes.find(route => {
-        let wpArray;
-        try {
-          wpArray = typeof route.waypoints === 'string' ? JSON.parse(route.waypoints) : (route.waypoints || []);
-        } catch {
-          wpArray = [];
-        }
-        return wpArray.some(wp => wp.n === p.place_name || wp.place_name === p.place_name || wp.id === p.id);
-      });
+      const matchingRoute = savedRoutes.find(route =>
+        getRouteWaypoints(route).some(wp => wp.n === p.place_name || wp.place_name === p.place_name || wp.id === p.id)
+      );
 
       const reservedRouteName = matchingRoute ? matchingRoute.route_name : null;
       const isReserved = !!reservedRouteName;
@@ -697,8 +697,8 @@ function App() {
           const lng = pt.longitude !== undefined ? pt.longitude : pt.ln;
           addDot(lat, lng, '#a855f7', pt.place_name || pt.n || 'Route Stop', 'Saved Route Plan', route.route_name);
         });
-      } catch (error) {
-        console.warn("Saved route contains invalid waypoint data:", error);
+      } catch (e) {
+        // Fallback for JSON parsing errors
       }
     });
 
@@ -738,21 +738,6 @@ function App() {
   // 0. POST SHARE VALIDATOR
   // ==========================================
 
-  const beginManualShare = (place, platform) => {
-    if (!place) return null;
-    const shareKey = `${place.id}-${platform}`;
-    if (activeSharesRef.current.has(shareKey)) {
-      triggerToast(`Publishing to ${platform} in progress, please wait...`);
-      return null;
-    }
-    if (place[PLATFORM_COLUMNS[platform]]) {
-      triggerToast(`Already shared to ${platform.charAt(0).toUpperCase() + platform.slice(1)}!`);
-      return null;
-    }
-    activeSharesRef.current.add(shareKey);
-    return () => activeSharesRef.current.delete(shareKey);
-  };
-
   const checkAndPost = async (p, platform, shareAction) => {
     if (!p) return;
 
@@ -768,6 +753,11 @@ function App() {
     activeSharesRef.current.add(shareKey);
 
     try {
+      // Trigger the background download using the proxy
+      if (p.cover_photo_url) {
+        downloadCoverImage(p.cover_photo_url, p.place_name);
+      }
+
       const targetColumn = PLATFORM_COLUMNS[platform];
 
       const { data, error } = await supabaseClient
@@ -795,6 +785,70 @@ function App() {
     }
   };
 
+  // ==========================================
+  // IMAGE DOWNLOADER (WITH WEBP/JPEG DETECTION)
+  // ==========================================
+  const downloadCoverImage = async (imageUrl, locationName) => {
+    if (!imageUrl) return;
+
+    // --- FIX: Check if this location's cover image was already downloaded ---
+    if (downloadedImagesRef.current.has(locationName)) {
+      return;
+    }
+
+    try {
+      const proxyUrl = `/api/cover-image-proxy?url=${encodeURIComponent(imageUrl)}`;
+      const response = await fetch(proxyUrl);
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to download image");
+      }
+
+      const blob = await response.blob();
+
+      if (blob.size < 1000) {
+        throw new Error("File too small; the image source appears to be empty or corrupted.");
+      }
+
+      // Force read the exact Content-Type from the proxy response
+      const mimeType = response.headers.get('content-type') || blob.type || '';
+
+
+      // ----------------------
+
+      let ext = 'jpg';
+      if (mimeType.includes('avif')) ext = 'avif';
+      else if (mimeType.includes('webp')) ext = 'webp';
+      else if (mimeType.includes('png')) ext = 'png';
+      else if (mimeType.includes('gif')) ext = 'gif';
+      else if (mimeType.includes('jpeg') || mimeType.includes('jpg')) ext = 'jpg';
+      else ext = 'bin'; // If it saves as .bin, the payload is not a valid image format
+
+      const blobUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+
+      link.download = `${locationName.replace(/[^a-z0-9]/gi, '_')}.${ext}`;
+
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(blobUrl);
+
+      // --- FIX: Record the successful download to prevent duplicates ---
+      downloadedImagesRef.current.add(locationName);
+
+    } catch (err) {
+      console.error("Download Error:", err.message);
+      if (typeof triggerToast === 'function') {
+        triggerToast(`Error: ${err.message}`);
+      } else {
+        alert(`Error: ${err.message}`);
+      }
+    }
+  };
+
   const updateSupabasePostStatus = async (id, platform) => {
     const targetColumn = PLATFORM_COLUMNS[platform];
     if (!targetColumn) throw new Error(`Unsupported sharing platform: ${platform}`);
@@ -805,7 +859,9 @@ function App() {
       .from('travel_bucket_list')
       .update({ [targetColumn]: currentTimestamp })
       .eq('id', id);
-    if (error) throw error;
+    if (error) {
+      throw new Error(`Post may be live, but its status could not be saved: ${error.message}`);
+    }
 
     // 2. IMMEDIATELY mutate local React states to trigger instant visual updates
     const stateUpdateHandler = (prevItems) =>
@@ -913,12 +969,12 @@ function App() {
           platform,
           text: socialText,
           imageUrl: p.cover_photo_url,
-          link: shareLink
+          link: shareLink,
         }),
       });
 
       if (!response.ok) {
-        const errData = await response.json();
+        const errData = await response.json().catch(() => ({}));
         throw new Error(errData.error || `Failed to post to ${platform}`);
       }
 
@@ -1045,12 +1101,13 @@ function App() {
 
   // --- PINTEREST ---
   const handlePinterestShare = async (p) => {
-    const releaseShareLock = beginManualShare(p, 'pinterest');
-    if (!releaseShareLock) return;
+    if (!p) return;
 
     if (!p.cover_photo_url) {
-      triggerToast("No cover photo available to share!");
-      releaseShareLock();
+      if (typeof setToast === 'function') {
+        setToast({ show: true, msg: "No cover photo available to share!" });
+        setTimeout(() => setToast({ show: false, msg: "" }), 3000);
+      }
       return;
     }
 
@@ -1083,27 +1140,20 @@ function App() {
     const pinterestUrl = `https://www.pinterest.com/pin/create/button/?url=${encodeURIComponent(shareUrl)}&media=${encodeURIComponent(p.cover_photo_url)}&description=${encodeURIComponent(finalDescription)}`;
 
     const popup = window.open(pinterestUrl, '_blank', 'width=750,height=600');
-
     if (popup) {
       try {
         await updateSupabasePostStatus(p.id, 'pinterest');
-        triggerToast("Synced Pinterest Status!");
+        setToast?.({ show: true, msg: "Synced Pinterest Status!" });
+        setTimeout(() => setToast?.({ show: false, msg: "" }), 3000);
       } catch (err) {
         console.error("Pinterest DB sync failed:", err);
-        triggerToast('Pinterest opened, but its status could not be saved.');
-      } finally {
-        releaseShareLock();
       }
-    } else {
-      releaseShareLock();
-      triggerToast('Allow popups to open the Pinterest composer.');
     }
   };
 
   // --- FLIPBOARD ---
   const handleFlipboardShare = async (p) => {
-    const releaseShareLock = beginManualShare(p, 'flipboard');
-    if (!releaseShareLock) return;
+    if (!p) return;
 
     const locationName = p.place_name || "Island Vignette";
     const shareLink = generateGalleryLink(locationName);
@@ -1132,32 +1182,31 @@ function App() {
 
     const fullTextToCopy = `${locationName}\n\n${shortDesc}\n\n📍Location: ${shareLink}\n\n${dynamicHashtags}`;
 
+    try {
+      await navigator.clipboard.writeText(fullTextToCopy);
+      setToast?.({ show: true, msg: "Caption copied! Opening Flipboard..." });
+    } catch (err) {
+      console.error("Flipboard clipboard failure", err);
+    }
+
     const targetUrl = p.cover_photo_url || shareLink;
     const flipboardUrl = `https://share.flipboard.com/bookmarklet/popout?v=2` +
       `&url=${encodeURIComponent(targetUrl)}` +
       `&title=${generateCleanSlug(locationName)}`;
-    const popup = window.open('about:blank', 'flipboard-share', 'width=700,height=680,scrollbars=yes,resizable=yes');
-    if (!popup) {
-      releaseShareLock();
-      triggerToast('Allow popups to open the Flipboard composer.');
-      return;
-    }
 
-    try {
-      await navigator.clipboard.writeText(fullTextToCopy);
-      triggerToast("Caption copied! Opening Flipboard...");
-    } catch (err) {
-      console.error("Flipboard clipboard failure", err);
-    }
-    popup.location.href = flipboardUrl;
+    const popup = window.open(
+      flipboardUrl,
+      'flipboard-share',
+      'width=700,height=680,scrollbars=yes,resizable=yes'
+    );
 
-    try {
-      await updateSupabasePostStatus(p.id, 'flipboard');
-    } catch (err) {
-      console.error("Flipboard DB sync failed:", err);
-      triggerToast('Flipboard opened, but its status could not be saved.');
-    } finally {
-      releaseShareLock();
+    if (popup) {
+      try {
+        await updateSupabasePostStatus(p.id, 'flipboard');
+        setTimeout(() => setToast?.({ show: false, msg: "" }), 3000);
+      } catch (err) {
+        console.error("Flipboard DB sync failed:", err);
+      }
     }
   };
 
@@ -1168,8 +1217,17 @@ function App() {
       e.stopPropagation();
     }
 
-    const releaseShareLock = beginManualShare(p, 'twitter');
-    if (!releaseShareLock) return;
+    if (!p) return;
+
+    if (p.cover_photo_url) {
+      downloadCoverImage(p.cover_photo_url, p.place_name);
+    }
+
+    if (p.published_twitter_at) {
+      setToast?.({ show: true, msg: "Already shared to X / Twt!" });
+      setTimeout(() => setToast?.({ show: false, msg: "" }), 3000);
+      return;
+    }
 
     const locationName = p.place_name || "Island Vignette";
     const shareLink = generateGalleryLink(locationName);
@@ -1221,15 +1279,10 @@ function App() {
     if (popup) {
       try {
         await updateSupabasePostStatus(p.id, 'twitter');
+        setTimeout(() => setToast?.({ show: false, msg: "" }), 3000);
       } catch (err) {
         console.error("Twitter DB sync failed:", err);
-        triggerToast('X composer opened, but its status could not be saved.');
-      } finally {
-        releaseShareLock();
       }
-    } else {
-      releaseShareLock();
-      triggerToast('Allow popups to open the X composer.');
     }
   };
 
@@ -1322,12 +1375,6 @@ function App() {
 
   // UTILITY & DATA SYNC FUNCTIONS ---
 
-  const triggerToast = React.useCallback((msg) => {
-    setToast({ show: true, msg });
-    setTimeout(() => setToast({ show: false, msg: '' }), 2500);
-  }, []);
-
-
   const triggerIndexNow = async (placeName, albumPhotos) => {
     try {
       const host = "www.myjournalview.com";
@@ -1414,7 +1461,7 @@ function App() {
    * Uses the pagination helper for the large 'travel_bucket_list' table 
    * and concurrent requests for everything else to optimize loading time.
    */
-  const refreshAllData = async () => {
+  const refreshAllData = React.useCallback(async () => {
     try {
       const [
         placesData,
@@ -1436,10 +1483,9 @@ function App() {
         supabaseClient.from('location_shares').select('*, travel_bucket_list(place_name)') // 2. Add the shares query
       ]);
 
-      const queryErrors = [sr, v, a, c, l, sub, sh].filter((result) => result.error);
-      if (queryErrors.length > 0) {
-        throw new Error(queryErrors.map((result) => result.error.message).join('; '));
-      }
+      if (sub.error) console.error("Subscribers fetch error:", sub.error);
+      if (sr.error) console.error("Saved routes fetch error:", sr.error);
+      if (sh.error) console.error("Shares fetch error:", sh.error); // Optional error handling
 
       setPlaces(placesData || []);
       setSavedRoutes(sr.data || []);
@@ -1454,7 +1500,7 @@ function App() {
       console.error("Data sync error:", error);
       triggerToast("Failed to sync database.");
     }
-  };
+  }, [fetchAllRecords, triggerToast]);
 
   const bulkGenerateSlugs = async () => {
     // Target places that are 'done' but missing a slug in the database
@@ -1496,9 +1542,8 @@ function App() {
   // --- HEADER: ADD LOCATION FUNCTIONS ---
 
 
-  const autocompleteListenerRef = useRef(null);
 
-  const initGoogle = async () => {
+  const initGoogle = React.useCallback(async () => {
     const mapsKey = import.meta.env.VITE_MAPS_KEY;
     if (!mapsKey) {
       triggerToast("Google Maps key is missing; place autocomplete is unavailable.");
@@ -1508,14 +1553,8 @@ function App() {
 
     try {
       await loadGoogleMapsApi(mapsKey);
-
-      // Guard 1: Abort if unmounted or DOM ref detached during API script loading
-      if (isMounted.current === false || !autocompleteRef.current || autocompleteInstanceRef.current) return;
-
       const { Autocomplete } = await window.google.maps.importLibrary("places");
-
-      // Guard 2: Abort if unmounted during library import
-      if (isMounted.current === false || !autocompleteRef.current || autocompleteInstanceRef.current) return;
+      if (!autocompleteRef.current || autocompleteInstanceRef.current) return;
 
       const autocomplete = new Autocomplete(autocompleteRef.current, {
         componentRestrictions: { country: "lk" },
@@ -1523,10 +1562,7 @@ function App() {
       });
       autocompleteInstanceRef.current = autocomplete;
 
-      // Attach listener and store reference for cleanup
-      const listener = autocomplete.addListener("place_changed", () => {
-        if (isMounted.current === false) return;
-
+      autocompleteListenerRef.current = autocomplete.addListener("place_changed", () => {
         const place = autocomplete.getPlace();
         if (!place.geometry) return;
 
@@ -1539,52 +1575,45 @@ function App() {
           category: VALID_CATEGORIES[0]
         });
       });
-
-      autocompleteListenerRef.current = listener;
     } catch (error) {
-      if (isMounted.current !== false) {
-        console.error("Google Places autocomplete initialization failed:", error);
-        triggerToast("Google Places autocomplete could not be initialized.");
-      }
+      console.error("Google Places autocomplete initialization failed:", error);
+      triggerToast("Google Places autocomplete could not be initialized.");
     }
-  };
+  }, [triggerToast]);
 
   useEffect(() => {
-    if (!isLoggedIn) return;
-    refreshAllData();
-    initGoogle();
-    // These functions use stable module data and state setters; run them once per login.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoggedIn]);
+    if (!isLoggedIn) return undefined;
+    const initializationTimer = window.setTimeout(() => {
+      refreshAllData();
+      void initGoogle();
+    }, 0);
+
+    return () => {
+      window.clearTimeout(initializationTimer);
+      autocompleteListenerRef.current?.remove();
+      autocompleteListenerRef.current = null;
+      autocompleteInstanceRef.current = null;
+    };
+  }, [isLoggedIn, initGoogle, refreshAllData]);
 
   useEffect(() => {
-    if (!isLoggedIn || locationSource !== 'device') return;
-    navigator.geolocation.getCurrentPosition((position) => {
-      setUserCoords({ lat: position.coords.latitude, lng: position.coords.longitude });
-    }, () => {
-      triggerToast("GPS access was denied; using the saved home location.");
-      setLocationSource('home');
-    });
-  }, [isLoggedIn, locationSource, triggerToast]);
-
-  useEffect(() => {
-    if (!isLoggedIn) return;
+    if (!isLoggedIn) return undefined;
+    let remainingSeconds = REFRESH_INTERVAL_SECONDS;
     const timer = setInterval(() => {
-      setTimeLeft((prev) => {
-        if (prev <= 1) {
-          refreshAllData();
-          return REFRESH_INTERVAL_SECONDS;
-        }
-        return prev - 1;
-      });
+      remainingSeconds -= 1;
+      if (remainingSeconds <= 0) {
+        refreshAllData();
+        remainingSeconds = REFRESH_INTERVAL_SECONDS;
+      }
+      setTimeLeft(remainingSeconds);
     }, 1000);
+
     return () => clearInterval(timer);
-  }, [isLoggedIn]);
+  }, [isLoggedIn, refreshAllData]);
 
 
 
   // --- TAB 1: PLACES FUNCTIONS ---
-
   const updatePlaceField = async (id, field, value) => {
     // 1. Prepare update object. Ensure value isn't undefined to prevent DB errors.
     const updateData = { [field]: value ?? null };
@@ -1594,7 +1623,12 @@ function App() {
       updateData.created_at = new Date().toISOString();
     }
 
-    // 3. Optimistically update local state for instant UI response without refetching all tables
+    const currentPlace = places.find((place) => place.id === id);
+    const previousValues = Object.fromEntries(
+      Object.keys(updateData).map((key) => [key, currentPlace?.[key]])
+    );
+
+    // 3. Optimistically update local state for instant UI response.
     setPlaces((prevPlaces) =>
       prevPlaces.map((place) =>
         place.id === id ? { ...place, ...updateData } : place
@@ -1609,11 +1643,19 @@ function App() {
 
     if (!error) {
       triggerToast('Updated Successfully');
+      refreshAllData();
       return true;
     } else {
+      setPlaces((prevPlaces) => prevPlaces.map((place) => {
+        if (place.id !== id) return place;
+        const restoredPlace = { ...place };
+        Object.entries(previousValues).forEach(([key, previousValue]) => {
+          if (previousValue === undefined) delete restoredPlace[key];
+          else restoredPlace[key] = previousValue;
+        });
+        return restoredPlace;
+      }));
       triggerToast(`Update Failed: ${error.message}`);
-      // Revert to backend state on error
-      refreshAllData();
       return false;
     }
   };
@@ -1895,9 +1937,12 @@ Generate a strict JSON object matching the exact schema provided.
 
       const data = await response.json();
 
-      if (data.error) {
-        triggerToast(`Gemini API Error: ${data.error.message}`);
-        throw new Error(data.error.message);
+      if (!response.ok || data.error) {
+        const message = typeof data.error === 'string'
+          ? data.error
+          : data.error?.message || `Article generation failed (${response.status}).`;
+        triggerToast(`Article generation error: ${message}`);
+        throw new Error(message);
       }
 
       if (!data.candidates || !data.candidates[0]?.content?.parts[0]?.text) {
@@ -1965,7 +2010,12 @@ Return ONLY this JSON structure:
       });
 
       const data = await response.json();
-      if (data.error) throw new Error(data.error.message);
+      if (!response.ok || data.error) {
+        const message = typeof data.error === 'string'
+          ? data.error
+          : data.error?.message || `Metadata generation failed (${response.status}).`;
+        throw new Error(message);
+      }
 
       if (!data.candidates || !data.candidates[0]?.content?.parts[0]?.text) {
         throw new Error("No content generated by AI.");
@@ -2008,12 +2058,9 @@ Return ONLY this JSON structure:
     }
   };
 
-
   const bulkUpdateMetadata = async () => {
-    // 1. Only target places marked 'done' where metadata is still default ('None'/'Open')
-    const targets = places.filter(
-      (p) => p.status === 'done' && (p.restriction_level === 'None' || p.governing_org === 'Open')
-    );
+    // Only target places marked 'done' where metadata is still default ('None'/'Open')
+    const targets = places.filter(p => p.status === 'done' && (p.restriction_level === 'None' || p.governing_org === 'Open'));
 
     if (targets.length === 0) {
       triggerToast("No 'Done' places need updating.");
@@ -2023,24 +2070,14 @@ Return ONLY this JSON structure:
     triggerToast(`Analyzing ${targets.length} locations...`);
 
     for (const place of targets) {
-      // Guard 1: Abort if component unmounted before cycle
-      if (isMounted.current === false) break;
-
       const success = await generatePlaceMetadata(place);
-
-      // Guard 2: Abort if component unmounted during async API call
-      if (isMounted.current === false) break;
-
       if (success) {
-        await new Promise((resolve) => setTimeout(resolve, 2000)); // Rate limiting safety delay
+        await new Promise(r => setTimeout(r, 2000)); // Rate limiting safety
       }
     }
 
-    // 2. Finalize safely only if component is still mounted
-    if (isMounted.current !== false) {
-      triggerToast("Metadata audit complete!");
-      refreshAllData();
-    }
+    triggerToast("Metadata audit complete!");
+    refreshAllData();
   };
 
   const syncYouTubeVideos = async () => {
@@ -2201,7 +2238,7 @@ Return ONLY this JSON structure:
         triggerToast("Article saved, but IndexNow submission failed.");
       }
 
-      // Notify once when an entry receives its first article; edits must not resend the newsletter.
+      // Notify subscribers only when this location first receives an article.
       if (shouldNotifySubscribers) {
         try {
           await notifySubscribersOnCompletion({
@@ -2317,7 +2354,7 @@ Return ONLY this JSON structure:
 
       // 2. Parse and apply structural Google Photos proxy URL transformations 
       let emailCoverImageUrl = '';
-      if (typeof locationData.cover_photo_url === 'string' && locationData.cover_photo_url.startsWith('https://')) {
+      if (locationData.cover_photo_url) {
         let targetUrl = locationData.cover_photo_url.replace(/^http:\/\//i, 'https://');
         const baseUrl = targetUrl.split('=')[0];
         emailCoverImageUrl = `${baseUrl}=w600-h338-c`;
@@ -2446,6 +2483,7 @@ Return ONLY this JSON structure:
         }
       }, 150);
     }
+
     return () => {
       if (timer) clearTimeout(timer);
     };
@@ -2533,17 +2571,18 @@ Return ONLY this JSON structure:
         return;
       }
 
-      const formattedTrip = waypoints.flatMap((wp) => {
-        const coordinates = getCoordinates(wp);
+      const formattedTrip = waypoints.flatMap((waypoint) => {
+        const coordinates = getCoordinates(waypoint);
         if (!coordinates) return [];
         return [{
-          id: wp.id || `saved-${Math.random()}`,
-          place_name: wp.place_name || wp.n || "Saved Waypoint",
+          id: waypoint.id || `saved-${Math.random()}`,
+          place_name: waypoint.place_name || waypoint.n || "Saved Waypoint",
           latitude: coordinates.lat,
           longitude: coordinates.lng,
-          category: wp.category || "Location"
+          category: waypoint.category || "Location"
         }];
       });
+
       if (formattedTrip.length === 0) {
         triggerToast('This route has no stops with valid coordinates.');
         return;
@@ -2551,10 +2590,7 @@ Return ONLY this JSON structure:
 
       setSelectedTrip(formattedTrip);
       setActiveRouteName(route.route_name || ""); // Track and display active route name
-      const skippedCount = waypoints.length - formattedTrip.length;
-      triggerToast(skippedCount > 0
-        ? `Loaded route and skipped ${skippedCount} invalid stop${skippedCount === 1 ? '' : 's'}.`
-        : `Loaded "${route.route_name}" into active trip!`);
+      triggerToast(`Loaded "${route.route_name}" into active trip!`);
     } catch (err) {
       console.error("Load Route Error:", err);
       triggerToast("Failed to load saved route.");
@@ -2564,14 +2600,10 @@ Return ONLY this JSON structure:
   // Deletes route plan from Supabase database
   const deleteRoute = async (id) => {
     if (confirm("Delete this route plan?")) {
-      try {
-        const { error } = await supabaseClient.from('saved_travel_routes').delete().eq('id', id);
-        if (error) throw error;
+      const { error } = await supabaseClient.from('saved_travel_routes').delete().eq('id', id);
+      if (!error) {
         triggerToast('Route Deleted');
         refreshAllData();
-      } catch (error) {
-        console.error('Delete route failed:', error);
-        triggerToast('Failed to delete route.');
       }
     }
   };
@@ -2630,7 +2662,7 @@ Return ONLY this JSON structure:
         return;
       }
       showQRCode(pts, route.route_name || route.name || "Saved Route Plan");
-    } catch {
+    } catch (e) {
       triggerToast("Error processing route data.");
     }
   };
@@ -2664,7 +2696,7 @@ Return ONLY this JSON structure:
       </button>
     </div>
 
-    <p class="text-xs font-black uppercase text-slate-800 text-center mb-4 w-full truncate px-2 italic">${escapeHtml(name)}</p>
+    <p class="text-xs font-black uppercase text-slate-800 text-center mb-4 w-full truncate px-2 italic">${name}</p>
 
     <div class="bg-slate-50 p-4 rounded-xl mb-5 border border-slate-100 flex items-center justify-center shadow-inner">
       <div id="qrcode-canvas" class="mix-blend-multiply"></div>
@@ -2688,14 +2720,15 @@ Return ONLY this JSON structure:
     // Render QR Code canvas safely
     setTimeout(() => {
       const qrContainer = document.getElementById("qrcode-canvas");
-      if (qrContainer && window.QRCode) {
-        new window.QRCode(qrContainer, {
+      const QRCodeConstructor = window.QRCode;
+      if (qrContainer && QRCodeConstructor) {
+        new QRCodeConstructor(qrContainer, {
           text: universalUrl,
           width: 160,
           height: 160,
           colorDark: "#0f172a",
           colorLight: "#f8fafc",
-          correctLevel: window.QRCode.CorrectLevel.H
+          correctLevel: QRCodeConstructor.CorrectLevel.H
         });
       }
     }, 50);
@@ -2745,7 +2778,7 @@ Return ONLY this JSON structure:
     const safeShares = Array.isArray(sharesData) ? sharesData : [];
 
     // Localized Set per recalculation to avoid state leakage across re-renders
-
+    const knownUsers = new Set();
 
     const parseUA = (v = {}) => {
       const rawUA = v.user_agent || "";
@@ -2882,7 +2915,7 @@ Return ONLY this JSON structure:
 
       return {
         type,
-        source: finalSource,
+        source: finalSource || 'Direct',
         os,
         isBot,
         loyaltyStatus,
@@ -2894,24 +2927,13 @@ Return ONLY this JSON structure:
       };
     };
 
-
-    // 1. Fast Chronological Sort: Compare primitive numeric timestamps instead of instantiating Date objects
-    const sortedAnalytics = [...safeAnalytics].sort((a, b) => {
-      const timeA = a.created_at ? Date.parse(a.created_at) : 0;
-      const timeB = b.created_at ? Date.parse(b.created_at) : 0;
-      return timeA - timeB;
-    });
-
-    // 2. Sequential Pure Mapping: Reset tracking set prior to iteration to keep loyalty calculation pure
-    const knownUsers = new Set();
-    const parsedData = sortedAnalytics.map((v) => ({
-      ...v,
-      ...parseUA(v)
-    }));
+    // Sort analytics chronologically prior to computing loyalty status
+    const parsedData = [...safeAnalytics]
+      .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+      .map(v => ({ ...v, ...parseUA(v) }));
 
     const latestMetrics = parsedData.length > 0 ? parsedData[parsedData.length - 1] : null;
 
-    // 3. Fast Metric Aggregator
     const getSortedMetrics = (data, keyOrFn) => {
       const counts = data.reduce((acc, item) => {
         const val = typeof keyOrFn === 'function' ? keyOrFn(item) : (item[keyOrFn] || 'Unknown');
@@ -3462,10 +3484,7 @@ Return ONLY this JSON structure:
             <div className="flex-1 overflow-y-auto p-8 no-scrollbar bg-slate-50/50">
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-6">
                 {(processedPlaces || []).map(p => {
-                  const coordinates = getCoordinates(p);
-                  const dynamicDistance = coordinates
-                    ? (L.latLng(sortCenter.lat, sortCenter.lng).distanceTo(L.latLng(coordinates.lat, coordinates.lng)) / 1000).toFixed(1)
-                    : '—';
+                  const dynamicDistance = (L.latLng(sortCenter.lat, sortCenter.lng).distanceTo(L.latLng(p.latitude, p.longitude)) / 1000).toFixed(1);
                   const hasArticle = p.ai_article && Object.keys(p.ai_article).length > 0;
 
                   return (
@@ -3858,7 +3877,7 @@ Return ONLY this JSON structure:
                             onClick={(e) => {
                               e.preventDefault();
                               e.stopPropagation();
-                              handlePinterestShare(p);
+                              checkAndPost(p, "pinterest", () => handlePinterestShare(p));
                             }}
                             className={`flex flex-col items-center justify-center gap-1 py-2 text-black border rounded-xl hover:bg-rose-600 hover:text-white transition-all shadow-sm group relative ${p.published_pinterest_at
                               ? "border-emerald-500 bg-emerald-50/50 shadow-sm shadow-emerald-100"
@@ -3885,7 +3904,7 @@ Return ONLY this JSON structure:
                             onClick={(e) => {
                               e.preventDefault();
                               e.stopPropagation();
-                              handleFlipboardShare(p);
+                              checkAndPost(p, "flipboard", () => handleFlipboardShare(p));
                             }}
                             className={`flex flex-col items-center justify-center gap-1 py-2 text-black border rounded-xl hover:bg-red-500 hover:text-white transition-all shadow-sm group relative ${p.published_flipboard_at
                               ? "border-emerald-500 bg-emerald-50/50 shadow-sm shadow-emerald-100"
@@ -4112,11 +4131,7 @@ Return ONLY this JSON structure:
 
                                     {/* Remove Waypoint Button */}
                                     <button
-                                      onClick={() => {
-                                        const remainingStops = selectedTrip.filter((place) => place.id !== stop.id);
-                                        setSelectedTrip(remainingStops);
-                                        if (remainingStops.length === 0) setActiveRouteName('');
-                                      }}
+                                      onClick={() => setSelectedTrip((prev) => prev.filter((p) => p.id !== stop.id))}
                                       className="p-1 text-rose-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
                                     >
                                       <Icon name="trash-2" className="w-3.5 h-3.5" />
@@ -4198,13 +4213,7 @@ Return ONLY this JSON structure:
                           </p>
                         ) : (
                           savedRoutes.map((route, index) => {
-                            let wpArray = [];
-                            try {
-                              wpArray = typeof route.waypoints === 'string' ? JSON.parse(route.waypoints) : (route.waypoints || []);
-                            } catch (e) {
-                              wpArray = [];
-                            }
-
+                            const wpArray = getRouteWaypoints(route);
                             return (
                               <Draggable
                                 key={route.id}
@@ -4300,25 +4309,19 @@ Return ONLY this JSON structure:
                   .map(p => {
                     const coordinates = getCoordinates(p);
                     const d = coordinates
-                      ? L.latLng(HomePoint.lat, HomePoint.lng).distanceTo(L.latLng(coordinates.lat, coordinates.lng))
+                      ? L.latLng(sortCenter.lat, sortCenter.lng).distanceTo(L.latLng(coordinates.lat, coordinates.lng))
                       : null;
                     const km = d === null ? '—' : (d / 1000).toFixed(1);
                     const isDone = p.status === 'done';
 
                     // Check if location is part of any saved route plan
-                    const matchingRoute = savedRoutes.find(route => {
-                      let wpArray;
-                      try {
-                        wpArray = typeof route.waypoints === 'string' ? JSON.parse(route.waypoints) : (route.waypoints || []);
-                      } catch {
-                        wpArray = [];
-                      }
-                      return wpArray.some(wp =>
+                    const matchingRoute = savedRoutes.find(route =>
+                      getRouteWaypoints(route).some(wp =>
                         wp.id === p.id ||
                         (wp.place_name && wp.place_name === p.place_name) ||
                         (wp.n && wp.n === p.place_name)
-                      );
-                    });
+                      )
+                    );
 
                     const reservedRouteName = matchingRoute ? matchingRoute.route_name : null;
                     const isReserved = !!reservedRouteName;

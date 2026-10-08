@@ -57,7 +57,7 @@ export default async function handler(req, res) {
 
     // Reflects your unified Vercel project domain name to target the active proxy
     const hostDomain = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "https://my-journal-admin.vercel.app";
-    const unblockableImageUrl = `${hostDomain}/api/ig-image-proxy?url=${encodeURIComponent(imageUrl)}&ignore=/image.jpg`;
+    const unblockableImageUrl = `${hostDomain}/api/cover-image-proxy?url=${encodeURIComponent(imageUrl)}`;
 
     // ==========================================
     // INSTAGRAM ROUTE (Dynamic Architecture Router)
