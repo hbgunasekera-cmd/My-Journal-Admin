@@ -1,0 +1,178 @@
+/* --- 1. EXTERNAL IMPORTS --- */
+@import "tailwindcss"; /* Tailwind v4 entry point[cite: 3] */
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;800&display=swap');
+
+
+/* --- 3. CORE LAYOUT & GLOBAL RESET --- */
+@layer base {
+    html, body, #root {
+        height: 100vh;
+        width: 100vw;
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+        background-color: #F8FAFC;
+        font-family: 'Plus Jakarta Sans', sans-serif;
+    }
+
+    #root {
+        display: flex;
+        align-items: stretch;
+        width: 100%; /* Ensure root covers the full width[cite: 3] */
+    }
+
+    /* 
+       FIX: Ensure the main content wrapper (adjacent to your Sidebar) 
+       expands to fill the remaining screen width.[cite: 3]
+    */
+    #root > main, 
+    #root > div:last-child {
+        flex: 1;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        position: relative;
+    }
+
+    .touch-none {
+        -webkit-tap-highlight-color: transparent;
+        touch-action: none;
+    }
+}
+
+/* --- 4. INPUT & CURSOR CONTROLS --- */
+input,
+textarea,
+[contenteditable="true"],
+.pac-target-input {
+    -webkit-user-select: text !important;
+    -moz-user-select: text !important;
+    user-select: text !important;
+    caret-color: auto !important;
+    cursor: text !important;
+}
+
+button, a {
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+}
+
+:focus-visible {
+    outline: 2px solid #6366f1 !important;
+    outline-offset: 2px;
+}
+
+#map, .sidebar-item, .category-badge {
+    cursor: default;
+}
+
+/* --- 5. MAP & LEAFLET STYLING --- */
+#map-container {
+    width: 100%;
+    height: 100%;
+    z-index: 0;
+    background: #e2e8f0;
+}
+
+.leaflet-container {
+    height: 100%;
+    width: 100%;
+    cursor: grab !important;
+    user-select: none !important;
+}
+
+.leaflet-container:active { cursor: grabbing !important; }
+.leaflet-routing-container { display: none !important; }
+
+.leaflet-popup-content-wrapper {
+    padding: 0 !important;
+    border-radius: 8px !important;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15) !important;
+    overflow: hidden;
+}
+
+.leaflet-popup-content {
+    margin: 8px !important;
+    font-family: 'Plus Jakarta Sans', sans-serif;
+}
+
+.custom-map-tooltip {
+    background: rgba(15, 23, 42, 0.9) !important;
+    border: none !important;
+    border-radius: 6px !important;
+    color: white !important;
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-weight: 600;
+    font-size: 11px !important;
+    padding: 4px 8px !important;
+    white-space: nowrap;
+}
+
+/* --- 6. CUSTOM MARKERS --- */
+.marker-pending { background: #f97316; border: 2px solid white; border-radius: 50%; box-shadow: 0 2px 4px rgba(0,0,0,0.3); }
+.marker-done { background: #10b981; border: 2px solid white; border-radius: 50%; box-shadow: 0 2px 4px rgba(0,0,0,0.3); }
+.marker-selected { background: #a855f7; border: 2px solid white; border-radius: 50%; box-shadow: 0 0 0 4px rgba(168, 85, 247, 0.3); z-index: 1000 !important; }
+.marker-smart { background: #3b82f6; border: 2px solid white; border-radius: 50%; box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.3); }
+
+/* --- 7. GOOGLE PLACES AUTOCOMPLETE --- */
+.pac-container {
+    z-index: 10000 !important;
+    border-radius: 1rem;
+    border: 1px solid #f1f5f9 !important;
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1) !important;
+    margin-top: 8px;
+    padding: 0.5rem;
+    font-family: 'Plus Jakarta Sans', sans-serif !important;
+}
+
+.pac-item {
+    padding: 10px 14px;
+    cursor: pointer;
+    border-top: 1px solid #f8fafc;
+    display: flex;
+    align-items: center;
+}
+
+.pac-item-query {
+    font-size: 13px;
+    font-weight: 600;
+    color: #0f172a;
+}
+
+/* --- 8. UTILITIES & SCROLLBARS --- */
+@layer utilities {
+    .no-scrollbar::-webkit-scrollbar {
+        display: none;
+    }
+    .no-scrollbar {
+        -ms-overflow-style: none;
+        scrollbar-width: none;
+    }
+
+    .custom-scrollbar::-webkit-scrollbar {
+        width: 4px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-track {
+        background: transparent;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+        background: rgba(0, 0, 0, 0.1);
+        border-radius: 10px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+        background: rgba(0, 0, 0, 0.2);
+    }
+}
+
+.lucide {
+    stroke-width: 1.25 !important;
+    flex-shrink: 0;
+}
+
+.inline-flex svg.lucide {
+    width: 100% !important;
+    height: 100% !important;
+    display: block;
+}
+
+.hidden { display: none !important; }
