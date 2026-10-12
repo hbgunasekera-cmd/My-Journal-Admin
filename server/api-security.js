@@ -103,7 +103,8 @@ export async function fetchTrustedImage(value) {
         signal: controller.signal,
         headers: {
           'User-Agent': 'Mozilla/5.0 (compatible; MyJournalImageFetcher/1.0)',
-          'Accept': 'image/avif,image/webp,image/png,image/jpeg,image/*;q=0.8'
+          // Prefer JPEG so image hosts do not negotiate AVIF/WebP for Meta's image_url endpoint.
+          'Accept': 'image/jpeg,image/png;q=0.9,image/*;q=0.8'
         }
       });
 
