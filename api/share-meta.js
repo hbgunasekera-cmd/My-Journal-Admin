@@ -55,8 +55,11 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "Missing required imageUrl payload attribute." });
     }
 
-    // Reflects your unified Vercel project domain name to target the active proxy
-    const hostDomain = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "https://my-journal-admin.vercel.app";
+    // Meta must fetch a public URL. VERCEL_URL can point to a protected deployment URL,
+    // so use the configured public app URL or the production domain instead.
+    const hostDomain = process.env.PUBLIC_APP_URL
+      ? new URL(process.env.PUBLIC_APP_URL).origin
+      : "https://my-journal-admin.vercel.app";
     const unblockableImageUrl = `${hostDomain}/api/cover-image-proxy?format=jpeg&url=${encodeURIComponent(imageUrl)}`;
 
     // ==========================================

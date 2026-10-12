@@ -2,8 +2,8 @@ import { fetchTrustedImage, validateImageUrl } from '../server/api-security.js';
 import sharp from 'sharp';
 
 export default async function handler(req, res) {
-  if (req.method !== 'GET') {
-    res.setHeader('Allow', 'GET');
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    res.setHeader('Allow', 'GET, HEAD');
     return res.status(405).json({ error: 'Method not allowed.' });
   }
 
@@ -21,7 +21,12 @@ export default async function handler(req, res) {
     const outputBuffer = shouldConvertToJpeg
       ? await sharp(buffer)
         .rotate()
-        .resize({ width: 1440, height: 1440, fit: 'inside', withoutEnlargement: true })
+        .resize({
+          width: 1080,
+          height: 1080,
+          fit: 'contain',
+          background: '#fff'
+        })
         .flatten({ background: '#fff' })
         .jpeg({ quality: 88 })
         .toBuffer()
@@ -29,8 +34,10 @@ export default async function handler(req, res) {
 
     res.setHeader('Content-Type', shouldConvertToJpeg ? 'image/jpeg' : contentType);
     res.setHeader('Content-Length', outputBuffer.length);
+    if (shouldConvertToJpeg) res.setHeader('Content-Disposition', 'inline; filename="cover.jpg"');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Cache-Control', 'public, max-age=86400, immutable');
+    if (req.method === 'HEAD') return res.status(200).end();
     return res.status(200).send(outputBuffer);
   } catch (error) {
     const status = error.name === 'AbortError' ? 504 : 400;
