@@ -922,10 +922,41 @@ function App() {
   // 2. REVISED INTEGRATION SHARING FUNCTIONS
   // ==========================================
 
-  /**
-   * Helper Function: Generate Gallery URL
-   * Converts a location name into a URL-friendly slug and returns the gallery link.
-   */
+  // Reuse a short, location-specific summary across the Social tab and every share action.
+  const getSocialDescription = (place) => {
+    const article = place?.ai_article || {};
+    const storedDescription = typeof article.description === 'string'
+      ? article.description.trim()
+      : '';
+    const source = [
+      article.history,
+      article.why_visit?.summary,
+      storedDescription.length <= 260 ? storedDescription : '',
+      article.seo_intro
+    ].find((value) => typeof value === 'string' && value.trim());
+    const placeName = place?.place_name || 'This location';
+    const locality = typeof place?.locality === 'string' ? place.locality.trim() : '';
+    const location = locality
+      ? (/sri lanka/i.test(locality) ? locality : `${locality}, Sri Lanka`)
+      : 'Sri Lanka';
+    const category = typeof place?.category === 'string' ? place.category.trim() : '';
+    const fallback = category
+      ? `The ${category.toLowerCase()} ${placeName} is located in ${location}.`
+      : `${placeName} is located in ${location}.`;
+    const cleaned = (source || fallback)
+      .replace(/[#*]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const description = cleaned.match(/[^.!?]+[.!?]+/)?.[0]?.trim() || cleaned;
+    const maxLength = 220;
+
+    if (description.length <= maxLength) return description;
+
+    const shortened = description.slice(0, maxLength - 1);
+    const lastSpace = shortened.lastIndexOf(' ');
+    return `${(lastSpace > 0 ? shortened.slice(0, lastSpace) : shortened).trim()}…`;
+  };
+
   // --- META (FACEBOOK/INSTAGRAM/THREADS) ---
   const handleMetaShare = async (p, platform) => {
     const locationName = p.place_name || "Island Vignette";
@@ -933,8 +964,7 @@ function App() {
     const coreTags = "#MyJournal #SriLanka #TravelSriLanka #TravelPhotography";
     const dynamicHashtags = `${coreTags} ${getSpecificTags(p)}`.trim();
 
-    const storyText = p.ai_article?.story || p.ai_article?.description || "";
-    const cleanText = storyText.replace(/[#*]/g, '').trim();
+    const cleanText = getSocialDescription(p);
 
     const platformLimit = platform === 'threads' ? 500 : 2200;
     const fixedCost = locationName.length + shareLink.length + dynamicHashtags.length + 40;
@@ -996,8 +1026,7 @@ function App() {
     const coreTags = "#MyJournal #SriLanka #TravelSriLanka #TravelPhotography";
     const dynamicHashtags = `${coreTags} ${getSpecificTags(p)}`.trim();
 
-    const storyText = p.ai_article?.story || p.ai_article?.description || "";
-    const cleanText = storyText.replace(/[#*]/g, '').trim();
+    const cleanText = getSocialDescription(p);
 
     const fixedCost = locationName.length + 4 + 7 + shareLink.length + 4 + dynamicHashtags.length;
     const maxDescBudget = 500 - fixedCost - 5;
@@ -1048,8 +1077,7 @@ function App() {
     const specificTags = getSpecificTags(p).split(' ').slice(0, 2).join(' ');
     const dynamicHashtags = `${coreTags} ${specificTags}`.trim();
 
-    const storyText = p.ai_article?.story || p.ai_article?.description || "";
-    const cleanText = storyText.replace(/[#*]/g, '').trim();
+    const cleanText = getSocialDescription(p);
 
     const fixedCost = locationName.length + 4 + 7 + shareLink.length + 4 + dynamicHashtags.length;
     const maxDescBudget = 300 - fixedCost - 5;
@@ -1118,7 +1146,7 @@ function App() {
     const dynamicHashtags = `${coreTags} ${getSpecificTags(p)}`.trim();
 
     let shortDesc;
-    const fullStory = p.ai_article?.story || p.ai_article?.description;
+    const fullStory = getSocialDescription(p);
 
     if (fullStory) {
       const cleanText = fullStory.replace(/[#*]/g, '').trim();
@@ -1132,7 +1160,7 @@ function App() {
         shortDesc += "...";
       }
     } else {
-      shortDesc = `Breathtaking views at ${locationName}. A stunning escape in Sri Lanka.`;
+      shortDesc = fullStory;
     }
 
     const finalDescription = `${locationName} \n\n${shortDesc}\n\n📍Location: ${locationName}\n© Hasitha Gunasekera\n\n${dynamicHashtags}`;
@@ -1162,7 +1190,7 @@ function App() {
     const dynamicHashtags = `${coreTags} ${getSpecificTags(p)}`.trim();
 
     let shortDesc = "";
-    const storyText = p.ai_article?.story || p.ai_article?.description || "";
+    const storyText = getSocialDescription(p);
 
     if (storyText) {
       const cleanText = storyText.replace(/[#*]/g, '').trim();
@@ -1235,8 +1263,7 @@ function App() {
     const coreTags = "#MyJournal #SriLanka #TravelSriLanka #TravelPhotography";
     const dynamicHashtags = `${coreTags} ${getSpecificTags(p)}`.trim();
 
-    const storyText = p.ai_article?.story || p.ai_article?.description || "";
-    const cleanText = storyText.replace(/[#*]/g, '').trim();
+    const cleanText = getSocialDescription(p);
 
     const fixedCost = locationName.length + 18 + 23 + dynamicHashtags.length;
     const maxDescBudget = Math.max(0, 280 - fixedCost - 5);
@@ -1313,7 +1340,7 @@ function App() {
         "IslandParadise,", "ProtectNature,", "CeylonVibes,"
       ].join(" ");
 
-      const description = p.description || p.journal_entry || "";
+      const description = getSocialDescription(p);
       const clipboardText = `${locationName}\n${galleryLink}\n\n${description}\n\n${tagsList}`.trim();
 
       await navigator.clipboard.writeText(clipboardText);
@@ -3733,9 +3760,7 @@ Return ONLY this JSON structure:
                     // Data extraction from AI Article
                     const hasArticle = p.ai_article && Object.keys(p.ai_article).length > 0;
                     const artisticTitle = `✨ ${p.place_name} — Island Vignettes: A Sri Lankan Journal`;
-                    const description =
-                      p.ai_article?.story ||
-                      "Capturing the essence of Sri Lanka's hidden gems through the lens of adventure.";
+                    const description = getSocialDescription(p);
 
                     return (
                       <div
