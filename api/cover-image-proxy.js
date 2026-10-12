@@ -1,4 +1,5 @@
 import { fetchTrustedImage, validateImageUrl } from '../server/api-security.js';
+import sharp from 'sharp';
 
 export default async function handler(req, res) {
   if (req.method !== 'GET') {
@@ -16,10 +17,21 @@ export default async function handler(req, res) {
     }
 
     const { buffer, contentType } = await fetchTrustedImage(parsedUrl.toString());
-    res.setHeader('Content-Type', contentType);
+    const shouldConvertToJpeg = req.query?.format === 'jpeg';
+    const outputBuffer = shouldConvertToJpeg
+      ? await sharp(buffer)
+        .rotate()
+        .resize({ width: 1440, height: 1440, fit: 'inside', withoutEnlargement: true })
+        .flatten({ background: '#fff' })
+        .jpeg({ quality: 88 })
+        .toBuffer()
+      : buffer;
+
+    res.setHeader('Content-Type', shouldConvertToJpeg ? 'image/jpeg' : contentType);
+    res.setHeader('Content-Length', outputBuffer.length);
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Cache-Control', 'public, max-age=86400, immutable');
-    return res.status(200).send(buffer);
+    return res.status(200).send(outputBuffer);
   } catch (error) {
     const status = error.name === 'AbortError' ? 504 : 400;
     console.warn('Cover image proxy rejected a request:', error.message);

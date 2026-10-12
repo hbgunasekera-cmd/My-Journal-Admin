@@ -1290,17 +1290,22 @@ function App() {
     const tweetText = `${locationName}\n\n${shortDesc}\n\n📍Location: ${shareLink}\n\n${dynamicHashtags}`;
 
     const twitterIntentUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(tweetText)}`;
+    const clipboardWrite = navigator.clipboard?.writeText
+      ? navigator.clipboard.writeText(tweetText)
+        .then(() => true)
+        .catch((err) => {
+          console.error("Clipboard Error:", err);
+          return false;
+        })
+      : Promise.resolve(false);
     const popup = window.open(
       twitterIntentUrl,
       'twitter_intent',
       'width=550,height=420,scrollbars=yes,resizable=yes'
     );
 
-    try {
-      await navigator.clipboard.writeText(tweetText);
+    if (await clipboardWrite) {
       setToast?.({ show: true, msg: "Caption copied! Opening X Composer..." });
-    } catch (err) {
-      console.error("Clipboard Error:", err);
     }
 
     if (popup) {
