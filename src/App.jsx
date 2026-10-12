@@ -4761,49 +4761,31 @@ Return ONLY this JSON structure:
                             {/* Share Type and Country Breakdown */}
                             {isExpanded && (
                               <div className="pb-3 animate-in fade-in slide-in-from-top-2">
-                                <div className="space-y-2">
-                                  <div className="bg-black/20 rounded-xl p-3 space-y-2 border border-white/5 shadow-inner">
-                                    <p className="text-[8px] font-black uppercase tracking-widest text-white/40 mb-2 border-b border-white/10 pb-1">
-                                      Shares by Type
-                                    </p>
-                                    <div className="space-y-2 max-h-40 overflow-y-auto custom-scrollbar pr-1">
-                                      {Object.entries(item.types || {})
-                                        .sort((a, b) => b[1].hits - a[1].hits)
-                                        .map(([type, typeSummary]) => (
-                                          <div key={type} className="rounded-lg bg-white/5 px-2.5 py-2">
-                                            <div className="flex justify-between items-center mb-1.5">
-                                              <span className="text-[9px] font-black text-white/90">{type}</span>
-                                              <span className="text-[9px] font-black text-emerald-200">{typeSummary.hits}</span>
-                                            </div>
-                                            <div className="space-y-1 border-l border-white/10 pl-2">
-                                              {Object.entries(typeSummary.countries || {})
-                                                .sort((a, b) => b[1] - a[1])
-                                                .map(([country, count]) => (
-                                                  <div key={country} className="flex justify-between items-center">
-                                                    <span className="text-[8px] font-bold text-white/60">{country}</span>
-                                                    <span className="text-[8px] font-black text-emerald-300">{count}</span>
-                                                  </div>
-                                                ))}
-                                            </div>
+                                <div className="bg-black/20 rounded-xl p-3 space-y-2 border border-white/5 shadow-inner">
+                                  <p className="text-[8px] font-black uppercase tracking-widest text-white/40 mb-2 border-b border-white/10 pb-1">
+                                    Shares by Type
+                                  </p>
+                                  <div className="space-y-2 max-h-40 overflow-y-auto custom-scrollbar pr-1">
+                                    {Object.entries(item.types || {})
+                                      .sort((a, b) => b[1].hits - a[1].hits)
+                                      .map(([type, typeSummary]) => (
+                                        <div key={type} className="rounded-lg bg-white/5 px-2.5 py-2">
+                                          <div className="flex justify-between items-center mb-1.5">
+                                            <span className="text-[9px] font-black text-white/90">{type}</span>
+                                            <span className="text-[9px] font-black text-emerald-200">{typeSummary.hits}</span>
                                           </div>
-                                        ))}
-                                    </div>
-                                  </div>
-
-                                  <div className="bg-black/20 rounded-xl p-3 space-y-2 border border-white/5 shadow-inner">
-                                    <p className="text-[8px] font-black uppercase tracking-widest text-white/40 mb-2 border-b border-white/10 pb-1">
-                                      All Shares by Country
-                                    </p>
-                                    <div className="space-y-1.5 max-h-24 overflow-y-auto custom-scrollbar pr-1">
-                                      {Object.entries(item.countries || {})
-                                        .sort((a, b) => b[1] - a[1])
-                                        .map(([country, count]) => (
-                                          <div key={country} className="flex justify-between items-center">
-                                            <span className="text-[9px] font-bold text-white/80">{country}</span>
-                                            <span className="text-[9px] font-black text-emerald-300">{count}</span>
+                                          <div className="space-y-1 border-l border-white/10 pl-2">
+                                            {Object.entries(typeSummary.countries || {})
+                                              .sort((a, b) => b[1] - a[1])
+                                              .map(([country, count]) => (
+                                                <div key={country} className="flex justify-between items-center">
+                                                  <span className="text-[8px] font-bold text-white/60">{country}</span>
+                                                  <span className="text-[8px] font-black text-emerald-300">{count}</span>
+                                                </div>
+                                              ))}
                                           </div>
-                                        ))}
-                                    </div>
+                                        </div>
+                                      ))}
                                   </div>
                                 </div>
                               </div>
