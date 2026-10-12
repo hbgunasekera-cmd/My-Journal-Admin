@@ -1480,7 +1480,7 @@ function App() {
         supabaseClient.from('location_comments').select('*, travel_bucket_list(place_name)').order('created_at', { ascending: false }),
         supabaseClient.from('location_likes').select('*, travel_bucket_list(place_name)'),
         supabaseClient.from('subscribers').select('*').order('subscribed_at', { ascending: false }),
-        supabaseClient.from('location_shares').select('*, travel_bucket_list(place_name)') // 2. Add the shares query
+        supabaseClient.from('location_shares').select('*, travel_bucket_list(place_name, category)') // 2. Add the shares query
       ]);
 
       if (sub.error) console.error("Subscribers fetch error:", sub.error);
@@ -2943,25 +2943,42 @@ Return ONLY this JSON structure:
       return Object.entries(counts).sort((a, b) => b[1] - a[1]);
     };
 
-    // Helper function to aggregate location-based metrics (Likes & Shares)
-    const aggregateLocationData = (dataset) => {
+    // Aggregate location metrics, retaining share type counts when requested.
+    const aggregateLocationData = (dataset, includeShareTypes = false) => {
       return dataset.reduce((acc, item) => {
         const locName = item.travel_bucket_list?.place_name || 'Unknown Location';
         const category = item.travel_bucket_list?.category || 'General';
         const country = item.country || 'Unknown';
+        const existing = acc.find((entry) => entry.name === locName);
+        const summary = existing || {
+          name: locName,
+          category,
+          hits: 0,
+          countries: {},
+          ...(includeShareTypes ? { types: {} } : {})
+        };
 
-        const existing = acc.find(x => x.name === locName);
-        if (existing) {
-          existing.hits += 1;
-          existing.countries[country] = (existing.countries[country] || 0) + 1;
-        } else {
-          acc.push({
-            name: locName,
-            category: category,
-            hits: 1,
-            countries: { [country]: 1 }
-          });
+        summary.hits += 1;
+        summary.countries[country] = (summary.countries[country] || 0) + 1;
+
+        if (includeShareTypes) {
+          const rawType = [
+            item.share_type,
+            item.platform,
+            item.type,
+            item.share_platform,
+            item.share_method,
+            item.channel,
+            item.method
+          ].find((value) => typeof value === 'string' && value.trim());
+          const type = rawType?.trim() || category || 'Unknown Type';
+          const typeSummary = summary.types[type] || { hits: 0, countries: {} };
+          typeSummary.hits += 1;
+          typeSummary.countries[country] = (typeSummary.countries[country] || 0) + 1;
+          summary.types[type] = typeSummary;
         }
+
+        if (!existing) acc.push(summary);
         return acc;
       }, []).sort((a, b) => b.hits - a.hits);
     };
@@ -2982,7 +2999,7 @@ Return ONLY this JSON structure:
       os: getSortedMetrics(parsedData, 'os'),
       trafficType: getSortedMetrics(parsedData, v => v.isBot ? 'Bot/Crawler' : 'Real Person'),
       likesSummary: aggregateLocationData(safeLikes),
-      sharesSummary: aggregateLocationData(safeShares)
+      sharesSummary: aggregateLocationData(safeShares, true)
     };
   }, [analyticsData, likesData, subscribersData, sharesData]);
 
@@ -4741,22 +4758,52 @@ Return ONLY this JSON structure:
                               </div>
                             </div>
 
-                            {/* Country Breakdown */}
+                            {/* Share Type and Country Breakdown */}
                             {isExpanded && (
                               <div className="pb-3 animate-in fade-in slide-in-from-top-2">
-                                <div className="bg-black/20 rounded-xl p-3 space-y-2 border border-white/5 shadow-inner">
-                                  <p className="text-[8px] font-black uppercase tracking-widest text-white/40 mb-2 border-b border-white/10 pb-1">
-                                    Country Breakdown
-                                  </p>
-                                  <div className="space-y-1.5 max-h-32 overflow-y-auto custom-scrollbar pr-1">
-                                    {Object.entries(item.countries || {})
-                                      .sort((a, b) => b[1] - a[1])
-                                      .map(([country, count]) => (
-                                        <div key={country} className="flex justify-between items-center">
-                                          <span className="text-[9px] font-bold text-white/80">{country}</span>
-                                          <span className="text-[9px] font-black text-emerald-300">{count}</span>
-                                        </div>
-                                      ))}
+                                <div className="space-y-2">
+                                  <div className="bg-black/20 rounded-xl p-3 space-y-2 border border-white/5 shadow-inner">
+                                    <p className="text-[8px] font-black uppercase tracking-widest text-white/40 mb-2 border-b border-white/10 pb-1">
+                                      Shares by Type
+                                    </p>
+                                    <div className="space-y-2 max-h-40 overflow-y-auto custom-scrollbar pr-1">
+                                      {Object.entries(item.types || {})
+                                        .sort((a, b) => b[1].hits - a[1].hits)
+                                        .map(([type, typeSummary]) => (
+                                          <div key={type} className="rounded-lg bg-white/5 px-2.5 py-2">
+                                            <div className="flex justify-between items-center mb-1.5">
+                                              <span className="text-[9px] font-black text-white/90">{type}</span>
+                                              <span className="text-[9px] font-black text-emerald-200">{typeSummary.hits}</span>
+                                            </div>
+                                            <div className="space-y-1 border-l border-white/10 pl-2">
+                                              {Object.entries(typeSummary.countries || {})
+                                                .sort((a, b) => b[1] - a[1])
+                                                .map(([country, count]) => (
+                                                  <div key={country} className="flex justify-between items-center">
+                                                    <span className="text-[8px] font-bold text-white/60">{country}</span>
+                                                    <span className="text-[8px] font-black text-emerald-300">{count}</span>
+                                                  </div>
+                                                ))}
+                                            </div>
+                                          </div>
+                                        ))}
+                                    </div>
+                                  </div>
+
+                                  <div className="bg-black/20 rounded-xl p-3 space-y-2 border border-white/5 shadow-inner">
+                                    <p className="text-[8px] font-black uppercase tracking-widest text-white/40 mb-2 border-b border-white/10 pb-1">
+                                      All Shares by Country
+                                    </p>
+                                    <div className="space-y-1.5 max-h-24 overflow-y-auto custom-scrollbar pr-1">
+                                      {Object.entries(item.countries || {})
+                                        .sort((a, b) => b[1] - a[1])
+                                        .map(([country, count]) => (
+                                          <div key={country} className="flex justify-between items-center">
+                                            <span className="text-[9px] font-bold text-white/80">{country}</span>
+                                            <span className="text-[9px] font-black text-emerald-300">{count}</span>
+                                          </div>
+                                        ))}
+                                    </div>
                                   </div>
                                 </div>
                               </div>
