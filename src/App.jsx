@@ -308,33 +308,57 @@ const formatPageName = (path) => {
 };
 
 
-const MetricColumn = ({ title, data, highlightValue }) => (
-  <div className="min-w-0">
-    <p className="text-[9px] font-black uppercase text-slate-500 mb-3 border-b border-slate-700 pb-1 tracking-wider">
-      {title}
-    </p>
-    <div className="space-y-2 max-h-48 overflow-y-auto no-scrollbar">
-      {(data || [])
-        .filter(([, count]) => count > 0)
-        .map(([name, count]) => {
-          const isLatest = highlightValue && name === highlightValue;
+const MetricColumn = ({ title, data, highlightValue }) => {
+  const listRef = useRef(null);
+  const highlightedRowRef = useRef(null);
 
-          return (
-            <div key={name} className="flex justify-between text-[10px] font-bold group">
-              <span className={`truncate pr-2 transition-colors ${isLatest ? 'text-orange-500' : 'text-slate-400 group-hover:text-white'
-                }`}>
-                {/* Now formatPageName is perfectly in scope! */}
-                {formatPageName(name)}
-              </span>
-              <span className={`font-black ${isLatest ? 'text-orange-500' : 'text-white'}`}>
-                {count}
-              </span>
-            </div>
-          );
-        })}
+  useEffect(() => {
+    const list = listRef.current;
+    const row = highlightedRowRef.current;
+    if (!list || !row) return;
+
+    const listBounds = list.getBoundingClientRect();
+    const rowBounds = row.getBoundingClientRect();
+    if (rowBounds.top >= listBounds.top && rowBounds.bottom <= listBounds.bottom) return;
+
+    const rowTop = rowBounds.top - listBounds.top + list.scrollTop;
+    list.scrollTo({
+      top: rowTop - (list.clientHeight - row.offsetHeight) / 2,
+      behavior: 'smooth'
+    });
+  }, [data, highlightValue]);
+
+  return (
+    <div className="min-w-0">
+      <p className="text-[9px] font-black uppercase text-slate-500 mb-3 border-b border-slate-700 pb-1 tracking-wider">
+        {title}
+      </p>
+      <div ref={listRef} className="space-y-2 max-h-48 overflow-y-auto no-scrollbar">
+        {(data || [])
+          .filter(([, count]) => count > 0)
+          .map(([name, count]) => {
+            const isLatest = highlightValue && name === highlightValue;
+
+            return (
+              <div
+                key={name}
+                ref={isLatest ? highlightedRowRef : null}
+                className="flex justify-between text-[10px] font-bold group"
+              >
+                <span className={`truncate pr-2 transition-colors ${isLatest ? 'text-orange-500' : 'text-slate-400 group-hover:text-white'
+                  }`}>
+                  {formatPageName(name)}
+                </span>
+                <span className={`font-black ${isLatest ? 'text-orange-500' : 'text-white'}`}>
+                  {count}
+                </span>
+              </div>
+            );
+          })}
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
 
 // --- Main Application Component ---
