@@ -438,6 +438,7 @@ function App() {
   const autocompleteListenerRef = useRef(null);
   const downloadedImagesRef = useRef(new Set());
   const activeSharesRef = useRef(new Set());
+  const youtubeSyncInProgressRef = useRef(false);
   const REFRESH_INTERVAL_SECONDS = 600;
   const [timeLeft, setTimeLeft] = useState(REFRESH_INTERVAL_SECONDS);
 
@@ -2136,119 +2137,191 @@ Return ONLY this JSON structure:
     refreshAllData();
   };
 
+  const indexUnsubmittedHubVideos = async () => {
+    const videos = await fetchAllRecords('hub_videos');
+    const pageByUrl = new Map();
+
+    for (const video of videos) {
+      if (!video?.id || !video.url) continue;
+
+      const slug = generateCleanSlug(video.title || 'video') || 'video';
+      const pageUrl = `https://www.myjournalview.com/videos/${slug}-${video.id}`;
+      const page = pageByUrl.get(pageUrl) || { url: pageUrl, ids: [], indexed: false };
+      page.ids.push(video.id);
+      page.indexed ||= video.Indexed === true;
+      pageByUrl.set(pageUrl, page);
+    }
+
+    const pendingPages = [...pageByUrl.values()].filter((page) => !page.indexed);
+    let accepted = 0;
+    let tracked = 0;
+    let failed = 0;
+
+    for (let offset = 0; offset < pendingPages.length; offset += 10_000) {
+      const batch = pendingPages.slice(offset, offset + 10_000);
+      try {
+        const response = await fetch('/api/indexnow', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            host: 'www.myjournalview.com',
+            key: '24d0f44fba0b4dc7bf211372ab00f787',
+            keyLocation: 'https://www.myjournalview.com/24d0f44fba0b4dc7bf211372ab00f787.txt',
+            urlList: batch.map((page) => page.url)
+          })
+        });
+        const result = await response.json().catch(() => ({}));
+
+        if (!response.ok || !result.success) {
+          console.error('Video IndexNow batch failed:', result.error || response.status);
+          failed += batch.length;
+          continue;
+        }
+        accepted += batch.length;
+
+        const recordIds = [...new Set(batch.flatMap((page) => page.ids))];
+        const { error: updateError } = await supabaseClient
+          .from('hub_videos')
+          .update({ Indexed: true })
+          .in('id', recordIds);
+
+        if (updateError) {
+          console.error('IndexNow accepted video URLs, but tracking update failed:', updateError);
+          failed += batch.length;
+          continue;
+        }
+
+        tracked += batch.length;
+      } catch (error) {
+        console.error('Video IndexNow request failed:', error);
+        failed += batch.length;
+      }
+    }
+
+    return { pending: pendingPages.length, accepted, tracked, failed };
+  };
+
   const syncYouTubeVideos = async () => {
+    if (youtubeSyncInProgressRef.current) {
+      triggerToast('YouTube sync is already running.');
+      return;
+    }
+
+    youtubeSyncInProgressRef.current = true;
+    let addedCount = 0;
+    let removedCount = 0;
+    let syncError = null;
+    let indexingResult = null;
+    let indexingError = null;
+
     try {
-      triggerToast("Starting YouTube sync...");
-
-      // 1. Fetch existing video URLs from Supabase to prevent duplicates & find deletions
-      const { data: existingRecords, error: fetchError } = await supabaseClient
-        .from('hub_videos')
-        .select('url');
-
-      if (fetchError) throw fetchError;
-
-      // Create a Set for O(1) lookup speed of what's already in the DB
-      const existingUrls = new Set((existingRecords || []).map((record) => record.url));
-      const existingCount = existingRecords?.length || 0;
-
-      // 2. Call backend proxy endpoint (paginated YouTube API)
-      const response = await fetch('/api/sync-youtube', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ targetUrl: 'https://www.youtube.com/@myjournalview' }),
-      });
-
-      // Read raw text first to safely handle empty or HTML error pages (e.g., 504 timeouts)
-      const rawText = await response.text();
-      let responseData;
+      triggerToast('Starting YouTube sync...');
 
       try {
-        responseData = rawText ? JSON.parse(rawText) : {};
-      } catch (parseError) {
-        console.error("Raw server response:", rawText);
-        throw new Error(
-          `Server returned invalid response format (Status: ${response.status}). Check server logs.`,
-          { cause: parseError }
-        );
-      }
+        const existingRecords = await fetchAllRecords('hub_videos');
+        const existingUrls = new Set(existingRecords.map((record) => record.url));
+        const existingCount = existingRecords.length;
 
-      if (!response.ok) {
-        throw new Error(
-          responseData.error ||
-          `HTTP Error ${response.status} - Failed to fetch from YouTube proxy`
-        );
-      }
+        const response = await fetch('/api/sync-youtube', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ targetUrl: 'https://www.youtube.com/@myjournalview' }),
+        });
 
-      const { videos } = responseData;
-
-      if (!videos || !Array.isArray(videos)) {
-        throw new Error(
-          "Invalid response format: 'videos' array missing from server response."
-        );
-      }
-
-      // 3. IDENTIFY & REMOVE OBSOLETE VIDEOS
-      // Create a Set of URLs currently active on the YouTube channel
-      const activeYouTubeUrls = new Set(videos.map((v) => v.url).filter(Boolean));
-
-      // Find database records that are NO LONGER present in the fetched YouTube payload
-      const urlsToDelete = (existingRecords || [])
-        .filter((record) => !activeYouTubeUrls.has(record.url))
-        .map((record) => record.url);
-
-      if (urlsToDelete.length > 0) {
-        triggerToast(`Removing ${urlsToDelete.length} obsolete videos/shorts...`);
-
-        const { error: deleteError } = await supabaseClient
-          .from('hub_videos')
-          .delete()
-          .in('url', urlsToDelete);
-
-        if (deleteError) throw deleteError;
-      }
-
-      // 4. Filter out videos that already exist in the database and map to schema
-      const newVideos = videos
-        .filter((v) => v?.url && !existingUrls.has(v.url))
-        .map((v, index) => ({
-          title: v.title || "Untitled Video",
-          url: v.url,
-          custom_thumbnail_url: v.thumbnail || null,
-          is_active: true,
-          display_order: existingCount + index,
-          // 'id' and 'created_at' are handled automatically by DB defaults
-        }));
-
-      if (newVideos.length === 0) {
-        const deleteMsg = urlsToDelete.length > 0 ? `Removed ${urlsToDelete.length} obsolete videos.` : '';
-        triggerToast(`Sync complete! ${deleteMsg} All ${videos.length} YouTube videos are up-to-date!`);
-
-        // Ensure UI refreshes if deletions happened, even if no new videos were added
-        if (urlsToDelete.length > 0 && typeof refreshAllData === 'function') {
-          refreshAllData();
+        const rawText = await response.text();
+        let responseData;
+        try {
+          responseData = rawText ? JSON.parse(rawText) : {};
+        } catch (parseError) {
+          console.error('Raw server response:', rawText);
+          throw new Error(
+            `Server returned invalid response format (Status: ${response.status}). Check server logs.`,
+            { cause: parseError }
+          );
         }
-        return;
+
+        if (!response.ok) {
+          throw new Error(
+            responseData.error || `HTTP Error ${response.status} - Failed to fetch from YouTube proxy`
+          );
+        }
+
+        const { videos } = responseData;
+        if (!Array.isArray(videos)) {
+          throw new Error("Invalid response format: 'videos' array missing from server response.");
+        }
+
+        const activeYouTubeUrls = new Set(videos.map((video) => video?.url).filter(Boolean));
+        const urlsToDelete = [...new Set(existingRecords
+          .filter((record) => record.url && !activeYouTubeUrls.has(record.url))
+          .map((record) => record.url))];
+
+        if (urlsToDelete.length > 0) {
+          const { error: deleteError } = await supabaseClient
+            .from('hub_videos')
+            .delete()
+            .in('url', urlsToDelete);
+          if (deleteError) throw deleteError;
+          removedCount = urlsToDelete.length;
+        }
+
+        const seenUrls = new Set(existingUrls);
+        const newVideos = [];
+        for (const video of videos) {
+          if (!video?.url || seenUrls.has(video.url)) continue;
+          seenUrls.add(video.url);
+          newVideos.push({
+            title: video.title || 'Untitled Video',
+            url: video.url,
+            custom_thumbnail_url: video.thumbnail || null,
+            is_active: true,
+            display_order: existingCount + newVideos.length,
+          });
+        }
+
+        if (newVideos.length > 0) {
+          triggerToast(`Inserting ${newVideos.length} new videos...`);
+          const { error: insertError } = await supabaseClient
+            .from('hub_videos')
+            .insert(newVideos);
+          if (insertError) throw insertError;
+          addedCount = newVideos.length;
+        }
+      } catch (error) {
+        syncError = error;
+        console.error('YouTube Sync Error:', error);
       }
 
-      triggerToast(`Inserting ${newVideos.length} new videos (out of ${videos.length} found)...`);
+      // Always scan the database after sync (or a sync error), so pending rows
+      // can be retried and newly inserted videos are included.
+      try {
+        indexingResult = await indexUnsubmittedHubVideos();
+      } catch (error) {
+        indexingError = error;
+        console.error('Video IndexNow scan failed:', error);
+      }
 
-      // 5. Insert strictly new records into hub_videos table
-      const { error: insertError } = await supabaseClient
-        .from('hub_videos')
-        .insert(newVideos);
-
-      if (insertError) throw insertError;
-
-      triggerToast(`Successfully synced! Added ${newVideos.length} videos, removed ${urlsToDelete.length}.`);
-
-      // Optional: Trigger state refresh if function exists in your component context
-      if (typeof refreshAllData === 'function') {
+      if ((addedCount > 0 || removedCount > 0) && typeof refreshAllData === 'function') {
         refreshAllData();
       }
 
-    } catch (error) {
-      console.error("YouTube Sync Error:", error);
-      triggerToast(`Sync Error: ${error.message}`);
+      const summary = syncError
+        ? [`YouTube sync failed: ${syncError.message}`]
+        : [`YouTube sync complete: added ${addedCount}, removed ${removedCount}`];
+
+      if (indexingError) {
+        summary.push(`IndexNow scan failed: ${indexingError.message}`);
+      } else if (indexingResult?.pending === 0) {
+        summary.push('All video pages are already indexed.');
+      } else if (indexingResult) {
+        summary.push(
+          `IndexNow accepted ${indexingResult.accepted}; marked ${indexingResult.tracked} as indexed; ${indexingResult.failed} remain pending.`
+        );
+      }
+
+      triggerToast(summary.join('. '));
+    } finally {
+      youtubeSyncInProgressRef.current = false;
     }
   };
 

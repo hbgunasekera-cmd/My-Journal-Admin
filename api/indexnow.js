@@ -2,6 +2,7 @@ import { requireTrustedMutation } from '../server/api-security.js';
 
 const EXPECTED_HOST = 'www.myjournalview.com';
 const EXPECTED_KEY = '24d0f44fba0b4dc7bf211372ab00f787';
+const MAX_URLS_PER_REQUEST = 10_000;
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -15,7 +16,7 @@ export default async function handler(req, res) {
   if (
     host !== EXPECTED_HOST || key !== EXPECTED_KEY ||
     keyLocation !== `https://${EXPECTED_HOST}/${EXPECTED_KEY}.txt` ||
-    !Array.isArray(urlList) || urlList.length === 0 || urlList.length > 10 ||
+    !Array.isArray(urlList) || urlList.length === 0 || urlList.length > MAX_URLS_PER_REQUEST ||
     urlList.some((value) => {
       try {
         const url = new URL(value);
