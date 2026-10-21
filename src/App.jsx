@@ -1930,11 +1930,16 @@ Return only JSON matching the provided schema. Keep the information concise and 
               type: "OBJECT",
               properties: {
                 location: { type: "STRING" },
+                elevation: { type: "NUMBER" },
+                elevation_label: { type: "STRING" },
                 vertical_measurement_m: { type: "NUMBER" },
+                vertical_measurement: { type: "NUMBER" },
                 vertical_measurement_label: { type: "STRING" },
                 vertical_measurement_basis: { type: "STRING" },
                 elevation_m: { type: "NUMBER" },
+                mountain_height: { type: "NUMBER" },
                 mountain_height_m: { type: "NUMBER" },
+                waterfall_height: { type: "NUMBER" },
                 waterfall_height_m: { type: "NUMBER" },
                 difficulty: { type: "STRING" },
                 vehicle_access: { type: "STRING" },
@@ -2247,14 +2252,31 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
         throw new Error(`Could not build the article because a sourced road distance and travel time from the nearest main town were not available for ${place.place_name}. Check the locality and retry.`);
       }
       for (const key of [
-        'elevation_m', 'mountain_height_m', 'waterfall_height_m',
-        'vertical_measurement_m', 'vertical_measurement_label', 'vertical_measurement_basis'
+        'elevation', 'elevation_m', 'mountain_height', 'mountain_height_m',
+        'waterfall_height', 'waterfall_height_m', 'vertical_measurement',
+        'vertical_measurement_m', 'vertical_measurement_label', 'elevation_label',
+        'vertical_measurement_basis'
       ]) delete quickFacts[key];
       if (verticalValue !== undefined) {
+        const measurementKey = measurement.field.replace(/_m$/, '');
+        // Keep both unit-bearing keys and the legacy display keys. The public article
+        // renderer appends the unit, so its numeric value key must also be populated.
+        quickFacts.elevation = verticalValue;
+        quickFacts[measurementKey] = verticalValue;
         quickFacts[measurement.field] = verticalValue;
+        quickFacts.vertical_measurement = verticalValue;
         quickFacts.vertical_measurement_m = verticalValue;
         quickFacts.vertical_measurement_label = measurement.label;
+        quickFacts.elevation_label = measurement.label;
         quickFacts.vertical_measurement_basis = verticalMeasurementBasis;
+        aiJson.elevation = verticalValue;
+        aiJson[measurementKey] = verticalValue;
+        aiJson[measurement.field] = verticalValue;
+        aiJson.vertical_measurement = verticalValue;
+        aiJson.vertical_measurement_m = verticalValue;
+        aiJson.vertical_measurement_label = measurement.label;
+        aiJson.elevation_label = measurement.label;
+        aiJson.vertical_measurement_basis = verticalMeasurementBasis;
       }
 
       aiJson.fact_sources = Array.isArray(data.factSources) ? data.factSources : [];
