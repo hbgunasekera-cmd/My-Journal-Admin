@@ -1871,7 +1871,7 @@ FACT-CHECK SCOPE — USE WEB-VERIFIED FACTS ONLY IN THESE ARTICLE SECTIONS:
 - Expedition Highlights: 'highlights'.
 - Expedition Journal: 'story'. Write in a personal, reflective first-person editorial voice, but frame it as how I would plan or experience the outing. Never claim I actually visited, saw, heard, or photographed the place.
 - History & Local Heritage: 'history'.
-- Quick Answers & AI Engine Discovery Index: 'target_keywords', 'faqs', and 'quick_facts'. Keep factual claims source-supported. Omit unsupported numeric fields such as elevation_m; do not substitute zero.
+- Quick Answers & AI Engine Discovery Index: 'target_keywords', 'faqs', and 'quick_facts'. Keep factual claims source-supported. Include a source-checked vertical measurement for every location: waterfall height for waterfalls, mountain height (summit elevation) for mountains, and site elevation for other categories. Do not use a different category's measurement label or substitute zero.
 - Use only facts supported by the supplied research in those sections. If sources disagree, omit the disputed claim. Never write "not verified", "not confirmed", "unknown", or similar source-gap placeholders. If a detail is missing, use another supported fact about the place or give a direct, useful answer without repeating generic "check local guidance" advice.
 
 EDITORIAL SECTIONS:
@@ -1880,19 +1880,18 @@ EDITORIAL SECTIONS:
 - Do not invent site-specific distances, schedules, fees, road surfaces, facilities, weather, signal, hazards, access rules, or drone permissions. Keep any numeric or legal claim out unless it belongs to a fact-checked section and is supported by the research.
 - Keep subjective ratings clearly editorial. Label photography, route, and drone suggestions as recommendations, not observed conditions or actual captures.
 - Avoid these clichés: "tapestry," "realm," "nestled," "unveil," "symphony," "breathtaking," "embark," and "delve." Use concise, natural language.
-- Avoid these clichés: "tapestry," "realm," "nestled," "unveil," "symphony," "breathtaking," "embark," and "delve." Use concise, natural language.
 
 Return only JSON matching the provided schema. Keep the information concise and useful:
 - 'target_keywords': 3-5 relevant search phrases; do not add unsupported factual claims.
 - 'seo_intro': a concise, accurate, location-specific 1-2 sentence description.
 - 'faqs': 3-5 useful questions with direct answers grounded in research. Prefer useful location details; omit unsupported specifics rather than answering every question with a reminder to check elsewhere.
-- 'quick_facts': include source-supported facts. Omit unsupported elevation_m and other numeric facts; do not use zero. For a text rating such as difficulty when no reliable rating is available, give a short first-person planning perspective, not a generic research disclaimer.
+- 'quick_facts': include the category-appropriate vertical measurement backed by reliable sources: waterfall_height_m for waterfalls, mountain_height_m for mountains, or elevation_m for all other locations. Also set vertical_measurement_m to the same value and vertical_measurement_label to 'Waterfall height', 'Mountain height', or 'Elevation'. Keep difficulty, time_required, vehicle_access, motorcycle_friendly, and mobile_coverage concise, neutral, and non-first-person. Use a source-supported difficulty rating only; if none is published, say 'Route-dependent; varies with route length and surface.' Give time required only when a source supports an estimate; otherwise use a concise route/pace qualifier. State access and signal information directly, without first-person narration.
 - 'why_visit': a factual, source-supported summary; make suitability notes clearly subjective and specific to the confirmed features.
 - 'story': about 250-300 words in a personal, reflective first-person editorial voice. Describe how I would approach and enjoy the outing using confirmed features, but never present it as a visit that actually happened.
 - 'explorer_rating': editorial estimates, not measured facts; do not imply they are official ratings.
 - 'photography_notes': label recommendations as suggestions and avoid claiming observed light, weather, or conditions.
 - 'drone_notes': write cautious first-person photography advice; do not claim permission, launch areas, or flight conditions.
-- 'route_report': include factual starting point, distance_km, road condition, hazards, or travel time only when supported. Omit unsupported numeric values; use concrete first-person route-planning advice for other text fields instead of disclaimer-like reminders.
+- 'route_report': starting_point must contain only the nearest main town/city serving the locality, not the trailhead. Give distance_km and travel_time as the normal road route from that town to the location (never straight-line distance); include that town's name in travel_time. Include route conditions only when supported. Use concise, neutral wording.
 - 'wish_i_knew': give specific, memorable preparation tips in first person; avoid repeating generic authority-check instructions.
 - 'best_time_to_visit': include specific months or hours only when supported; otherwise give a useful subjective planning approach such as choosing daylight and leaving a flexible schedule.
 - 'history': include source-supported history and local heritage details. If none are found, give verified geographic or place-category context without saying history could not be verified.
@@ -1931,7 +1930,11 @@ Return only JSON matching the provided schema. Keep the information concise and 
               type: "OBJECT",
               properties: {
                 location: { type: "STRING" },
+                vertical_measurement_m: { type: "NUMBER" },
+                vertical_measurement_label: { type: "STRING" },
                 elevation_m: { type: "NUMBER" },
+                mountain_height_m: { type: "NUMBER" },
+                waterfall_height_m: { type: "NUMBER" },
                 difficulty: { type: "STRING" },
                 vehicle_access: { type: "STRING" },
                 motorcycle_friendly: { type: "STRING" },
@@ -2082,20 +2085,20 @@ Return only JSON matching the provided schema. Keep the information concise and 
         question: 'What would make this visit worthwhile?',
         answer: `I’d focus on the confirmed features of ${place.place_name}, give the visit an unhurried pace, and leave space to explore details that interest me.`,
         history: `${place.place_name} is a ${String(place.category || 'location').toLowerCase()} in ${place.locality || 'Sri Lanka'}. I’d use on-site interpretation and local heritage material to add historical context to the visit.`,
-        difficulty: 'I’d plan for a steady pace, comfortable footwear, and breaks; the effort depends on the route I choose.',
-        vehicle_access: 'I’d plan around the final approach, save the route offline, and leave a flexible buffer for the journey.',
-        motorcycle_friendly: 'For a motorcycle trip, I’d keep the pace conservative, pack for changing conditions, and plan a secure stop before setting out.',
-        mobile_coverage: 'I’d save maps and essential details offline before leaving; it makes the day easier if signal drops.',
+        difficulty: 'Route-dependent; difficulty varies with route length, surface, and conditions.',
+        vehicle_access: 'Access depends on the approach road and any site-specific restrictions.',
+        motorcycle_friendly: 'Route-dependent; consider the road surface and parking available at the access point.',
+        mobile_coverage: 'Coverage varies by carrier; save maps and essential details for offline use.',
         recommended_time: 'I’d choose a daylight slot and leave a flexible window so the visit does not feel rushed.',
-        time_required: 'I’d leave room for the approach, time at the site, and a relaxed return instead of squeezing this stop into a tight schedule.',
+        time_required: 'Time varies with the chosen route and pace; allow time for both the approach and the visit.',
         best_months: 'I’d choose dates around the kind of weather I want and keep the plan flexible rather than relying on a fixed month.',
         best_time_of_day: 'I’d aim for daylight that suits the pace and photographs I have in mind.',
         avoid: 'I’d avoid a rushed schedule and leave room to adjust the plan if the journey takes longer than expected.',
-        starting_point: 'I’d pin the destination before leaving and make sure the final approach is clear in my route plan.',
-        travel_time: 'I’d allow a buffer for the approach and any stops along the way rather than planning a tight arrival.',
-        road_condition: 'I’d match my pace to the road surface and conditions on the day, leaving extra time for a relaxed drive.',
-        hazards: 'I’d stay attentive to footing, changing weather, and posted instructions throughout the outing.',
-        fuel_parking: 'I’d plan fuel and parking before departure and keep the schedule flexible around the final stop.',
+        starting_point: undefined,
+        travel_time: undefined,
+        road_condition: 'Road surface and conditions vary by route.',
+        hazards: 'Footing, weather, and posted site instructions can affect the route.',
+        fuel_parking: 'Fuel and parking options depend on the selected approach.',
         weather_risk: 'I’d pack a light weather layer and adjust the outing if conditions make the journey uncomfortable.',
         child_friendly: 'With children, I’d keep the plan flexible, bring water and snacks, and make time for breaks.',
         restrictions: 'I’d leave drone use out of the plan unless current aviation and site rules clearly allow it.',
@@ -2122,7 +2125,10 @@ Return only JSON matching the provided schema. Keep the information concise and 
       const sanitizeArticle = (value, field = '') => {
         if (typeof value === 'string') {
           if (value.trim() && !sourceGap.test(value) && !genericGuidance.test(value.trim())) return value;
-          if (['elevation_m', 'distance_km', 'target_keywords', 'highlights'].includes(field)) return undefined;
+          if ([
+            'elevation_m', 'mountain_height_m', 'waterfall_height_m', 'vertical_measurement_m',
+            'distance_km', 'target_keywords', 'highlights', 'starting_point', 'travel_time'
+          ].includes(field)) return undefined;
           return articleGuidance[field]
             || `I’d keep ${field.replace(/_/g, ' ') || 'this part of the plan'} flexible and build my visit around the features of ${place.place_name} described in this guide.`;
         }
@@ -2137,6 +2143,61 @@ Return only JSON matching the provided schema. Keep the information concise and 
         return value;
       };
       aiJson = sanitizeArticle(aiJson);
+
+      const quickFacts = aiJson.quick_facts && typeof aiJson.quick_facts === 'object'
+        ? aiJson.quick_facts
+        : (aiJson.quick_facts = {});
+      const category = String(place.category || '').trim().toLowerCase();
+      const measurement = category === 'waterfall'
+        ? { field: 'waterfall_height_m', label: 'Waterfall height', minimum: 0 }
+        : category === 'mountain'
+          ? { field: 'mountain_height_m', label: 'Mountain height', minimum: 0 }
+          : { field: 'elevation_m', label: 'Elevation', minimum: 0 };
+      const getMeasurement = (value) => {
+        if (value === null || value === undefined || String(value).trim() === '') return undefined;
+        const numeric = typeof value === 'number' ? value : Number(value);
+        return Number.isFinite(numeric) && numeric > measurement.minimum ? numeric : undefined;
+      };
+      const verticalValue = getMeasurement(quickFacts[measurement.field])
+        ?? (quickFacts.vertical_measurement_label === measurement.label
+          ? getMeasurement(quickFacts.vertical_measurement_m)
+          : undefined);
+      if (verticalValue === undefined) {
+        throw new Error(`Could not build the article because the research did not provide a confirmed ${measurement.label.toLowerCase()} for ${place.place_name}. Check the place category and retry.`);
+      }
+      const routeReport = aiJson.route_report && typeof aiJson.route_report === 'object'
+        ? aiJson.route_report
+        : {};
+      const startingTown = typeof routeReport.starting_point === 'string'
+        ? routeReport.starting_point.trim()
+        : '';
+      const routeDistance = Number(routeReport.distance_km);
+      const routeTravelTime = typeof routeReport.travel_time === 'string'
+        ? routeReport.travel_time.trim()
+        : '';
+      const startingTownName = startingTown.split(',')[0]
+        .replace(/\s+(?:district|town|city)$/i, '')
+        .trim()
+        .toLowerCase();
+      if (
+        !startingTown
+        || !Number.isFinite(routeDistance)
+        || routeDistance <= 0
+        || !routeTravelTime
+        || !startingTownName
+        || !routeTravelTime.toLowerCase().includes(startingTownName)
+      ) {
+        throw new Error(`Could not build the article because a sourced road distance and travel time from the nearest main town were not available for ${place.place_name}. Check the locality and retry.`);
+      }
+      for (const key of [
+        'elevation_m', 'mountain_height_m', 'waterfall_height_m',
+        'vertical_measurement_m', 'vertical_measurement_label'
+      ]) delete quickFacts[key];
+      if (verticalValue !== undefined) {
+        quickFacts[measurement.field] = verticalValue;
+        quickFacts.vertical_measurement_m = verticalValue;
+        quickFacts.vertical_measurement_label = measurement.label;
+      }
 
       aiJson.fact_sources = Array.isArray(data.factSources) ? data.factSources : [];
       aiJson.fact_checked_at = typeof data.factCheckedAt === 'string' ? data.factCheckedAt : null;
