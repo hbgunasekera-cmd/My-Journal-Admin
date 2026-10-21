@@ -947,18 +947,50 @@ function App() {
   // 2. REVISED INTEGRATION SHARING FUNCTIONS
   // ==========================================
 
+  const isArticleFactCheckedForPlace = (article, place) => {
+    const savedPlace = article?.fact_check_location;
+    const hasSources = Array.isArray(article?.fact_sources) && article.fact_sources.some((source) => {
+      if (typeof source?.url !== 'string') return false;
+      try {
+        return ['http:', 'https:'].includes(new URL(source.url).protocol);
+      } catch {
+        return false;
+      }
+    });
+    if (!article?.fact_checked_at || !hasSources || !savedPlace) {
+      return false;
+    }
+
+    const normalize = (value) => String(value || '').trim().toLowerCase();
+    if (
+      normalize(savedPlace.place_name) !== normalize(place?.place_name)
+      || normalize(savedPlace.category) !== normalize(place?.category)
+      || normalize(savedPlace.locality) !== normalize(place?.locality)
+    ) return false;
+
+    const toCoordinate = (value) => value == null || String(value).trim() === '' ? Number.NaN : Number(value);
+    const savedLatitude = toCoordinate(savedPlace.latitude);
+    const savedLongitude = toCoordinate(savedPlace.longitude);
+    const latitude = toCoordinate(place?.latitude);
+    const longitude = toCoordinate(place?.longitude);
+    const savedHasCoordinates = Number.isFinite(savedLatitude) && Number.isFinite(savedLongitude);
+    const hasCoordinates = Number.isFinite(latitude) && Number.isFinite(longitude);
+    return savedHasCoordinates === hasCoordinates
+      && (!savedHasCoordinates || (savedLatitude === latitude && savedLongitude === longitude));
+  };
+
   // Reuse a short, location-specific summary across the Social tab and every share action.
   const getSocialDescription = (place) => {
     const article = place?.ai_article || {};
+    const hasGroundedSources = isArticleFactCheckedForPlace(article, place);
     const storedDescription = typeof article.description === 'string'
       ? article.description.trim()
       : '';
-    const source = [
-      article.history,
+    const source = hasGroundedSources ? [
+      article.seo_intro,
       article.why_visit?.summary,
-      storedDescription.length <= 260 ? storedDescription : '',
-      article.seo_intro
-    ].find((value) => typeof value === 'string' && value.trim());
+      storedDescription.length <= 260 ? storedDescription : ''
+    ].find((value) => typeof value === 'string' && value.trim()) : '';
     const placeName = place?.place_name || 'This location';
     const locality = typeof place?.locality === 'string' ? place.locality.trim() : '';
     const location = locality
@@ -1824,34 +1856,34 @@ function App() {
 
 
   const generateTravelArticle = async (place) => {
-    const contextPrompt = `Write an authentic backcountry field report and first-person travel journal entry for a ${place.category} named "${place.place_name}" located in ${place.locality || 'Sri Lanka'}.
+    const contextPrompt = `Create a useful, location-specific travel guide for the ${place.category} "${place.place_name}" in ${place.locality || 'Sri Lanka'}.
 
-CRITICAL TONE & STYLE INSTRUCTIONS:
-- Narrative Voice: Write as an authentic human explorer sharing a grounded, passionate, and conversational travel diary.
-- Sensory Focus: Emphasize vivid sensory details (e.g., mist in the air, the roar of cascading water, changing light).
-- Authentic Journey: Capture two-wheel travel realities—navigating steep ascents, broken pavement, potholes, or off-road tracks on a commuter scooter or motorcycle—along with real weather and road challenges.
-- Photography Workflow: Frame visual notes around capturing photos on an iPhone 12 Pro, refined with minimal color balancing using the native iOS photo editor (no heavy filters or LUTs).
-- Drone Operations: Include practical aerial notes for a compact DJI Neo 2 drone (ideal for waterfall shots), noting wind resistance limitations in misty/cloudy conditions, and respecting drone bans in national parks (e.g., Horton Plains, Knuckles) or exposed mountain summits.
-- Language Constraints: STRICTLY AVOID cliché AI buzzwords. Never use: "tapestry," "realm," "nestled," "unveil," "symphony," "breathtaking," "embark," or "delve." Use natural, unpretentious vocabulary.
+FACTUAL ACCURACY IS REQUIRED:
+- A source-grounded research brief and web source list will be supplied after this prompt. Use only facts supported by that brief. Do not invent, infer, or embellish factual details.
+- Never guess or state an elevation, peak ranking, distance, travel time, fee, date, district, history, route condition, opening schedule, access/permit rule, phone signal, weather pattern, or drone restriction.
+- Rankings and other important numeric claims may be used only when the research brief says they are corroborated. If a numeric value is not confirmed, omit its optional numeric field. For unavailable string details, say "Not verified in the available sources" or recommend checking the responsible authority.
+- If sources disagree, do not choose a version; explain briefly that sources conflict or omit the claim.
+- Do not claim the writer visited the place. Do not invent first-person experiences, conversations, weather, sensory observations, travel events, or a photograph that was actually taken. Make the story a practical, factual guide, not a fictional diary.
+- Separate documented facts from clearly labeled photography suggestions and subjective ratings. Keep any current safety, access, or legal guidance conservative and grounded in an official source.
+- Avoid these clichés: "tapestry," "realm," "nestled," "unveil," "symphony," "breathtaking," "embark," and "delve." Use concise, natural language.
 
-REQUIRED DATA SECTIONS:
-Generate a strict JSON object matching the exact schema provided.
-- 'target_keywords': Array of 3-5 strategic SEO long-tail keywords for search targeting.
-- 'seo_intro': A punchy 2-3 sentence SEO-optimized introductory hook summarizing the spot and setting the stage.
-- 'faqs': Array of 3-5 clear Q&A pairs covering key logistics (access, permits, best times, safety).
-- 'quick_facts': Core scannable telemetry (elevation, difficulty, access, mobile signal).
-- 'why_visit': Pros and cons of visiting.
-- 'story': A captivating 300-word first-person narrative about the visit and journey.
-- 'explorer_rating': Ratings out of 10 for various factors.
-- 'photography_notes': Camera, lens, time, and editing tips.
-- 'drone_notes': Flight conditions, wind, obstacles, and launch points.
-- 'route_report': Starting point, distance, road condition, and hazards.
-- 'wish_i_knew': Array of 3-4 highly practical tips for before visiting.
-- 'best_time': Best month and time of day.
-- 'history': VERY BRIEF (1-2 sentences) historical context.
-- 'field_notes': Safety, water, and conservation rules.
-- 'behind_the_shot': Details on one specific photograph capture.
-- 'highlights': Array of key visual or expedition highlights.`;
+Return only JSON matching the provided schema. Keep the information concise and useful:
+- 'target_keywords': 3-5 relevant search phrases; do not add unsupported factual claims.
+- 'seo_intro': a concise, accurate, location-specific 1-2 sentence description.
+- 'faqs': 3-5 useful questions; if access, permits, timing, or safety are not verified, clearly say so and direct readers to the responsible authority.
+- 'quick_facts': include only verified facts. Omit elevation_m when the value is unverified; do not use zero as a substitute.
+- 'why_visit': a sourced summary and clearly subjective suitability notes.
+- 'story': about 250-300 words of factual visitor information, with no fabricated first-person visit.
+- 'explorer_rating': editorial estimates, not measured facts; do not imply they are official ratings.
+- 'photography_notes': label recommendations as suggestions and avoid claiming observed light, weather, or conditions.
+- 'drone_notes': provide only sourced restrictions or clearly recommend checking official rules; do not invent launch sites or flight conditions.
+- 'route_report': use verified starting point, distance_km, road condition, hazards, and travel time only. Omit unsupported distance_km rather than using zero.
+- 'wish_i_knew': practical tips supported by evidence or clearly framed as general preparation advice.
+- 'best_time_to_visit': give specific months or hours only when the research supports them.
+- 'history': include only sourced historical facts; otherwise state that reliable history was not confirmed.
+- 'field_notes': distinguish verified conservation/safety rules from general advice.
+- 'behind_the_shot': do not invent a photo or capture time. Use 'No actual capture documented' for captured_time unless a source verifies it; describe any composition as a suggestion, not as a photograph already taken.
+- 'highlights': only confirmed place features.`;
 
     const requestBody = {
       contents: [{
@@ -1859,8 +1891,8 @@ Generate a strict JSON object matching the exact schema provided.
       }],
       generationConfig: {
         responseMimeType: "application/json",
-        temperature: 0.75,
-        maxOutputTokens: 65536, // Prevents JSON truncation on large responses
+        temperature: 0.2,
+        maxOutputTokens: 8192,
         responseSchema: {
           type: "OBJECT",
           properties: {
@@ -1989,7 +2021,17 @@ Generate a strict JSON object matching the exact schema provided.
       const response = await fetch('/api/generate-article', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestBody)
+        body: JSON.stringify({
+          ...requestBody,
+          // Keep the source search tied to the selected place, including coordinates when available.
+          factCheck: {
+            placeName: place.place_name,
+            category: place.category,
+            locality: place.locality,
+            latitude: place.latitude,
+            longitude: place.longitude
+          }
+        })
       });
 
       const data = await response.json();
@@ -2015,6 +2057,16 @@ Generate a strict JSON object matching the exact schema provided.
       } catch (parseError) {
         throw new Error(`Failed to parse AI response JSON: ${parseError.message}`, { cause: parseError });
       }
+
+      aiJson.fact_sources = Array.isArray(data.factSources) ? data.factSources : [];
+      aiJson.fact_checked_at = typeof data.factCheckedAt === 'string' ? data.factCheckedAt : null;
+      aiJson.fact_check_location = {
+        place_name: place.place_name,
+        category: place.category,
+        locality: place.locality,
+        latitude: place.latitude,
+        longitude: place.longitude
+      };
 
       await saveArticleToDatabase(place, aiJson);
 
@@ -2409,7 +2461,10 @@ Return ONLY this JSON structure:
     if (newStory !== null && newStory !== currentStory) {
       const updatedData = {
         ...place.ai_article,
-        story: newStory
+        story: newStory,
+        fact_sources: [],
+        fact_checked_at: null,
+        fact_check_location: null
       };
       saveArticleToDatabase(place, updatedData);
     }
@@ -3632,6 +3687,17 @@ Return ONLY this JSON structure:
                 {(processedPlaces || []).map(p => {
                   const dynamicDistance = (L.latLng(sortCenter.lat, sortCenter.lng).distanceTo(L.latLng(p.latitude, p.longitude)) / 1000).toFixed(1);
                   const hasArticle = p.ai_article && Object.keys(p.ai_article).length > 0;
+                  const factSources = Array.isArray(p.ai_article?.fact_sources)
+                    ? p.ai_article.fact_sources.filter((source) => {
+                      if (typeof source?.url !== 'string') return false;
+                      try {
+                        return ['http:', 'https:'].includes(new URL(source.url).protocol);
+                      } catch {
+                        return false;
+                      }
+                    })
+                    : [];
+                  const hasFactCheck = isArticleFactCheckedForPlace(p.ai_article, p);
 
                   return (
                     <div key={p.id} className="bg-white rounded-[1.5rem] border border-slate-200 shadow-sm overflow-hidden flex flex-col group relative hover:shadow-md transition-all">
@@ -3759,6 +3825,32 @@ Return ONLY this JSON structure:
                             </select>
                           </div>
                         </div>
+
+                        {hasArticle && (
+                          <details className={`rounded-lg px-2.5 py-2 text-[8px] ${hasFactCheck ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+                            <summary className="cursor-pointer font-black uppercase tracking-wide">
+                              {hasFactCheck ? `Source-grounded · ${factSources.length} web sources` : 'Article has not been source-checked'}
+                            </summary>
+                            {hasFactCheck ? (
+                              <ul className="mt-2 space-y-1.5">
+                                {factSources.map((source, index) => (
+                                  <li key={`${source.url}-${index}`}>
+                                    <a
+                                      href={source.url}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="underline underline-offset-2 hover:text-emerald-900"
+                                    >
+                                      {source.title || source.url}
+                                    </a>
+                                  </li>
+                                ))}
+                              </ul>
+                            ) : (
+                              <p className="mt-1.5 leading-relaxed">Rebuild this article with the fact-check button below before sharing its specific claims.</p>
+                            )}
+                          </details>
+                        )}
                       </div>
 
                       {/* Action Footer - Organized & Symmetrical */}
@@ -3804,6 +3896,23 @@ Return ONLY this JSON structure:
                         >
                           <Icon name={hasArticle ? "file-text" : "sparkles"} className="w-4 h-4" />
                         </button>
+
+                        {hasArticle && (
+                          <button
+                            onClick={async () => {
+                              if (!window.confirm(`Rebuild the article for ${p.place_name} using source-checked facts? The current article will be replaced only if generation succeeds.`)) return;
+                              try {
+                                await generateTravelArticle(p);
+                              } catch {
+                                // The generator displays the failure in the dashboard toast.
+                              }
+                            }}
+                            className="w-8 h-8 rounded-xl flex items-center justify-center hover:bg-white hover:shadow-sm transition-all text-emerald-600"
+                            title="Rebuild with web fact check"
+                          >
+                            <Icon name="shield-check" className="w-4 h-4" />
+                          </button>
+                        )}
 
 
                         {hasArticle && (

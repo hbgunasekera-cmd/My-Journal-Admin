@@ -1,4 +1,9 @@
 {
+  "functions": {
+    "api/generate-article.js": {
+      "maxDuration": 60
+    }
+  },
   "crons": [
     {
       "path": "/api/cron-publish",
