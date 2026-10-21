@@ -1871,8 +1871,8 @@ FACT-CHECK SCOPE — USE WEB-VERIFIED FACTS ONLY IN THESE ARTICLE SECTIONS:
 - Expedition Highlights: 'highlights'.
 - Expedition Journal: 'story'. Write in a personal, reflective first-person editorial voice, but frame it as how I would plan or experience the outing. Never claim I actually visited, saw, heard, or photographed the place.
 - History & Local Heritage: 'history'.
-- Quick Answers & AI Engine Discovery Index: 'target_keywords', 'faqs', and 'quick_facts'. Keep factual claims source-supported. Include a source-checked vertical measurement for every location: waterfall height for waterfalls, mountain height (summit elevation) for mountains, and site elevation for other categories. Do not use a different category's measurement label or substitute zero.
-- Use only facts supported by the supplied research in those sections. If sources disagree, omit the disputed claim. Never write "not verified", "not confirmed", "unknown", or similar source-gap placeholders. If a detail is missing, use another supported fact about the place or give a direct, useful answer without repeating generic "check local guidance" advice.
+- Quick Answers & AI Engine Discovery Index: 'target_keywords', 'faqs', and 'quick_facts'. Prefer source-supported facts. Always provide a category-appropriate vertical measurement: waterfall height for waterfalls, mountain height (summit elevation) for mountains, and site elevation for other categories. If web research cannot confirm the measurement, use the AI model's best estimate, mark its basis as 'AI estimate', and do not imply it is web-verified. Do not use a different category's measurement label or substitute zero.
+- Use only facts supported by the supplied research in those sections. The vertical measurement is the exception: if sources do not corroborate it, ignore any unverified web figure and supply a rounded best estimate from the model's own learned geographic knowledge, marked 'AI estimate'. Do not use web-source facts as the basis for that fallback estimate. If sources disagree about other claims, omit the disputed claim. Never write "not verified", "not confirmed", "unknown", or similar source-gap placeholders. If a detail is missing, use another supported fact about the place or give a direct, useful answer without repeating generic "check local guidance" advice.
 
 EDITORIAL SECTIONS:
 - For all other fields, write detailed first-person recommendations and opinions in a natural travel-editor voice. Use prospective language such as "I’d plan", "I’d bring", and "I’d frame"; do not imply a real visit or actual observation.
@@ -1885,7 +1885,7 @@ Return only JSON matching the provided schema. Keep the information concise and 
 - 'target_keywords': 3-5 relevant search phrases; do not add unsupported factual claims.
 - 'seo_intro': a concise, accurate, location-specific 1-2 sentence description.
 - 'faqs': 3-5 useful questions with direct answers grounded in research. Prefer useful location details; omit unsupported specifics rather than answering every question with a reminder to check elsewhere.
-- 'quick_facts': include the category-appropriate vertical measurement backed by reliable sources: waterfall_height_m for waterfalls, mountain_height_m for mountains, or elevation_m for all other locations. Also set vertical_measurement_m to the same value and vertical_measurement_label to 'Waterfall height', 'Mountain height', or 'Elevation'. Keep difficulty, time_required, vehicle_access, motorcycle_friendly, and mobile_coverage concise, neutral, and non-first-person. Use a source-supported difficulty rating only; if none is published, say 'Route-dependent; varies with route length and surface.' Give time required only when a source supports an estimate; otherwise use a concise route/pace qualifier. State access and signal information directly, without first-person narration.
+- 'quick_facts': always include one vertical measurement in metres: waterfall_height_m for waterfalls, mountain_height_m for mountains, or elevation_m for all other locations. Also set vertical_measurement_m to the same value, vertical_measurement_label to 'Waterfall height', 'Mountain height', or 'Elevation', and vertical_measurement_basis to 'Web-verified' or 'AI estimate'. Prefer a researched value supported by reliable sources. If research cannot confirm one, use your best estimate from model knowledge, round to avoid false precision, and mark it 'AI estimate'. Keep difficulty, time_required, vehicle_access, motorcycle_friendly, and mobile_coverage concise, neutral, and non-first-person. Use a source-supported difficulty rating only; if none is published, say 'Route-dependent; varies with route length and surface.' Give time required only when a source supports an estimate; otherwise use a concise route/pace qualifier. State access and signal information directly, without first-person narration.
 - 'why_visit': a factual, source-supported summary; make suitability notes clearly subjective and specific to the confirmed features.
 - 'story': about 250-300 words in a personal, reflective first-person editorial voice. Describe how I would approach and enjoy the outing using confirmed features, but never present it as a visit that actually happened.
 - 'explorer_rating': editorial estimates, not measured facts; do not imply they are official ratings.
@@ -1932,6 +1932,7 @@ Return only JSON matching the provided schema. Keep the information concise and 
                 location: { type: "STRING" },
                 vertical_measurement_m: { type: "NUMBER" },
                 vertical_measurement_label: { type: "STRING" },
+                vertical_measurement_basis: { type: "STRING" },
                 elevation_m: { type: "NUMBER" },
                 mountain_height_m: { type: "NUMBER" },
                 waterfall_height_m: { type: "NUMBER" },
@@ -2148,9 +2149,9 @@ Return only JSON matching the provided schema. Keep the information concise and 
         ? aiJson.quick_facts
         : (aiJson.quick_facts = {});
       const category = String(place.category || '').trim().toLowerCase();
-      const measurement = category === 'waterfall'
+      const measurement = category.includes('waterfall')
         ? { field: 'waterfall_height_m', label: 'Waterfall height', minimum: 0 }
-        : category === 'mountain'
+        : category.includes('mountain')
           ? { field: 'mountain_height_m', label: 'Mountain height', minimum: 0 }
           : { field: 'elevation_m', label: 'Elevation', minimum: 0 };
       const getMeasurement = (value) => {
@@ -2158,12 +2159,68 @@ Return only JSON matching the provided schema. Keep the information concise and 
         const numeric = typeof value === 'number' ? value : Number(value);
         return Number.isFinite(numeric) && numeric > measurement.minimum ? numeric : undefined;
       };
-      const verticalValue = getMeasurement(quickFacts[measurement.field])
+      let verticalValue = getMeasurement(quickFacts[measurement.field])
         ?? (quickFacts.vertical_measurement_label === measurement.label
           ? getMeasurement(quickFacts.vertical_measurement_m)
           : undefined);
+      let verticalMeasurementBasis = quickFacts.vertical_measurement_basis === 'Web-verified'
+        ? 'Web-verified'
+        : 'AI estimate';
       if (verticalValue === undefined) {
-        throw new Error(`Could not build the article because the research did not provide a confirmed ${measurement.label.toLowerCase()} for ${place.place_name}. Check the place category and retry.`);
+        const hasCoordinates = place.latitude !== null && place.latitude !== undefined && String(place.latitude).trim() !== ''
+          && place.longitude !== null && place.longitude !== undefined && String(place.longitude).trim() !== ''
+          && Number.isFinite(Number(place.latitude)) && Number.isFinite(Number(place.longitude));
+        const coordinateText = hasCoordinates
+          ? `Coordinates: ${place.latitude}, ${place.longitude}.`
+          : '';
+        const estimatePrompt = `Estimate one category-appropriate vertical measurement for this Sri Lankan location using only your own learned geographic knowledge. Do not browse, cite, search for, or rely on web-source facts. If you cannot recall an exact value, give your best reasonable rounded estimate instead of omitting it. Avoid false precision; use whole metres and round large elevations/heights sensibly.
+Location: ${place.place_name}
+Category: ${place.category || 'other location'}
+Locality: ${place.locality || 'Sri Lanka'}
+${coordinateText}
+Measurement required: ${measurement.label} in metres. For waterfalls this means vertical waterfall drop; for mountains it means summit height above sea level; for all other locations it means site elevation above sea level.
+Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
+        const estimateResponse = await fetch('/api/generate-article', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: estimatePrompt }] }],
+            generationConfig: {
+              responseMimeType: 'application/json',
+              temperature: 0.2,
+              maxOutputTokens: 128,
+              responseSchema: {
+                type: 'OBJECT',
+                properties: {
+                  value_m: { type: 'NUMBER' },
+                  basis: { type: 'STRING' }
+                },
+                required: ['value_m', 'basis']
+              }
+            }
+          })
+        });
+        const estimateData = await estimateResponse.json().catch(() => ({}));
+        if (!estimateResponse.ok || estimateData.error) {
+          const message = typeof estimateData.error === 'string'
+            ? estimateData.error
+            : estimateData.error?.message || `AI measurement estimate failed (${estimateResponse.status}).`;
+          throw new Error(message);
+        }
+        const estimateText = estimateData.candidates?.[0]?.content?.parts?.[0]?.text
+          ?.replace(/```json\n?|```/g, '')
+          .trim();
+        let estimateJson;
+        try {
+          estimateJson = JSON.parse(estimateText || '{}');
+        } catch (error) {
+          throw new Error(`AI measurement estimate returned invalid JSON: ${error.message}`);
+        }
+        verticalValue = getMeasurement(estimateJson.value_m);
+        if (verticalValue === undefined) {
+          throw new Error(`The AI model could not provide a usable ${measurement.label.toLowerCase()} estimate for ${place.place_name}.`);
+        }
+        verticalMeasurementBasis = 'AI estimate';
       }
       const routeReport = aiJson.route_report && typeof aiJson.route_report === 'object'
         ? aiJson.route_report
@@ -2191,12 +2248,13 @@ Return only JSON matching the provided schema. Keep the information concise and 
       }
       for (const key of [
         'elevation_m', 'mountain_height_m', 'waterfall_height_m',
-        'vertical_measurement_m', 'vertical_measurement_label'
+        'vertical_measurement_m', 'vertical_measurement_label', 'vertical_measurement_basis'
       ]) delete quickFacts[key];
       if (verticalValue !== undefined) {
         quickFacts[measurement.field] = verticalValue;
         quickFacts.vertical_measurement_m = verticalValue;
         quickFacts.vertical_measurement_label = measurement.label;
+        quickFacts.vertical_measurement_basis = verticalMeasurementBasis;
       }
 
       aiJson.fact_sources = Array.isArray(data.factSources) ? data.factSources : [];
