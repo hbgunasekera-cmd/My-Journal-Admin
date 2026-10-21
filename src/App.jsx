@@ -1866,32 +1866,38 @@ function App() {
   const generateTravelArticle = async (place, { articleOnly = false } = {}) => {
     const contextPrompt = `Create a useful, location-specific travel guide for the ${place.category} "${place.place_name}" in ${place.locality || 'Sri Lanka'}.
 
-FACTUAL ACCURACY IS REQUIRED:
-- A source-grounded research brief and web source list will be supplied after this prompt. Use only facts supported by that brief. Do not invent, infer, or embellish factual details.
-- Never guess or state an elevation, peak ranking, distance, travel time, fee, date, district, history, route condition, opening schedule, access/permit rule, phone signal, weather pattern, or drone restriction.
-- Rankings and other important numeric claims may be used only when the research brief says they are corroborated. If a numeric value is not confirmed, omit its optional numeric field. Never write "not verified in the available source(s)", "not confirmed", "unknown", or similar source-gap placeholders in the article.
-- Fill text fields with useful, location-relevant information. When a specific detail is not established by the research, give practical preparation guidance appropriate to that field (such as checking current route, opening, access, weather, or authority information) instead of a source-gap statement. Do not turn general advice into a claim about this location.
-- If sources disagree, do not choose a version; explain briefly that sources conflict or omit the claim.
-- Do not claim the writer visited the place. Do not invent first-person experiences, conversations, weather, sensory observations, travel events, or a photograph that was actually taken. Make the story a practical, factual guide, not a fictional diary.
-- Separate documented facts from clearly labeled photography suggestions and subjective ratings. Keep any current safety, access, or legal guidance conservative and grounded in an official source.
+FACT-CHECK SCOPE — USE WEB-VERIFIED FACTS ONLY IN THESE ARTICLE SECTIONS:
+- Summary & Intro: 'seo_intro' and 'why_visit.summary'.
+- Expedition Highlights: 'highlights'.
+- Expedition Journal: 'story'. Write in a personal, reflective first-person editorial voice, but frame it as how I would plan or experience the outing. Never claim I actually visited, saw, heard, or photographed the place.
+- History & Local Heritage: 'history'.
+- Quick Answers & AI Engine Discovery Index: 'target_keywords', 'faqs', and 'quick_facts'. Keep factual claims source-supported. Omit unsupported numeric fields such as elevation_m; do not substitute zero.
+- Use only facts supported by the supplied research in those sections. If sources disagree, omit the disputed claim. Never write "not verified", "not confirmed", "unknown", or similar source-gap placeholders. If a detail is missing, use another supported fact about the place or give a direct, useful answer without repeating generic "check local guidance" advice.
+
+EDITORIAL SECTIONS:
+- For all other fields, write detailed first-person recommendations and opinions in a natural travel-editor voice. Use prospective language such as "I’d plan", "I’d bring", and "I’d frame"; do not imply a real visit or actual observation.
+- Avoid filler such as "check current route information and local guidance" or repeating instructions to consult an authority. Give a concrete suggestion, explain why it helps, and keep it clearly framed as advice rather than a claim about this location.
+- Do not invent site-specific distances, schedules, fees, road surfaces, facilities, weather, signal, hazards, access rules, or drone permissions. Keep any numeric or legal claim out unless it belongs to a fact-checked section and is supported by the research.
+- Keep subjective ratings clearly editorial. Label photography, route, and drone suggestions as recommendations, not observed conditions or actual captures.
+- Avoid these clichés: "tapestry," "realm," "nestled," "unveil," "symphony," "breathtaking," "embark," and "delve." Use concise, natural language.
 - Avoid these clichés: "tapestry," "realm," "nestled," "unveil," "symphony," "breathtaking," "embark," and "delve." Use concise, natural language.
 
 Return only JSON matching the provided schema. Keep the information concise and useful:
 - 'target_keywords': 3-5 relevant search phrases; do not add unsupported factual claims.
 - 'seo_intro': a concise, accurate, location-specific 1-2 sentence description.
-- 'faqs': 3-5 useful questions with practical answers; for current access, permits, timing, or safety, tell readers which current information to check and where to confirm it, without saying the detail is unverified.
-- 'quick_facts': include only verified factual values. Omit elevation_m when it is unsupported; do not use zero as a substitute. Use practical preparation guidance for text fields whose specific details are not established.
-- 'why_visit': a sourced summary and clearly subjective suitability notes.
-- 'story': about 250-300 words of factual visitor information, with no fabricated first-person visit.
+- 'faqs': 3-5 useful questions with direct answers grounded in research. Prefer useful location details; omit unsupported specifics rather than answering every question with a reminder to check elsewhere.
+- 'quick_facts': include source-supported facts. Omit unsupported elevation_m and other numeric facts; do not use zero. For a text rating such as difficulty when no reliable rating is available, give a short first-person planning perspective, not a generic research disclaimer.
+- 'why_visit': a factual, source-supported summary; make suitability notes clearly subjective and specific to the confirmed features.
+- 'story': about 250-300 words in a personal, reflective first-person editorial voice. Describe how I would approach and enjoy the outing using confirmed features, but never present it as a visit that actually happened.
 - 'explorer_rating': editorial estimates, not measured facts; do not imply they are official ratings.
 - 'photography_notes': label recommendations as suggestions and avoid claiming observed light, weather, or conditions.
-- 'drone_notes': provide sourced restrictions or recommend checking current Civil Aviation Authority and site-manager rules; do not invent launch sites or flight conditions.
-- 'route_report': use verified starting point, distance_km, road condition, hazards, and travel time only. Omit unsupported distance_km rather than using zero. For other text fields, give a useful reminder to confirm current route and road details before setting out.
-- 'wish_i_knew': practical tips supported by evidence or clearly framed as general preparation advice.
-- 'best_time_to_visit': give specific months or hours only when the research supports them.
-- 'history': include sourced historical facts when available; otherwise provide useful guidance on finding site interpretation or records from the relevant local heritage authority without using a source-gap placeholder.
-- 'field_notes': distinguish verified conservation/safety rules from general advice, and provide practical preparation advice where specific rules are not established.
-- 'behind_the_shot': do not invent a photo or claim an actual capture time. Frame all content as photography suggestions, including suggested daylight and composition.
+- 'drone_notes': write cautious first-person photography advice; do not claim permission, launch areas, or flight conditions.
+- 'route_report': include factual starting point, distance_km, road condition, hazards, or travel time only when supported. Omit unsupported numeric values; use concrete first-person route-planning advice for other text fields instead of disclaimer-like reminders.
+- 'wish_i_knew': give specific, memorable preparation tips in first person; avoid repeating generic authority-check instructions.
+- 'best_time_to_visit': include specific months or hours only when supported; otherwise give a useful subjective planning approach such as choosing daylight and leaving a flexible schedule.
+- 'history': include source-supported history and local heritage details. If none are found, give verified geographic or place-category context without saying history could not be verified.
+- 'field_notes': give concise first-person packing, pacing, and comfort advice; distinguish any sourced rules from opinion.
+- 'behind_the_shot': do not claim an actual capture or capture time. Give first-person photography ideas, including composition and lighting choices as suggestions.
 - 'highlights': only confirmed place features.`;
 
     const requestBody = {
@@ -2068,56 +2074,57 @@ Return only JSON matching the provided schema. Keep the information concise and 
       }
 
       const sourceGap = /not\s+(?:yet\s+)?verified|not\s+(?:reliably\s+)?confirmed|cannot\s+be\s+confirmed|could not be\s+(?:verified|confirmed|established)|unable to\s+(?:verify|confirm|establish)|(?:verification|confirmation)\s+(?:is|was)\s+(?:not possible|unavailable)|unverified|reliable history was not confirmed|unknown(?:\s+(?:to|from|in)\s+(?:the\s+)?sources?)?|no actual capture documented|not available in (?:the\s+)?(?:available\s+)?sources?|sources? (?:do|does) not (?:confirm|verify|establish|mention)/i;
+      const genericGuidance = /^(?:check|confirm|consult|review|verify|look up)\b.{0,180}\b(?:guidance|information|details|authority|source|rating)s?\b[.!]?$/i;
       const articleGuidance = {
-        location: `${place.locality || 'Sri Lanka'}; check a current map for the exact access point.`,
-        seo_intro: `${place.place_name} is a ${String(place.category || 'location').toLowerCase()} in ${place.locality || 'Sri Lanka'}. Check current local access and travel guidance before visiting.`,
-        story: `${place.place_name} is listed as a ${String(place.category || 'destination').toLowerCase()} in ${place.locality || 'Sri Lanka'}. Plan the visit with a current map and confirm the access point, route, opening details, and local conditions before departure. Carry water and weather protection suited to the forecast, save important details for offline use, and follow any instructions provided by the site manager. Where marked paths are provided, stay on them and avoid disturbing the surroundings. For heritage or historical context, use on-site interpretation and information from the responsible local authority.`,
-        question: 'What should I check before visiting?',
-        answer: 'Check a current map, local access guidance, opening details, and the weather forecast shortly before departure.',
-        history: `For historical context at ${place.place_name}, consult on-site interpretation and records from the relevant local heritage authority.`,
-        difficulty: 'Check the route length, surface, and current conditions with a local source before choosing a route.',
-        vehicle_access: 'Check a current map and local access guidance before setting out; road access can change.',
-        motorcycle_friendly: 'Confirm the route and parking arrangements locally before travelling by motorcycle.',
-        mobile_coverage: 'Download an offline map and save key details before travelling; coverage varies by carrier and terrain.',
-        recommended_time: 'Plan for daylight and check current opening hours and local conditions before departure.',
-        time_required: 'Allow time for travel, the visit, and any walking required; confirm route details locally.',
-        best_months: 'Check the local forecast and current site guidance when choosing dates.',
-        best_time_of_day: 'Plan for daylight and check current opening hours before departure.',
-        avoid: 'Check local weather and site guidance for any temporary closures before travelling.',
-        starting_point: 'Set the destination using a current map and confirm the accepted access point locally.',
-        travel_time: 'Check a current map shortly before departure because travel times vary with route and conditions.',
-        road_condition: 'Check recent local road updates before setting out.',
-        hazards: 'Check current weather and local safety guidance, and follow marked routes.',
-        fuel_parking: 'Confirm fuel stops and parking arrangements along the chosen route before departure.',
-        weather_risk: 'Check the local forecast before departure and adjust plans for severe weather.',
-        child_friendly: 'Confirm route length, surface, and available facilities locally before bringing children.',
-        restrictions: 'Check current Civil Aviation Authority and site-manager rules, and obtain any required permissions before flying.',
-        flight_conditions: 'Check current weather, airspace, and site-manager guidance before planning a flight.',
-        wind: 'Check the local forecast and wind conditions immediately before any planned flight.',
-        launch_area: 'Use only a launch area that is permitted by the site manager and aviation rules.',
-        obstacles: 'Assess the site safely from an approved area and follow local flight rules.',
-        captured_time: 'Suggested timing: plan the shoot for suitable daylight and check the forecast.',
-        device: 'Choose a camera or phone suited to the composition and conditions you plan for.',
-        conditions: 'Check the forecast and site conditions before planning a shoot.',
-        editing: 'Keep edits natural and preserve the scene’s colors and visible details.',
-        why_i_took_it: 'Suggested frame: focus on a location feature confirmed in the guide.',
-        best_for: 'Visitors interested in the confirmed features described in this guide.',
-        less_suitable_for: 'Anyone who needs confirmed route or access details should check locally before travelling.',
-        checklist: 'Check current access guidance and weather, carry water, and save the route for offline use.',
-        best_time: 'Plan for suitable daylight and check the forecast before visiting.',
-        lighting: 'Use the available daylight and adjust the composition to the conditions on the day.',
-        best_composition: 'Build the frame around a location feature confirmed in the guide.',
-        lens_recommendation: 'Choose a focal length that suits the subject and the space available at the site.',
-        mobile_notes: 'Keep the phone steady, preserve highlights, and check the composition before shooting.',
-        drone_potential: 'Check current aviation and site-manager rules before considering drone use.',
-        summary: `Use current local guidance to plan a visit to ${place.place_name}, including route, access, and conditions.`
+        location: `${place.locality || 'Sri Lanka'} — I’d use this as the base for planning a visit to ${place.place_name}.`,
+        seo_intro: `${place.place_name} is a ${String(place.category || 'location').toLowerCase()} in ${place.locality || 'Sri Lanka'}. I’d build a visit around its confirmed features and leave room to explore at an easy pace.`,
+        story: `If I were planning a visit to ${place.place_name}, a ${String(place.category || 'destination').toLowerCase()} in ${place.locality || 'Sri Lanka'}, I’d start by looking at the features that make this place distinctive and give the visit enough time to feel unhurried. I’d save the route before leaving, bring water and a light layer, and keep a little flexibility in the day rather than trying to fit too much into one stop. On site, I’d take time to notice the details, choose a comfortable pace, and make space for a few photographs without turning the outing into a checklist. For local heritage, I’d look for interpretation that adds context to the place. I’d leave the area as I found it and follow any posted instructions. That approach keeps the day thoughtful and adaptable, whether the visit is a short stop or part of a longer journey.`,
+        question: 'What would make this visit worthwhile?',
+        answer: `I’d focus on the confirmed features of ${place.place_name}, give the visit an unhurried pace, and leave space to explore details that interest me.`,
+        history: `${place.place_name} is a ${String(place.category || 'location').toLowerCase()} in ${place.locality || 'Sri Lanka'}. I’d use on-site interpretation and local heritage material to add historical context to the visit.`,
+        difficulty: 'I’d plan for a steady pace, comfortable footwear, and breaks; the effort depends on the route I choose.',
+        vehicle_access: 'I’d plan around the final approach, save the route offline, and leave a flexible buffer for the journey.',
+        motorcycle_friendly: 'For a motorcycle trip, I’d keep the pace conservative, pack for changing conditions, and plan a secure stop before setting out.',
+        mobile_coverage: 'I’d save maps and essential details offline before leaving; it makes the day easier if signal drops.',
+        recommended_time: 'I’d choose a daylight slot and leave a flexible window so the visit does not feel rushed.',
+        time_required: 'I’d leave room for the approach, time at the site, and a relaxed return instead of squeezing this stop into a tight schedule.',
+        best_months: 'I’d choose dates around the kind of weather I want and keep the plan flexible rather than relying on a fixed month.',
+        best_time_of_day: 'I’d aim for daylight that suits the pace and photographs I have in mind.',
+        avoid: 'I’d avoid a rushed schedule and leave room to adjust the plan if the journey takes longer than expected.',
+        starting_point: 'I’d pin the destination before leaving and make sure the final approach is clear in my route plan.',
+        travel_time: 'I’d allow a buffer for the approach and any stops along the way rather than planning a tight arrival.',
+        road_condition: 'I’d match my pace to the road surface and conditions on the day, leaving extra time for a relaxed drive.',
+        hazards: 'I’d stay attentive to footing, changing weather, and posted instructions throughout the outing.',
+        fuel_parking: 'I’d plan fuel and parking before departure and keep the schedule flexible around the final stop.',
+        weather_risk: 'I’d pack a light weather layer and adjust the outing if conditions make the journey uncomfortable.',
+        child_friendly: 'With children, I’d keep the plan flexible, bring water and snacks, and make time for breaks.',
+        restrictions: 'I’d leave drone use out of the plan unless current aviation and site rules clearly allow it.',
+        flight_conditions: 'I’d treat aerial photography as optional and keep a ground-level composition ready as a backup.',
+        wind: 'I’d make wind part of the day’s decision and switch to ground photography if it affects a safe setup.',
+        launch_area: 'I’d only consider a launch point that is clearly allowed and safe for the site.',
+        obstacles: 'I’d keep any camera setup well clear of visitors, structures, and fragile surroundings.',
+        captured_time: 'Suggested timing: I’d plan the shot for daylight that suits the composition.',
+        device: 'I’d use the camera or phone I can handle comfortably while keeping the composition simple.',
+        conditions: 'I’d adapt the shot to the light and weather on the day instead of forcing a fixed setup.',
+        editing: 'I’d keep edits natural and preserve the scene’s colors and visible details.',
+        why_i_took_it: 'I’d frame the image around a confirmed feature and the way it helps tell the story of the place.',
+        best_for: 'I’d recommend it to visitors drawn to the confirmed features described in this guide.',
+        less_suitable_for: 'I’d choose a different stop if I needed a tightly scheduled visit or a guaranteed route experience.',
+        checklist: 'I’d save the route offline, bring water, pack for the forecast, and leave time for breaks.',
+        best_time: 'I’d plan for daylight that gives me time to compose a few frames without rushing.',
+        lighting: 'I’d work with the available daylight and adjust the composition to suit the conditions.',
+        best_composition: 'I’d build the frame around a confirmed feature and leave enough context to show its setting.',
+        lens_recommendation: 'I’d choose a focal length that suits the subject and lets me compose comfortably from permitted areas.',
+        mobile_notes: 'I’d keep the phone steady, protect highlights, and simplify the frame before taking the shot.',
+        drone_potential: 'I’d treat drone photography as optional and plan a strong ground-level composition first.',
+        summary: `${place.place_name} is a ${String(place.category || 'location').toLowerCase()} in ${place.locality || 'Sri Lanka'}. I’d plan an unhurried visit around its confirmed features and the details that make it distinctive.`
       };
       const sanitizeArticle = (value, field = '') => {
         if (typeof value === 'string') {
-          if (value.trim() && !sourceGap.test(value)) return value;
-          if (['elevation_m', 'distance_km'].includes(field)) return undefined;
+          if (value.trim() && !sourceGap.test(value) && !genericGuidance.test(value.trim())) return value;
+          if (['elevation_m', 'distance_km', 'target_keywords', 'highlights'].includes(field)) return undefined;
           return articleGuidance[field]
-            || `For ${field.replace(/_/g, ' ') || 'this detail'}, check current local guidance before planning a visit to ${place.place_name}.`;
+            || `I’d keep ${field.replace(/_/g, ' ') || 'this part of the plan'} flexible and build my visit around the features of ${place.place_name} described in this guide.`;
         }
         if (Array.isArray(value)) {
           return value.map((item) => sanitizeArticle(item, field)).filter((item) => item !== undefined);
@@ -3909,7 +3916,7 @@ Return only JSON matching the provided schema. Keep the information concise and 
                         {hasArticle && (
                           <details className={`rounded-lg px-2.5 py-2 text-[8px] ${hasFactCheck ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
                             <summary className="cursor-pointer font-black uppercase tracking-wide">
-                              {hasFactCheck ? `Source-grounded · ${factSources.length} web sources` : 'Article has not been source-checked'}
+                              {hasFactCheck ? `Core sections fact-checked · ${factSources.length} web sources` : 'Core article sections have not been fact-checked'}
                             </summary>
                             {hasFactCheck ? (
                               <ul className="mt-2 space-y-1.5">
@@ -3927,7 +3934,7 @@ Return only JSON matching the provided schema. Keep the information concise and 
                                 ))}
                               </ul>
                             ) : (
-                              <p className="mt-1.5 leading-relaxed">Rebuild this article with the fact-check button below before sharing its specific claims.</p>
+                              <p className="mt-1.5 leading-relaxed">Fact-check the summary, highlights, journal, history, and quick answers before sharing their specific claims.</p>
                             )}
                           </details>
                         )}
@@ -3983,7 +3990,7 @@ Return only JSON matching the provided schema. Keep the information concise and 
                           <button
                             disabled={Boolean(bulkFactCheckProgress)}
                             onClick={async () => {
-                              if (!window.confirm(`Rebuild the article for ${p.place_name} using source-checked facts? The current article will be replaced only if generation succeeds.`)) return;
+                              if (!window.confirm(`Rebuild the article for ${p.place_name}? Fact-checking applies to its summary, highlights, journal, history, and quick answers. The current article is replaced only if generation succeeds.`)) return;
                               try {
                                 await generateTravelArticle(p);
                               } catch {

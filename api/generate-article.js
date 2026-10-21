@@ -154,7 +154,7 @@ export default async function handler(req, res) {
         researchText.slice(0, 12_000),
         'Search sources returned for this research:',
         ...factSources.map((source, index) => `[${index + 1}] ${source.title} — ${source.url}`),
-        'Do not claim that every sentence below has been independently verified. Do not add specific facts outside this evidence; omit uncertain facts.'
+        'Use this research to fact-check only the sections identified as source-checked in the article request. For other fields, write prospective first-person editorial suggestions without adding location-specific factual claims or source-gap filler.'
       ].join('\n');
 
       safeRequest.contents = [...safeRequest.contents, { role: 'user', parts: [{ text: evidence }] }];
