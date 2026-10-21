@@ -1885,7 +1885,7 @@ Return only JSON matching the provided schema. Keep the information concise and 
 - 'target_keywords': 3-5 relevant search phrases; do not add unsupported factual claims.
 - 'seo_intro': a concise, accurate, location-specific 1-2 sentence description.
 - 'faqs': 3-5 useful questions with direct answers grounded in research. Prefer useful location details; omit unsupported specifics rather than answering every question with a reminder to check elsewhere.
-- 'quick_facts': always include one vertical measurement in metres: waterfall_height_m for waterfalls, mountain_height_m for mountains, or elevation_m for all other locations. Also set vertical_measurement_m to the same value, vertical_measurement_label to 'Waterfall height', 'Mountain height', or 'Elevation', and vertical_measurement_basis to 'Web-verified' or 'AI estimate'. Prefer a researched value supported by reliable sources. If research cannot confirm one, use your best estimate from model knowledge, round to avoid false precision, and mark it 'AI estimate'. Keep difficulty, time_required, vehicle_access, motorcycle_friendly, and mobile_coverage concise, neutral, and non-first-person. Use a source-supported difficulty rating only; if none is published, say 'Route-dependent; varies with route length and surface.' Give time required only when a source supports an estimate; otherwise use a concise route/pace qualifier. State access and signal information directly, without first-person narration.
+- 'quick_facts': always include the numeric vertical measurement in 'elevation_m' because the client article reads that field. Use waterfall_height_m for waterfalls, mountain_height_m for mountains, or elevation_m for all other locations; 'elevation_m' must equal the category-appropriate value so the client can display it. Also set vertical_measurement_m to the same value, vertical_measurement_label to 'Waterfall height', 'Mountain height', or 'Elevation', and vertical_measurement_basis to 'Web-verified' or 'AI estimate'. Prefer a researched value supported by reliable sources. If research cannot confirm one, use your best estimate from model knowledge, round to avoid false precision, and mark it 'AI estimate'. Keep difficulty, time_required, vehicle_access, motorcycle_friendly, and mobile_coverage concise, neutral, and non-first-person. Use a source-supported difficulty rating only; if none is published, say 'Route-dependent; varies with route length and surface.' Give time required only when a source supports an estimate; otherwise use a concise route/pace qualifier. State access and signal information directly, without first-person narration.
 - 'why_visit': a factual, source-supported summary; make suitability notes clearly subjective and specific to the confirmed features.
 - 'story': about 250-300 words in a personal, reflective first-person editorial voice. Describe how I would approach and enjoy the outing using confirmed features, but never present it as a visit that actually happened.
 - 'explorer_rating': editorial estimates, not measured facts; do not imply they are official ratings.
@@ -2262,6 +2262,9 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
         // Keep both unit-bearing keys and the legacy display keys. The public article
         // renderer appends the unit, so its numeric value key must also be populated.
         quickFacts.elevation = verticalValue;
+        // The client technical-spec card currently reads quick_facts.elevation_m
+        // for every category, so keep this common display field populated too.
+        quickFacts.elevation_m = verticalValue;
         quickFacts[measurementKey] = verticalValue;
         quickFacts[measurement.field] = verticalValue;
         quickFacts.vertical_measurement = verticalValue;
@@ -2270,6 +2273,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
         quickFacts.elevation_label = measurement.label;
         quickFacts.vertical_measurement_basis = verticalMeasurementBasis;
         aiJson.elevation = verticalValue;
+        aiJson.elevation_m = verticalValue;
         aiJson[measurementKey] = verticalValue;
         aiJson[measurement.field] = verticalValue;
         aiJson.vertical_measurement = verticalValue;
