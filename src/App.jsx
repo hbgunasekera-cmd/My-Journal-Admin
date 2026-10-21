@@ -411,6 +411,7 @@ function App() {
   const [filterStatus, setFilterStatus] = useState('All');
   const [sortBy, setSortBy] = useState('newest');
   const [toast, setToast] = useState({ show: false, msg: '' });
+  const [bulkFactCheckProgress, setBulkFactCheckProgress] = useState(null);
   const triggerToast = React.useCallback((msg) => {
     setToast({ show: true, msg });
     setTimeout(() => setToast({ show: false, msg: '' }), 2500);
@@ -439,6 +440,7 @@ function App() {
   const downloadedImagesRef = useRef(new Set());
   const activeSharesRef = useRef(new Set());
   const youtubeSyncInProgressRef = useRef(false);
+  const bulkFactCheckInProgressRef = useRef(false);
   const REFRESH_INTERVAL_SECONDS = 600;
   const [timeLeft, setTimeLeft] = useState(REFRESH_INTERVAL_SECONDS);
 
@@ -2068,7 +2070,7 @@ Return only JSON matching the provided schema. Keep the information concise and 
         longitude: place.longitude
       };
 
-      await saveArticleToDatabase(place, aiJson);
+      return await saveArticleToDatabase(place, aiJson);
 
     } catch (err) {
       triggerToast(`Fetch Error: ${err.message}`);
@@ -2187,6 +2189,87 @@ Return ONLY this JSON structure:
 
     triggerToast("Metadata audit complete!");
     refreshAllData();
+  };
+
+  const bulkRebuildFactCheckedArticles = async () => {
+    if (bulkFactCheckInProgressRef.current) return;
+
+    const targets = places.filter((place) => (
+      place.status === 'done'
+      && typeof place.ai_article?.story === 'string'
+      && place.ai_article.story.trim().length > 0
+    ));
+
+    if (targets.length === 0) {
+      triggerToast('No existing articles found for completed locations.');
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Rebuild ${targets.length} existing articles for completed/visited locations using web fact checks? Each article will be replaced only after generation succeeds.`
+    );
+    if (!confirmed) return;
+
+    bulkFactCheckInProgressRef.current = true;
+    setBulkFactCheckProgress({ current: 0, total: targets.length, waitingForQuota: false });
+    let rebuilt = 0;
+    let failed = 0;
+    let quotaPauseUsed = false;
+    let quotaLimitReached = false;
+    const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+    try {
+      for (let index = 0; index < targets.length; index += 1) {
+        const place = targets[index];
+        setBulkFactCheckProgress({
+          current: index + 1,
+          total: targets.length,
+          placeName: place.place_name,
+          waitingForQuota: false
+        });
+
+        let saved = false;
+        try {
+          saved = await generateTravelArticle(place) === true;
+        } catch (error) {
+          const isQuotaError = /quota|429/i.test(error?.message || '');
+          if (isQuotaError && !quotaPauseUsed) {
+            quotaPauseUsed = true;
+            setBulkFactCheckProgress({
+              current: index + 1,
+              total: targets.length,
+              placeName: place.place_name,
+              waitingForQuota: true
+            });
+            triggerToast('AI quota reached. Waiting 65 seconds before one retry...');
+            await delay(65_000);
+            try {
+              saved = await generateTravelArticle(place) === true;
+            } catch (retryError) {
+              if (/quota|429/i.test(retryError?.message || '')) quotaLimitReached = true;
+              console.error(`Fact-check rebuild failed for ${place.place_name}:`, retryError);
+            }
+          } else {
+            if (isQuotaError) quotaLimitReached = true;
+            console.error(`Fact-check rebuild failed for ${place.place_name}:`, error);
+          }
+        }
+
+        if (saved) rebuilt += 1;
+        else failed += 1;
+        if (quotaLimitReached) break;
+        if (index < targets.length - 1) await delay(4_000);
+      }
+
+      const notAttempted = targets.length - rebuilt - failed;
+      triggerToast(
+        `Fact-check batch finished: ${rebuilt} rebuilt, ${failed} failed${notAttempted ? `, ${notAttempted} not attempted after quota limit` : ''}.`
+      );
+      refreshAllData();
+    } finally {
+      bulkFactCheckInProgressRef.current = false;
+      setBulkFactCheckProgress(null);
+    }
   };
 
   const indexUnsubmittedHubVideos = async () => {
@@ -2447,10 +2530,12 @@ Return ONLY this JSON structure:
           p.id === place.id ? { ...p, ...updatedPlacePayload } : p
         )
       );
+      return true;
 
     } catch (err) {
       triggerToast("Database update failed.");
       console.error(err);
+      return false;
     }
   };
 
@@ -3658,6 +3743,23 @@ Return ONLY this JSON structure:
                 >
                   <Icon name="shield-check" className="w-3.5 h-3.5 text-emerald-500" />
                   <span>Audit Meta</span>
+                </button>
+
+                <button
+                  onClick={bulkRebuildFactCheckedArticles}
+                  disabled={Boolean(bulkFactCheckProgress)}
+                  className="flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all border bg-cyan-50 border-cyan-200 text-cyan-700 hover:bg-cyan-100 active:scale-95 shadow-sm disabled:opacity-60 disabled:cursor-wait"
+                  title="Rebuild existing articles for every completed/visited location using web fact checks"
+                >
+                  <Icon
+                    name="refresh-cw"
+                    className={`w-3.5 h-3.5 text-cyan-600 ${bulkFactCheckProgress ? 'animate-spin' : ''}`}
+                  />
+                  <span>
+                    {bulkFactCheckProgress
+                      ? `Checking ${bulkFactCheckProgress.current}/${bulkFactCheckProgress.total}`
+                      : 'Fact-check Articles'}
+                  </span>
                 </button>
 
                 {/* GENERATE SLUGS */}
