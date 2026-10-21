@@ -2584,14 +2584,32 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
   };
 
   const saveArticleToDatabase = async (place, articleData, { articleOnly = false } = {}) => {
+    const saveArticleUpdate = async (payload) => {
+      let lastError;
+      const isNetworkFailure = (error) => /networkerror|failed to fetch|fetch failed|network request failed/i
+        .test(String(error?.message || error || ''));
+
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+          const { error } = await supabaseClient
+            .from('travel_bucket_list')
+            .update(payload)
+            .eq('id', place.id);
+
+          if (!error) return;
+          lastError = error;
+        } catch (error) {
+          lastError = error;
+        }
+
+        if (!isNetworkFailure(lastError) || attempt === 2) throw lastError;
+        await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
+      }
+    };
+
     try {
       if (articleOnly) {
-        const { error } = await supabaseClient
-          .from('travel_bucket_list')
-          .update({ ai_article: articleData })
-          .eq('id', place.id);
-
-        if (error) throw error;
+        await saveArticleUpdate({ ai_article: articleData });
         setPlaces((currentPlaces) => currentPlaces.map((item) => (
           item.id === place.id ? { ...item, ai_article: articleData } : item
         )));
@@ -2603,18 +2621,13 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
       const generatedSlug = generateCleanSlug(place.place_name);
 
       // 1. Save Article to Database with slug & update created_at timestamp
-      const { error } = await supabaseClient
-        .from('travel_bucket_list')
-        .update({
-          ai_article: articleData,
-          status: 'done',
-          slug: generatedSlug,
-          is_indexed: false, // Set false initially until IndexNow confirms
-          created_at: new Date().toISOString(),
-        })
-        .eq('id', place.id);
-
-      if (error) throw error;
+      await saveArticleUpdate({
+        ai_article: articleData,
+        status: 'done',
+        slug: generatedSlug,
+        is_indexed: false, // Set false initially until IndexNow confirms
+        created_at: new Date().toISOString(),
+      });
 
       // 2. Trigger IndexNow with place name and dummy array to generate /gallery/ link
       const indexSuccess = await triggerIndexNow(place.place_name, [1]);
@@ -2669,8 +2682,12 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
       return true;
 
     } catch (err) {
-      triggerToast("Database update failed.");
-      console.error(err);
+      const networkFailure = /networkerror|failed to fetch|fetch failed|network request failed/i
+        .test(String(err?.message || err || ''));
+      triggerToast(networkFailure
+        ? 'Could not reach the database while saving the article. Check the Supabase connection and retry.'
+        : `Database update failed: ${err?.message || 'Unknown error.'}`);
+      console.error('Article database update failed:', err);
       return false;
     }
   };
