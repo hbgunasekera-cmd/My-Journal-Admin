@@ -949,9 +949,8 @@ function App() {
   // 2. REVISED INTEGRATION SHARING FUNCTIONS
   // ==========================================
 
-  const isArticleFactCheckedForPlace = (article, place) => {
-    const savedPlace = article?.fact_check_location;
-    const hasSources = Array.isArray(article?.fact_sources) && article.fact_sources.some((source) => {
+  const isFactSourceCheckForPlace = (sources, checkedAt, savedPlace, place) => {
+    const hasSources = Array.isArray(sources) && sources.some((source) => {
       if (typeof source?.url !== 'string') return false;
       try {
         return ['http:', 'https:'].includes(new URL(source.url).protocol);
@@ -959,7 +958,7 @@ function App() {
         return false;
       }
     });
-    if (!article?.fact_checked_at || !hasSources || !savedPlace) {
+    if (!checkedAt || !hasSources || !savedPlace) {
       return false;
     }
 
@@ -980,6 +979,20 @@ function App() {
     return savedHasCoordinates === hasCoordinates
       && (!savedHasCoordinates || (savedLatitude === latitude && savedLongitude === longitude));
   };
+
+  const isArticleFactCheckedForPlace = (article, place) => isFactSourceCheckForPlace(
+    article?.fact_sources,
+    article?.fact_checked_at,
+    article?.fact_check_location,
+    place
+  );
+
+  const isMetadataFactCheckedForPlace = (article, place) => isFactSourceCheckForPlace(
+    article?.metadata_fact_sources,
+    article?.metadata_fact_checked_at,
+    article?.metadata_fact_location,
+    place
+  );
 
   // Reuse a short, location-specific summary across the Social tab and every share action.
   const getSocialDescription = (place) => {
@@ -2069,6 +2082,16 @@ Return only JSON matching the provided schema. Keep the information concise and 
         latitude: place.latitude,
         longitude: place.longitude
       };
+      for (const key of [
+        'metadata_fact_sources',
+        'metadata_fact_checked_at',
+        'metadata_fact_location',
+        'metadata_parent_area',
+        'metadata_restriction_verified',
+        'metadata_governing_org_verified'
+      ]) {
+        if (place.ai_article?.[key] !== undefined) aiJson[key] = place.ai_article[key];
+      }
 
       return await saveArticleToDatabase(place, aiJson);
 
@@ -2079,32 +2102,31 @@ Return only JSON matching the provided schema. Keep the information concise and 
   };
 
   const generatePlaceMetadata = async (place) => {
-    const metaPrompt = `Act as a Sri Lankan Geography & Environmental Regulation Expert. 
-Analyze the location: "${place.place_name}" (Locality: ${place.locality || 'Not Specified'}, Category: ${place.category}).
+    const metaPrompt = `Determine access restriction and responsible governing body for the exact location in the supplied place context. Use only the source-grounded research brief appended after this prompt. The research must match the same location.
 
-STEP 1: Determine if this place is located within a larger protected area or reserve.
-Examples: 
-- "Chimney Pool" is inside "Horton Plains National Park".
-- "Dothaluoya Trail" or "Duwili Ella" is inside "Knuckles Forest Reserve".
-- "Piduruthalagala" is a "Strict Natural Reserve".
+Use authoritative current sources for access and agency responsibility. Do not infer restrictions from the category or from the absence of a rule. Do not assume that a public location is unrestricted. Do not infer the responsible agency from the parent area's agency unless the source confirms it manages this exact place.
 
-STEP 2: Assign Governing Body based on the PARENT location:
-- National Parks/Sanctuaries -> "Department of Wildlife Conservation"
-- Forest Reserves/Sinharaja/Knuckles -> "Department of Forest Conservation"
-- Heritage Sites (Sigiriya/Anuradhapura) -> "Central Cultural Fund" or "Department of Archaeology"
+Restriction level definitions:
+- "None": an authoritative source confirms ordinary public access with no special location-specific restriction.
+- "Low": an authoritative source confirms limited local rules or guidance without a permit/controlled-entry requirement.
+- "High": an authoritative source confirms controlled entry, tickets, permits, or required authorization.
+- "Restricted": an authoritative source confirms entry is prohibited or the site is legally closed/restricted to visitors.
 
-STEP 3: Set Restriction Level:
-- "None": Public areas/beaches.
-- "Low": Local trails with no entry fee.
-- "High": National Parks/Reserves requiring tickets/permits.
-- "Restricted": Strict Natural Reserves (e.g., Ritigala Peak, Hakgala SNR).
+For governing_org, use the best matching organization only when an authoritative source assigns responsibility for this exact site or its confirmed parent area. Use "Open" only when a source supports that no specific governing body applies. If evidence is insufficient or sources conflict, set that field's verified flag to false; the value will not be saved. Do not force a restriction level based on the organization.
 
-Return ONLY this JSON structure:
-{
-  "parent_area": "Name of the National Park or Reserve if applicable",
-  "restriction_level": "None" | "Low" | "High" | "Restricted",
-  "governing_org": "Open" | "Department of Wildlife Conservation" | "Department of Forest Conservation" | "Central Cultural Fund" | "Department of Archaeology" | "Department of National Botanic Gardens" | "National Livestock Development Board" | "Local Authorities"
-}`;
+Return only JSON matching the provided schema. Give a short evidence summary and identify the parent protected/heritage area only if confirmed.`;
+
+    const governingBodies = [
+      'Open',
+      'Department of Wildlife Conservation',
+      'Department of Forest Conservation',
+      'Central Cultural Fund',
+      'Department of Archaeology',
+      'Department of National Botanic Gardens',
+      'National Livestock Development Board',
+      'Local Authorities'
+    ];
+    const restrictionLevels = ['None', 'Low', 'High', 'Restricted'];
 
     try {
       const response = await fetch('/api/generate-article', {
@@ -2112,10 +2134,33 @@ Return ONLY this JSON structure:
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           contents: [{ parts: [{ text: metaPrompt }] }],
+          factCheck: {
+            scope: 'metadata',
+            placeName: place.place_name,
+            category: place.category,
+            locality: place.locality,
+            latitude: place.latitude,
+            longitude: place.longitude
+          },
           generationConfig: {
             responseMimeType: "application/json",
             temperature: 0.1,
-            maxOutputTokens: 65536 // Prevents token truncation on Gemini 2.5 Flash calls
+            maxOutputTokens: 2048,
+            responseSchema: {
+              type: 'OBJECT',
+              properties: {
+                parent_area: { type: 'STRING' },
+                restriction_level: { type: 'STRING', enum: restrictionLevels },
+                restriction_verified: { type: 'BOOLEAN' },
+                governing_org: { type: 'STRING', enum: governingBodies },
+                governing_org_verified: { type: 'BOOLEAN' },
+                evidence_summary: { type: 'STRING' }
+              },
+              required: [
+                'parent_area', 'restriction_level', 'restriction_verified',
+                'governing_org', 'governing_org_verified', 'evidence_summary'
+              ]
+            }
           }
         })
       });
@@ -2143,127 +2188,156 @@ Return ONLY this JSON structure:
         throw new Error(`Failed to parse AI response JSON: ${parseError.message}`, { cause: parseError });
       }
 
-      // --- BUSINESS RULE OVERRIDE ---
-      // Force 'Low' restriction if governing body is 'Local Authorities'
-      let finalRestriction = aiJson.restriction_level;
-      if (aiJson.governing_org === 'Local Authorities') {
-        finalRestriction = 'Low';
-      }
+      const validRestriction = restrictionLevels.includes(aiJson.restriction_level);
+      const validGoverningBody = governingBodies.includes(aiJson.governing_org);
+      const restrictionVerified = aiJson.restriction_verified === true && validRestriction;
+      const governingBodyVerified = aiJson.governing_org_verified === true && validGoverningBody;
+      const sourceList = Array.isArray(data.factSources) ? data.factSources : [];
+      const metadataSnapshot = {
+        place_name: place.place_name,
+        category: place.category,
+        locality: place.locality,
+        latitude: place.latitude,
+        longitude: place.longitude
+      };
+      const { data: currentRecord, error: readError } = await supabaseClient
+        .from('travel_bucket_list')
+        .select('ai_article')
+        .eq('id', place.id)
+        .single();
+      if (readError) throw readError;
 
-      // Update Database
+      const articleData = {
+        ...(currentRecord?.ai_article || place.ai_article || {}),
+        metadata_fact_sources: sourceList,
+        metadata_fact_checked_at: typeof data.factCheckedAt === 'string' ? data.factCheckedAt : null,
+        metadata_fact_location: metadataSnapshot,
+        metadata_parent_area: typeof aiJson.parent_area === 'string' ? aiJson.parent_area : '',
+        metadata_restriction_verified: restrictionVerified,
+        metadata_governing_org_verified: governingBodyVerified
+      };
+      const update = { ai_article: articleData };
+      if (restrictionVerified) update.restriction_level = aiJson.restriction_level;
+      if (governingBodyVerified) update.governing_org = aiJson.governing_org;
+
       const { error } = await supabaseClient
         .from('travel_bucket_list')
-        .update({
-          restriction_level: finalRestriction, // Use the enforced value
-          governing_org: aiJson.governing_org
-        })
+        .update(update)
         .eq('id', place.id);
 
       if (error) throw error;
-      return true;
+      setPlaces((current) => current.map((item) => (
+        item.id === place.id ? { ...item, ...update } : item
+      )));
+      return {
+        saved: true,
+        restrictionVerified,
+        governingBodyVerified,
+        evidenceSummary: aiJson.evidence_summary
+      };
     } catch (err) {
       if (typeof triggerToast === 'function') {
         triggerToast(`Metadata Error: ${err.message}`);
       }
-      return false;
+      throw err;
     }
   };
 
-  const bulkUpdateMetadata = async () => {
-    // Only target places marked 'done' where metadata is still default ('None'/'Open')
-    const targets = places.filter(p => p.status === 'done' && (p.restriction_level === 'None' || p.governing_org === 'Open'));
-
-    if (targets.length === 0) {
-      triggerToast("No 'Done' places need updating.");
-      return;
-    }
-
-    triggerToast(`Analyzing ${targets.length} locations...`);
-
-    for (const place of targets) {
-      const success = await generatePlaceMetadata(place);
-      if (success) {
-        await new Promise(r => setTimeout(r, 2000)); // Rate limiting safety
-      }
-    }
-
-    triggerToast("Metadata audit complete!");
-    refreshAllData();
-  };
-
-  const bulkRebuildFactCheckedArticles = async () => {
+  const bulkFactCheckCompletedLocations = async () => {
     if (bulkFactCheckInProgressRef.current) return;
 
-    const targets = places.filter((place) => (
-      place.status === 'done'
-      && typeof place.ai_article?.story === 'string'
-      && place.ai_article.story.trim().length > 0
+    const targets = places.filter((place) => place.status === 'done');
+    const articleTargets = targets.filter((place) => (
+      typeof place.ai_article?.story === 'string' && place.ai_article.story.trim().length > 0
     ));
 
     if (targets.length === 0) {
-      triggerToast('No existing articles found for completed locations.');
+      triggerToast('No completed/visited locations found.');
       return;
     }
 
     const confirmed = window.confirm(
-      `Rebuild ${targets.length} existing articles for completed/visited locations using web fact checks? Each article will be replaced only after generation succeeds.`
+      `Fact-check ${targets.length} completed/visited locations: rebuild ${articleTargets.length} existing articles and verify restriction level and governing body for every location? Existing articles are replaced only when generation succeeds; metadata fields are saved only when authoritative sources support them.`
     );
     if (!confirmed) return;
 
     bulkFactCheckInProgressRef.current = true;
-    setBulkFactCheckProgress({ current: 0, total: targets.length, waitingForQuota: false });
-    let rebuilt = 0;
+    const operations = targets.flatMap((place) => [
+      ...(articleTargets.includes(place) ? [{ place, type: 'article' }] : []),
+      { place, type: 'metadata' }
+    ]);
+    setBulkFactCheckProgress({ current: 0, total: operations.length, waitingForQuota: false });
+    let articlesRebuilt = 0;
+    let metadataChecked = 0;
+    let metadataValuesVerified = 0;
+    let metadataNeedsReview = 0;
     let failed = 0;
     let quotaPauseUsed = false;
     let quotaLimitReached = false;
     const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
     try {
-      for (let index = 0; index < targets.length; index += 1) {
-        const place = targets[index];
+      for (let index = 0; index < operations.length; index += 1) {
+        const { place, type } = operations[index];
         setBulkFactCheckProgress({
           current: index + 1,
-          total: targets.length,
+          total: operations.length,
           placeName: place.place_name,
+          step: type,
           waitingForQuota: false
         });
 
-        let saved = false;
+        const runOperation = async () => type === 'article'
+          ? await generateTravelArticle(place)
+          : await generatePlaceMetadata(place);
+
+        let result = null;
         try {
-          saved = await generateTravelArticle(place) === true;
+          result = await runOperation();
         } catch (error) {
           const isQuotaError = /quota|429/i.test(error?.message || '');
           if (isQuotaError && !quotaPauseUsed) {
             quotaPauseUsed = true;
             setBulkFactCheckProgress({
               current: index + 1,
-              total: targets.length,
+              total: operations.length,
               placeName: place.place_name,
+              step: type,
               waitingForQuota: true
             });
-            triggerToast('AI quota reached. Waiting 65 seconds before one retry...');
+            triggerToast('AI quota reached. Waiting 65 seconds before one retry.');
             await delay(65_000);
             try {
-              saved = await generateTravelArticle(place) === true;
+              result = await runOperation();
             } catch (retryError) {
               if (/quota|429/i.test(retryError?.message || '')) quotaLimitReached = true;
-              console.error(`Fact-check rebuild failed for ${place.place_name}:`, retryError);
+              console.error(`Fact-check failed for ${place.place_name}:`, retryError);
             }
           } else {
             if (isQuotaError) quotaLimitReached = true;
-            console.error(`Fact-check rebuild failed for ${place.place_name}:`, error);
+            console.error(`Fact-check failed for ${place.place_name}:`, error);
           }
         }
 
-        if (saved) rebuilt += 1;
-        else failed += 1;
+        if (type === 'article') {
+          if (result === true) articlesRebuilt += 1;
+          else failed += 1;
+        } else if (result?.saved) {
+          metadataChecked += 1;
+          const verifiedFields = Number(result.restrictionVerified) + Number(result.governingBodyVerified);
+          metadataValuesVerified += verifiedFields;
+          if (verifiedFields < 2) metadataNeedsReview += 1;
+        } else {
+          failed += 1;
+        }
+
         if (quotaLimitReached) break;
-        if (index < targets.length - 1) await delay(4_000);
+        if (index < operations.length - 1) await delay(3_000);
       }
 
-      const notAttempted = targets.length - rebuilt - failed;
+      const notAttempted = operations.length - articlesRebuilt - metadataChecked - failed;
       triggerToast(
-        `Fact-check batch finished: ${rebuilt} rebuilt, ${failed} failed${notAttempted ? `, ${notAttempted} not attempted after quota limit` : ''}.`
+        `Fact-check finished: ${articlesRebuilt}/${articleTargets.length} articles rebuilt; metadata checked for ${metadataChecked}/${targets.length} locations; ${metadataValuesVerified} fields verified; ${metadataNeedsReview} locations need review; ${failed} failed${notAttempted ? `; ${notAttempted} tasks not attempted after quota limit` : ''}.`
       );
       refreshAllData();
     } finally {
@@ -3729,36 +3803,28 @@ Return ONLY this JSON structure:
                 {/* ⚡ BULK ARTICLE GENERATOR */}
                 <button
                   onClick={bulkGenerateArticles}
-                  className="flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all border bg-violet-50 border-violet-200 text-violet-600 hover:bg-violet-100 active:scale-95 shadow-sm"
+                  disabled={Boolean(bulkFactCheckProgress)}
+                  className="flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all border bg-violet-50 border-violet-200 text-violet-600 hover:bg-violet-100 active:scale-95 shadow-sm disabled:opacity-60 disabled:cursor-wait"
                   title="Regenerate Articles for all visited locations"
                 >
                   <Icon name="sparkles" className="w-3.5 h-3.5 text-violet-500" />
                   <span>Articles</span>
                 </button>
 
-                {/* METADATA AUDIT TOOL */}
                 <button
-                  onClick={bulkUpdateMetadata}
-                  className="flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all border bg-emerald-50 border-emerald-200 text-emerald-600 hover:bg-emerald-100 active:scale-95 shadow-sm"
-                >
-                  <Icon name="shield-check" className="w-3.5 h-3.5 text-emerald-500" />
-                  <span>Audit Meta</span>
-                </button>
-
-                <button
-                  onClick={bulkRebuildFactCheckedArticles}
+                  onClick={bulkFactCheckCompletedLocations}
                   disabled={Boolean(bulkFactCheckProgress)}
                   className="flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all border bg-cyan-50 border-cyan-200 text-cyan-700 hover:bg-cyan-100 active:scale-95 shadow-sm disabled:opacity-60 disabled:cursor-wait"
-                  title="Rebuild existing articles for every completed/visited location using web fact checks"
+                  title="Rebuild existing articles and fact-check access restrictions and governing bodies for completed/visited locations"
                 >
                   <Icon
-                    name="refresh-cw"
+                    name="shield-check"
                     className={`w-3.5 h-3.5 text-cyan-600 ${bulkFactCheckProgress ? 'animate-spin' : ''}`}
                   />
                   <span>
                     {bulkFactCheckProgress
-                      ? `Checking ${bulkFactCheckProgress.current}/${bulkFactCheckProgress.total}`
-                      : 'Fact-check Articles'}
+                      ? `${bulkFactCheckProgress.waitingForQuota ? 'Waiting' : bulkFactCheckProgress.step === 'metadata' ? 'Metadata' : 'Article'} ${bulkFactCheckProgress.current}/${bulkFactCheckProgress.total}`
+                      : 'Fact-check Places'}
                   </span>
                 </button>
 
@@ -3788,7 +3854,7 @@ Return ONLY this JSON structure:
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-6">
                 {(processedPlaces || []).map(p => {
                   const dynamicDistance = (L.latLng(sortCenter.lat, sortCenter.lng).distanceTo(L.latLng(p.latitude, p.longitude)) / 1000).toFixed(1);
-                  const hasArticle = p.ai_article && Object.keys(p.ai_article).length > 0;
+                  const hasArticle = Boolean(p.ai_article?.story || p.ai_article?.description);
                   const factSources = Array.isArray(p.ai_article?.fact_sources)
                     ? p.ai_article.fact_sources.filter((source) => {
                       if (typeof source?.url !== 'string') return false;
@@ -3799,7 +3865,18 @@ Return ONLY this JSON structure:
                       }
                     })
                     : [];
+                  const metadataFactSources = Array.isArray(p.ai_article?.metadata_fact_sources)
+                    ? p.ai_article.metadata_fact_sources.filter((source) => {
+                      if (typeof source?.url !== 'string') return false;
+                      try {
+                        return ['http:', 'https:'].includes(new URL(source.url).protocol);
+                      } catch {
+                        return false;
+                      }
+                    })
+                    : [];
                   const hasFactCheck = isArticleFactCheckedForPlace(p.ai_article, p);
+                  const hasMetadataFactCheck = isMetadataFactCheckedForPlace(p.ai_article, p);
 
                   return (
                     <div key={p.id} className="bg-white rounded-[1.5rem] border border-slate-200 shadow-sm overflow-hidden flex flex-col group relative hover:shadow-md transition-all">
@@ -3923,6 +4000,8 @@ Return ONLY this JSON structure:
                               <option value="Department of Forest Conservation">Forestry Dept</option>
                               <option value="Central Cultural Fund">CCF (Cultural)</option>
                               <option value="Department of Archaeology">Archaeology</option>
+                              <option value="Department of National Botanic Gardens">Botanic Gardens Dept</option>
+                              <option value="National Livestock Development Board">Livestock Development Board</option>
                               <option value="Local Authorities">Local Gov (PS)</option>
                             </select>
                           </div>
@@ -3950,6 +4029,42 @@ Return ONLY this JSON structure:
                               </ul>
                             ) : (
                               <p className="mt-1.5 leading-relaxed">Rebuild this article with the fact-check button below before sharing its specific claims.</p>
+                            )}
+                          </details>
+                        )}
+
+                        {p.ai_article?.metadata_fact_checked_at && (
+                          <details className={`rounded-lg px-2.5 py-2 text-[8px] ${hasMetadataFactCheck ? 'bg-sky-50 text-sky-700' : 'bg-amber-50 text-amber-700'}`}>
+                            <summary className="cursor-pointer font-black uppercase tracking-wide">
+                              {hasMetadataFactCheck
+                                ? `Access & authority · ${metadataFactSources.length} sources · ${Number(p.ai_article.metadata_restriction_verified === true) + Number(p.ai_article.metadata_governing_org_verified === true)}/2 fields verified`
+                                : 'Access & authority check is out of date'}
+                            </summary>
+                            {hasMetadataFactCheck ? (
+                              <>
+                                {(p.ai_article.metadata_restriction_verified !== true || p.ai_article.metadata_governing_org_verified !== true) && (
+                                  <p className="mt-1.5 leading-relaxed">One or more values lacked authoritative confirmation and were left unchanged.</p>
+                                )}
+                                {p.ai_article.metadata_parent_area && (
+                                  <p className="mt-1.5">Parent area: {p.ai_article.metadata_parent_area}</p>
+                                )}
+                                <ul className="mt-2 space-y-1.5">
+                                  {metadataFactSources.map((source, index) => (
+                                    <li key={`${source.url}-${index}`}>
+                                      <a
+                                        href={source.url}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="underline underline-offset-2 hover:text-sky-900"
+                                      >
+                                        {source.title || source.url}
+                                      </a>
+                                    </li>
+                                  ))}
+                                </ul>
+                              </>
+                            ) : (
+                              <p className="mt-1.5 leading-relaxed">Re-run Fact-check Places after changing this location’s details.</p>
                             )}
                           </details>
                         )}
@@ -3984,6 +4099,7 @@ Return ONLY this JSON structure:
 
                         {/* ACTION 2: GENERATE TRAVEL ARTICLE TRIGGER MATRIX */}
                         <button
+                          disabled={Boolean(bulkFactCheckProgress)}
                           onClick={async () => {
                             if (hasArticle) {
                               manualEditArticle(p);
@@ -3992,7 +4108,7 @@ Return ONLY this JSON structure:
                               await generateTravelArticle(p);
                             }
                           }}
-                          className={`w-8 h-8 rounded-xl flex items-center justify-center hover:bg-white hover:shadow-sm transition-all ${hasArticle ? 'text-orange-500' : 'text-slate-300'
+                          className={`w-8 h-8 rounded-xl flex items-center justify-center hover:bg-white hover:shadow-sm transition-all disabled:opacity-50 ${hasArticle ? 'text-orange-500' : 'text-slate-300'
                             }`}
                           title={hasArticle ? "Edit Article" : "Generate with AI"}
                         >
@@ -4001,6 +4117,7 @@ Return ONLY this JSON structure:
 
                         {hasArticle && (
                           <button
+                            disabled={Boolean(bulkFactCheckProgress)}
                             onClick={async () => {
                               if (!window.confirm(`Rebuild the article for ${p.place_name} using source-checked facts? The current article will be replaced only if generation succeeds.`)) return;
                               try {
@@ -4009,7 +4126,7 @@ Return ONLY this JSON structure:
                                 // The generator displays the failure in the dashboard toast.
                               }
                             }}
-                            className="w-8 h-8 rounded-xl flex items-center justify-center hover:bg-white hover:shadow-sm transition-all text-emerald-600"
+                            className="w-8 h-8 rounded-xl flex items-center justify-center hover:bg-white hover:shadow-sm transition-all text-emerald-600 disabled:opacity-50"
                             title="Rebuild with web fact check"
                           >
                             <Icon name="shield-check" className="w-4 h-4" />
@@ -4071,7 +4188,7 @@ Return ONLY this JSON structure:
                   .filter((p) => p.status === "done")
                   .map((p) => {
                     // Data extraction from AI Article
-                    const hasArticle = p.ai_article && Object.keys(p.ai_article).length > 0;
+                    const hasArticle = Boolean(p.ai_article?.story || p.ai_article?.description);
                     const artisticTitle = `✨ ${p.place_name} — Island Vignettes: A Sri Lankan Journal`;
                     const description = getSocialDescription(p);
 
