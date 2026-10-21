@@ -987,13 +987,6 @@ function App() {
     place
   );
 
-  const isMetadataFactCheckedForPlace = (article, place) => isFactSourceCheckForPlace(
-    article?.metadata_fact_sources,
-    article?.metadata_fact_checked_at,
-    article?.metadata_fact_location,
-    place
-  );
-
   // Reuse a short, location-specific summary across the Social tab and every share action.
   const getSocialDescription = (place) => {
     const article = place?.ai_article || {};
@@ -1870,13 +1863,14 @@ function App() {
   };
 
 
-  const generateTravelArticle = async (place) => {
+  const generateTravelArticle = async (place, { articleOnly = false } = {}) => {
     const contextPrompt = `Create a useful, location-specific travel guide for the ${place.category} "${place.place_name}" in ${place.locality || 'Sri Lanka'}.
 
 FACTUAL ACCURACY IS REQUIRED:
 - A source-grounded research brief and web source list will be supplied after this prompt. Use only facts supported by that brief. Do not invent, infer, or embellish factual details.
 - Never guess or state an elevation, peak ranking, distance, travel time, fee, date, district, history, route condition, opening schedule, access/permit rule, phone signal, weather pattern, or drone restriction.
-- Rankings and other important numeric claims may be used only when the research brief says they are corroborated. If a numeric value is not confirmed, omit its optional numeric field. For unavailable string details, say "Not verified in the available sources" or recommend checking the responsible authority.
+- Rankings and other important numeric claims may be used only when the research brief says they are corroborated. If a numeric value is not confirmed, omit its optional numeric field. Never write "not verified in the available source(s)", "not confirmed", "unknown", or similar source-gap placeholders in the article.
+- Fill text fields with useful, location-relevant information. When a specific detail is not established by the research, give practical preparation guidance appropriate to that field (such as checking current route, opening, access, weather, or authority information) instead of a source-gap statement. Do not turn general advice into a claim about this location.
 - If sources disagree, do not choose a version; explain briefly that sources conflict or omit the claim.
 - Do not claim the writer visited the place. Do not invent first-person experiences, conversations, weather, sensory observations, travel events, or a photograph that was actually taken. Make the story a practical, factual guide, not a fictional diary.
 - Separate documented facts from clearly labeled photography suggestions and subjective ratings. Keep any current safety, access, or legal guidance conservative and grounded in an official source.
@@ -1885,19 +1879,19 @@ FACTUAL ACCURACY IS REQUIRED:
 Return only JSON matching the provided schema. Keep the information concise and useful:
 - 'target_keywords': 3-5 relevant search phrases; do not add unsupported factual claims.
 - 'seo_intro': a concise, accurate, location-specific 1-2 sentence description.
-- 'faqs': 3-5 useful questions; if access, permits, timing, or safety are not verified, clearly say so and direct readers to the responsible authority.
-- 'quick_facts': include only verified facts. Omit elevation_m when the value is unverified; do not use zero as a substitute.
+- 'faqs': 3-5 useful questions with practical answers; for current access, permits, timing, or safety, tell readers which current information to check and where to confirm it, without saying the detail is unverified.
+- 'quick_facts': include only verified factual values. Omit elevation_m when it is unsupported; do not use zero as a substitute. Use practical preparation guidance for text fields whose specific details are not established.
 - 'why_visit': a sourced summary and clearly subjective suitability notes.
 - 'story': about 250-300 words of factual visitor information, with no fabricated first-person visit.
 - 'explorer_rating': editorial estimates, not measured facts; do not imply they are official ratings.
 - 'photography_notes': label recommendations as suggestions and avoid claiming observed light, weather, or conditions.
-- 'drone_notes': provide only sourced restrictions or clearly recommend checking official rules; do not invent launch sites or flight conditions.
-- 'route_report': use verified starting point, distance_km, road condition, hazards, and travel time only. Omit unsupported distance_km rather than using zero.
+- 'drone_notes': provide sourced restrictions or recommend checking current Civil Aviation Authority and site-manager rules; do not invent launch sites or flight conditions.
+- 'route_report': use verified starting point, distance_km, road condition, hazards, and travel time only. Omit unsupported distance_km rather than using zero. For other text fields, give a useful reminder to confirm current route and road details before setting out.
 - 'wish_i_knew': practical tips supported by evidence or clearly framed as general preparation advice.
 - 'best_time_to_visit': give specific months or hours only when the research supports them.
-- 'history': include only sourced historical facts; otherwise state that reliable history was not confirmed.
-- 'field_notes': distinguish verified conservation/safety rules from general advice.
-- 'behind_the_shot': do not invent a photo or capture time. Use 'No actual capture documented' for captured_time unless a source verifies it; describe any composition as a suggestion, not as a photograph already taken.
+- 'history': include sourced historical facts when available; otherwise provide useful guidance on finding site interpretation or records from the relevant local heritage authority without using a source-gap placeholder.
+- 'field_notes': distinguish verified conservation/safety rules from general advice, and provide practical preparation advice where specific rules are not established.
+- 'behind_the_shot': do not invent a photo or claim an actual capture time. Frame all content as photography suggestions, including suggested daylight and composition.
 - 'highlights': only confirmed place features.`;
 
     const requestBody = {
@@ -2073,6 +2067,70 @@ Return only JSON matching the provided schema. Keep the information concise and 
         throw new Error(`Failed to parse AI response JSON: ${parseError.message}`, { cause: parseError });
       }
 
+      const sourceGap = /not\s+(?:yet\s+)?verified|not\s+(?:reliably\s+)?confirmed|cannot\s+be\s+confirmed|could not be\s+(?:verified|confirmed|established)|unable to\s+(?:verify|confirm|establish)|(?:verification|confirmation)\s+(?:is|was)\s+(?:not possible|unavailable)|unverified|reliable history was not confirmed|unknown(?:\s+(?:to|from|in)\s+(?:the\s+)?sources?)?|no actual capture documented|not available in (?:the\s+)?(?:available\s+)?sources?|sources? (?:do|does) not (?:confirm|verify|establish|mention)/i;
+      const articleGuidance = {
+        location: `${place.locality || 'Sri Lanka'}; check a current map for the exact access point.`,
+        seo_intro: `${place.place_name} is a ${String(place.category || 'location').toLowerCase()} in ${place.locality || 'Sri Lanka'}. Check current local access and travel guidance before visiting.`,
+        story: `${place.place_name} is listed as a ${String(place.category || 'destination').toLowerCase()} in ${place.locality || 'Sri Lanka'}. Plan the visit with a current map and confirm the access point, route, opening details, and local conditions before departure. Carry water and weather protection suited to the forecast, save important details for offline use, and follow any instructions provided by the site manager. Where marked paths are provided, stay on them and avoid disturbing the surroundings. For heritage or historical context, use on-site interpretation and information from the responsible local authority.`,
+        question: 'What should I check before visiting?',
+        answer: 'Check a current map, local access guidance, opening details, and the weather forecast shortly before departure.',
+        history: `For historical context at ${place.place_name}, consult on-site interpretation and records from the relevant local heritage authority.`,
+        difficulty: 'Check the route length, surface, and current conditions with a local source before choosing a route.',
+        vehicle_access: 'Check a current map and local access guidance before setting out; road access can change.',
+        motorcycle_friendly: 'Confirm the route and parking arrangements locally before travelling by motorcycle.',
+        mobile_coverage: 'Download an offline map and save key details before travelling; coverage varies by carrier and terrain.',
+        recommended_time: 'Plan for daylight and check current opening hours and local conditions before departure.',
+        time_required: 'Allow time for travel, the visit, and any walking required; confirm route details locally.',
+        best_months: 'Check the local forecast and current site guidance when choosing dates.',
+        best_time_of_day: 'Plan for daylight and check current opening hours before departure.',
+        avoid: 'Check local weather and site guidance for any temporary closures before travelling.',
+        starting_point: 'Set the destination using a current map and confirm the accepted access point locally.',
+        travel_time: 'Check a current map shortly before departure because travel times vary with route and conditions.',
+        road_condition: 'Check recent local road updates before setting out.',
+        hazards: 'Check current weather and local safety guidance, and follow marked routes.',
+        fuel_parking: 'Confirm fuel stops and parking arrangements along the chosen route before departure.',
+        weather_risk: 'Check the local forecast before departure and adjust plans for severe weather.',
+        child_friendly: 'Confirm route length, surface, and available facilities locally before bringing children.',
+        restrictions: 'Check current Civil Aviation Authority and site-manager rules, and obtain any required permissions before flying.',
+        flight_conditions: 'Check current weather, airspace, and site-manager guidance before planning a flight.',
+        wind: 'Check the local forecast and wind conditions immediately before any planned flight.',
+        launch_area: 'Use only a launch area that is permitted by the site manager and aviation rules.',
+        obstacles: 'Assess the site safely from an approved area and follow local flight rules.',
+        captured_time: 'Suggested timing: plan the shoot for suitable daylight and check the forecast.',
+        device: 'Choose a camera or phone suited to the composition and conditions you plan for.',
+        conditions: 'Check the forecast and site conditions before planning a shoot.',
+        editing: 'Keep edits natural and preserve the scene’s colors and visible details.',
+        why_i_took_it: 'Suggested frame: focus on a location feature confirmed in the guide.',
+        best_for: 'Visitors interested in the confirmed features described in this guide.',
+        less_suitable_for: 'Anyone who needs confirmed route or access details should check locally before travelling.',
+        checklist: 'Check current access guidance and weather, carry water, and save the route for offline use.',
+        best_time: 'Plan for suitable daylight and check the forecast before visiting.',
+        lighting: 'Use the available daylight and adjust the composition to the conditions on the day.',
+        best_composition: 'Build the frame around a location feature confirmed in the guide.',
+        lens_recommendation: 'Choose a focal length that suits the subject and the space available at the site.',
+        mobile_notes: 'Keep the phone steady, preserve highlights, and check the composition before shooting.',
+        drone_potential: 'Check current aviation and site-manager rules before considering drone use.',
+        summary: `Use current local guidance to plan a visit to ${place.place_name}, including route, access, and conditions.`
+      };
+      const sanitizeArticle = (value, field = '') => {
+        if (typeof value === 'string') {
+          if (value.trim() && !sourceGap.test(value)) return value;
+          if (['elevation_m', 'distance_km'].includes(field)) return undefined;
+          return articleGuidance[field]
+            || `For ${field.replace(/_/g, ' ') || 'this detail'}, check current local guidance before planning a visit to ${place.place_name}.`;
+        }
+        if (Array.isArray(value)) {
+          return value.map((item) => sanitizeArticle(item, field)).filter((item) => item !== undefined);
+        }
+        if (value && typeof value === 'object') {
+          return Object.fromEntries(Object.entries(value)
+            .map(([key, item]) => [key, sanitizeArticle(item, key)])
+            .filter(([, item]) => item !== undefined));
+        }
+        return value;
+      };
+      aiJson = sanitizeArticle(aiJson);
+
       aiJson.fact_sources = Array.isArray(data.factSources) ? data.factSources : [];
       aiJson.fact_checked_at = typeof data.factCheckedAt === 'string' ? data.factCheckedAt : null;
       aiJson.fact_check_location = {
@@ -2093,7 +2151,7 @@ Return only JSON matching the provided schema. Keep the information concise and 
         if (place.ai_article?.[key] !== undefined) aiJson[key] = place.ai_article[key];
       }
 
-      return await saveArticleToDatabase(place, aiJson);
+      return await saveArticleToDatabase(place, aiJson, { articleOnly });
 
     } catch (err) {
       triggerToast(`Fetch Error: ${err.message}`);
@@ -2101,243 +2159,82 @@ Return only JSON matching the provided schema. Keep the information concise and 
     }
   };
 
-  const generatePlaceMetadata = async (place) => {
-    const metaPrompt = `Determine access restriction and responsible governing body for the exact location in the supplied place context. Use only the source-grounded research brief appended after this prompt. The research must match the same location.
-
-Use authoritative current sources for access and agency responsibility. Do not infer restrictions from the category or from the absence of a rule. Do not assume that a public location is unrestricted. Do not infer the responsible agency from the parent area's agency unless the source confirms it manages this exact place.
-
-Restriction level definitions:
-- "None": an authoritative source confirms ordinary public access with no special location-specific restriction.
-- "Low": an authoritative source confirms limited local rules or guidance without a permit/controlled-entry requirement.
-- "High": an authoritative source confirms controlled entry, tickets, permits, or required authorization.
-- "Restricted": an authoritative source confirms entry is prohibited or the site is legally closed/restricted to visitors.
-
-For governing_org, use the best matching organization only when an authoritative source assigns responsibility for this exact site or its confirmed parent area. Use "Open" only when a source supports that no specific governing body applies. If evidence is insufficient or sources conflict, set that field's verified flag to false; the value will not be saved. Do not force a restriction level based on the organization.
-
-Return only JSON matching the provided schema. Give a short evidence summary and identify the parent protected/heritage area only if confirmed.`;
-
-    const governingBodies = [
-      'Open',
-      'Department of Wildlife Conservation',
-      'Department of Forest Conservation',
-      'Central Cultural Fund',
-      'Department of Archaeology',
-      'Department of National Botanic Gardens',
-      'National Livestock Development Board',
-      'Local Authorities'
-    ];
-    const restrictionLevels = ['None', 'Low', 'High', 'Restricted'];
-
-    try {
-      const response = await fetch('/api/generate-article', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: metaPrompt }] }],
-          factCheck: {
-            scope: 'metadata',
-            placeName: place.place_name,
-            category: place.category,
-            locality: place.locality,
-            latitude: place.latitude,
-            longitude: place.longitude
-          },
-          generationConfig: {
-            responseMimeType: "application/json",
-            temperature: 0.1,
-            maxOutputTokens: 2048,
-            responseSchema: {
-              type: 'OBJECT',
-              properties: {
-                parent_area: { type: 'STRING' },
-                restriction_level: { type: 'STRING', enum: restrictionLevels },
-                restriction_verified: { type: 'BOOLEAN' },
-                governing_org: { type: 'STRING', enum: governingBodies },
-                governing_org_verified: { type: 'BOOLEAN' },
-                evidence_summary: { type: 'STRING' }
-              },
-              required: [
-                'parent_area', 'restriction_level', 'restriction_verified',
-                'governing_org', 'governing_org_verified', 'evidence_summary'
-              ]
-            }
-          }
-        })
-      });
-
-      const data = await response.json();
-      if (!response.ok || data.error) {
-        const message = typeof data.error === 'string'
-          ? data.error
-          : data.error?.message || `Metadata generation failed (${response.status}).`;
-        throw new Error(message);
-      }
-
-      if (!data.candidates || !data.candidates[0]?.content?.parts[0]?.text) {
-        throw new Error("No content generated by AI.");
-      }
-
-      // Clean markdown formatting if present before parsing JSON
-      const rawText = data.candidates[0].content.parts[0].text;
-      const cleanedText = rawText.replace(/```json\n?|```/g, '').trim();
-
-      let aiJson;
-      try {
-        aiJson = JSON.parse(cleanedText);
-      } catch (parseError) {
-        throw new Error(`Failed to parse AI response JSON: ${parseError.message}`, { cause: parseError });
-      }
-
-      const validRestriction = restrictionLevels.includes(aiJson.restriction_level);
-      const validGoverningBody = governingBodies.includes(aiJson.governing_org);
-      const restrictionVerified = aiJson.restriction_verified === true && validRestriction;
-      const governingBodyVerified = aiJson.governing_org_verified === true && validGoverningBody;
-      const sourceList = Array.isArray(data.factSources) ? data.factSources : [];
-      const metadataSnapshot = {
-        place_name: place.place_name,
-        category: place.category,
-        locality: place.locality,
-        latitude: place.latitude,
-        longitude: place.longitude
-      };
-      const { data: currentRecord, error: readError } = await supabaseClient
-        .from('travel_bucket_list')
-        .select('ai_article')
-        .eq('id', place.id)
-        .single();
-      if (readError) throw readError;
-
-      const articleData = {
-        ...(currentRecord?.ai_article || place.ai_article || {}),
-        metadata_fact_sources: sourceList,
-        metadata_fact_checked_at: typeof data.factCheckedAt === 'string' ? data.factCheckedAt : null,
-        metadata_fact_location: metadataSnapshot,
-        metadata_parent_area: typeof aiJson.parent_area === 'string' ? aiJson.parent_area : '',
-        metadata_restriction_verified: restrictionVerified,
-        metadata_governing_org_verified: governingBodyVerified
-      };
-      const update = { ai_article: articleData };
-      if (restrictionVerified) update.restriction_level = aiJson.restriction_level;
-      if (governingBodyVerified) update.governing_org = aiJson.governing_org;
-
-      const { error } = await supabaseClient
-        .from('travel_bucket_list')
-        .update(update)
-        .eq('id', place.id);
-
-      if (error) throw error;
-      setPlaces((current) => current.map((item) => (
-        item.id === place.id ? { ...item, ...update } : item
-      )));
-      return {
-        saved: true,
-        restrictionVerified,
-        governingBodyVerified,
-        evidenceSummary: aiJson.evidence_summary
-      };
-    } catch (err) {
-      if (typeof triggerToast === 'function') {
-        triggerToast(`Metadata Error: ${err.message}`);
-      }
-      throw err;
-    }
-  };
-
-  const bulkFactCheckCompletedLocations = async () => {
+  const bulkFactCheckArticles = async () => {
     if (bulkFactCheckInProgressRef.current) return;
 
-    const targets = places.filter((place) => place.status === 'done');
-    const articleTargets = targets.filter((place) => (
-      typeof place.ai_article?.story === 'string' && place.ai_article.story.trim().length > 0
+    const targets = places.filter((place) => (
+      place.status === 'done'
+      && (
+        (typeof place.ai_article?.story === 'string' && place.ai_article.story.trim().length > 0)
+        || (typeof place.ai_article?.description === 'string' && place.ai_article.description.trim().length > 0)
+      )
     ));
 
     if (targets.length === 0) {
-      triggerToast('No completed/visited locations found.');
+      triggerToast('No completed/visited locations with existing articles found.');
       return;
     }
 
     const confirmed = window.confirm(
-      `Fact-check ${targets.length} completed/visited locations: rebuild ${articleTargets.length} existing articles and verify restriction level and governing body for every location? Existing articles are replaced only when generation succeeds; metadata fields are saved only when authoritative sources support them.`
+      `Fact-check and rebuild ${targets.length} existing articles for completed/visited locations? Each article is replaced only if generation succeeds. This updates article content only: it will not submit URLs to IndexNow, change the article creation date, or alter restriction and governing-body fields.`
     );
     if (!confirmed) return;
 
     bulkFactCheckInProgressRef.current = true;
-    const operations = targets.flatMap((place) => [
-      ...(articleTargets.includes(place) ? [{ place, type: 'article' }] : []),
-      { place, type: 'metadata' }
-    ]);
-    setBulkFactCheckProgress({ current: 0, total: operations.length, waitingForQuota: false });
-    let articlesRebuilt = 0;
-    let metadataChecked = 0;
-    let metadataValuesVerified = 0;
-    let metadataNeedsReview = 0;
+    setBulkFactCheckProgress({ current: 0, total: targets.length, waitingForQuota: false });
+    let rebuilt = 0;
     let failed = 0;
     let quotaPauseUsed = false;
     let quotaLimitReached = false;
     const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
     try {
-      for (let index = 0; index < operations.length; index += 1) {
-        const { place, type } = operations[index];
+      for (let index = 0; index < targets.length; index += 1) {
+        const place = targets[index];
         setBulkFactCheckProgress({
           current: index + 1,
-          total: operations.length,
+          total: targets.length,
           placeName: place.place_name,
-          step: type,
           waitingForQuota: false
         });
 
-        const runOperation = async () => type === 'article'
-          ? await generateTravelArticle(place)
-          : await generatePlaceMetadata(place);
-
         let result = null;
         try {
-          result = await runOperation();
+          result = await generateTravelArticle(place, { articleOnly: true });
         } catch (error) {
           const isQuotaError = /quota|429/i.test(error?.message || '');
           if (isQuotaError && !quotaPauseUsed) {
             quotaPauseUsed = true;
             setBulkFactCheckProgress({
               current: index + 1,
-              total: operations.length,
+              total: targets.length,
               placeName: place.place_name,
-              step: type,
               waitingForQuota: true
             });
             triggerToast('AI quota reached. Waiting 65 seconds before one retry.');
             await delay(65_000);
             try {
-              result = await runOperation();
+              result = await generateTravelArticle(place, { articleOnly: true });
             } catch (retryError) {
               if (/quota|429/i.test(retryError?.message || '')) quotaLimitReached = true;
-              console.error(`Fact-check failed for ${place.place_name}:`, retryError);
+              console.error(`Article fact-check failed for ${place.place_name}:`, retryError);
             }
           } else {
             if (isQuotaError) quotaLimitReached = true;
-            console.error(`Fact-check failed for ${place.place_name}:`, error);
+            console.error(`Article fact-check failed for ${place.place_name}:`, error);
           }
         }
 
-        if (type === 'article') {
-          if (result === true) articlesRebuilt += 1;
-          else failed += 1;
-        } else if (result?.saved) {
-          metadataChecked += 1;
-          const verifiedFields = Number(result.restrictionVerified) + Number(result.governingBodyVerified);
-          metadataValuesVerified += verifiedFields;
-          if (verifiedFields < 2) metadataNeedsReview += 1;
-        } else {
-          failed += 1;
-        }
+        if (result === true) rebuilt += 1;
+        else failed += 1;
 
         if (quotaLimitReached) break;
-        if (index < operations.length - 1) await delay(3_000);
+        if (index < targets.length - 1) await delay(3_000);
       }
 
-      const notAttempted = operations.length - articlesRebuilt - metadataChecked - failed;
+      const notAttempted = targets.length - rebuilt - failed;
       triggerToast(
-        `Fact-check finished: ${articlesRebuilt}/${articleTargets.length} articles rebuilt; metadata checked for ${metadataChecked}/${targets.length} locations; ${metadataValuesVerified} fields verified; ${metadataNeedsReview} locations need review; ${failed} failed${notAttempted ? `; ${notAttempted} tasks not attempted after quota limit` : ''}.`
+        `Article fact-check finished: ${rebuilt}/${targets.length} rebuilt; ${failed} failed${notAttempted ? `; ${notAttempted} not attempted after quota limit` : ''}.`
       );
       refreshAllData();
     } finally {
@@ -2534,8 +2431,21 @@ Return only JSON matching the provided schema. Give a short evidence summary and
     }
   };
 
-  const saveArticleToDatabase = async (place, articleData) => {
+  const saveArticleToDatabase = async (place, articleData, { articleOnly = false } = {}) => {
     try {
+      if (articleOnly) {
+        const { error } = await supabaseClient
+          .from('travel_bucket_list')
+          .update({ ai_article: articleData })
+          .eq('id', place.id);
+
+        if (error) throw error;
+        setPlaces((currentPlaces) => currentPlaces.map((item) => (
+          item.id === place.id ? { ...item, ai_article: articleData } : item
+        )));
+        return true;
+      }
+
       const shouldNotifySubscribers = !place.ai_article?.story;
       // Generate clean URL slug for the place
       const generatedSlug = generateCleanSlug(place.place_name);
@@ -3812,10 +3722,10 @@ Return only JSON matching the provided schema. Give a short evidence summary and
                 </button>
 
                 <button
-                  onClick={bulkFactCheckCompletedLocations}
+                  onClick={bulkFactCheckArticles}
                   disabled={Boolean(bulkFactCheckProgress)}
                   className="flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all border bg-cyan-50 border-cyan-200 text-cyan-700 hover:bg-cyan-100 active:scale-95 shadow-sm disabled:opacity-60 disabled:cursor-wait"
-                  title="Rebuild existing articles and fact-check access restrictions and governing bodies for completed/visited locations"
+                  title="Fact-check and rebuild existing articles for completed/visited locations; location metadata is unchanged"
                 >
                   <Icon
                     name="shield-check"
@@ -3823,8 +3733,8 @@ Return only JSON matching the provided schema. Give a short evidence summary and
                   />
                   <span>
                     {bulkFactCheckProgress
-                      ? `${bulkFactCheckProgress.waitingForQuota ? 'Waiting' : bulkFactCheckProgress.step === 'metadata' ? 'Metadata' : 'Article'} ${bulkFactCheckProgress.current}/${bulkFactCheckProgress.total}`
-                      : 'Fact-check Places'}
+                      ? `${bulkFactCheckProgress.waitingForQuota ? 'Waiting' : 'Article'} ${bulkFactCheckProgress.current}/${bulkFactCheckProgress.total}`
+                      : 'Fact-check Articles'}
                   </span>
                 </button>
 
@@ -3865,18 +3775,7 @@ Return only JSON matching the provided schema. Give a short evidence summary and
                       }
                     })
                     : [];
-                  const metadataFactSources = Array.isArray(p.ai_article?.metadata_fact_sources)
-                    ? p.ai_article.metadata_fact_sources.filter((source) => {
-                      if (typeof source?.url !== 'string') return false;
-                      try {
-                        return ['http:', 'https:'].includes(new URL(source.url).protocol);
-                      } catch {
-                        return false;
-                      }
-                    })
-                    : [];
                   const hasFactCheck = isArticleFactCheckedForPlace(p.ai_article, p);
-                  const hasMetadataFactCheck = isMetadataFactCheckedForPlace(p.ai_article, p);
 
                   return (
                     <div key={p.id} className="bg-white rounded-[1.5rem] border border-slate-200 shadow-sm overflow-hidden flex flex-col group relative hover:shadow-md transition-all">
@@ -4033,41 +3932,6 @@ Return only JSON matching the provided schema. Give a short evidence summary and
                           </details>
                         )}
 
-                        {p.ai_article?.metadata_fact_checked_at && (
-                          <details className={`rounded-lg px-2.5 py-2 text-[8px] ${hasMetadataFactCheck ? 'bg-sky-50 text-sky-700' : 'bg-amber-50 text-amber-700'}`}>
-                            <summary className="cursor-pointer font-black uppercase tracking-wide">
-                              {hasMetadataFactCheck
-                                ? `Access & authority · ${metadataFactSources.length} sources · ${Number(p.ai_article.metadata_restriction_verified === true) + Number(p.ai_article.metadata_governing_org_verified === true)}/2 fields verified`
-                                : 'Access & authority check is out of date'}
-                            </summary>
-                            {hasMetadataFactCheck ? (
-                              <>
-                                {(p.ai_article.metadata_restriction_verified !== true || p.ai_article.metadata_governing_org_verified !== true) && (
-                                  <p className="mt-1.5 leading-relaxed">One or more values lacked authoritative confirmation and were left unchanged.</p>
-                                )}
-                                {p.ai_article.metadata_parent_area && (
-                                  <p className="mt-1.5">Parent area: {p.ai_article.metadata_parent_area}</p>
-                                )}
-                                <ul className="mt-2 space-y-1.5">
-                                  {metadataFactSources.map((source, index) => (
-                                    <li key={`${source.url}-${index}`}>
-                                      <a
-                                        href={source.url}
-                                        target="_blank"
-                                        rel="noreferrer"
-                                        className="underline underline-offset-2 hover:text-sky-900"
-                                      >
-                                        {source.title || source.url}
-                                      </a>
-                                    </li>
-                                  ))}
-                                </ul>
-                              </>
-                            ) : (
-                              <p className="mt-1.5 leading-relaxed">Re-run Fact-check Places after changing this location’s details.</p>
-                            )}
-                          </details>
-                        )}
                       </div>
 
                       {/* Action Footer - Organized & Symmetrical */}
@@ -4110,7 +3974,7 @@ Return only JSON matching the provided schema. Give a short evidence summary and
                           }}
                           className={`w-8 h-8 rounded-xl flex items-center justify-center hover:bg-white hover:shadow-sm transition-all disabled:opacity-50 ${hasArticle ? 'text-orange-500' : 'text-slate-300'
                             }`}
-                          title={hasArticle ? "Edit Article" : "Generate with AI"}
+                          title={hasArticle ? "Edit Article" : "Generate article with web fact-checking; location metadata stays unchanged"}
                         >
                           <Icon name={hasArticle ? "file-text" : "sparkles"} className="w-4 h-4" />
                         </button>
@@ -4127,7 +3991,7 @@ Return only JSON matching the provided schema. Give a short evidence summary and
                               }
                             }}
                             className="w-8 h-8 rounded-xl flex items-center justify-center hover:bg-white hover:shadow-sm transition-all text-emerald-600 disabled:opacity-50"
-                            title="Rebuild with web fact check"
+                            title="Rebuild article with web fact-checking; location metadata stays unchanged"
                           >
                             <Icon name="shield-check" className="w-4 h-4" />
                           </button>
