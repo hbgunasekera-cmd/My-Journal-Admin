@@ -1,6 +1,6 @@
 import { requireTrustedMutation } from '../server/api-security.js';
 
-const MAX_PROMPT_CHARS = 40_000;
+const MAX_PROMPT_CHARS = 90_000;
 const MAX_OUTPUT_TOKENS = 8_192;
 
 const readText = (result) => (result?.candidates?.[0]?.content?.parts || [])
@@ -9,12 +9,11 @@ const readText = (result) => (result?.candidates?.[0]?.content?.parts || [])
   .join('\n')
   .trim();
 
-const getGroundedSources = (result) => {
-  const chunks = result?.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+const sanitizeSources = (sources) => {
   const seen = new Set();
 
-  return chunks.flatMap((chunk) => {
-    const url = chunk?.web?.uri;
+  return (Array.isArray(sources) ? sources : []).flatMap((source) => {
+    const url = source?.url;
     if (typeof url !== 'string') return [];
 
     try {
@@ -22,13 +21,21 @@ const getGroundedSources = (result) => {
       if (!['https:', 'http:'].includes(parsedUrl.protocol) || seen.has(parsedUrl.href)) return [];
       seen.add(parsedUrl.href);
       return [{
-        title: typeof chunk.web.title === 'string' ? chunk.web.title.slice(0, 300) : parsedUrl.hostname,
+        title: typeof source.title === 'string' ? source.title.slice(0, 300) : parsedUrl.hostname,
         url: parsedUrl.href
       }];
     } catch {
       return [];
     }
   }).slice(0, 12);
+};
+
+const getGroundedSources = (result) => {
+  const chunks = result?.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+  return sanitizeSources(chunks.map((chunk) => ({
+    title: chunk?.web?.title,
+    url: chunk?.web?.uri
+  })));
 };
 
 const getFactContext = (value) => {
@@ -158,9 +165,15 @@ export default async function handler(req, res) {
 
   let phase = 'article generation';
   try {
+    const researchOnly = requestBody.researchOnly === true;
     const factContext = getFactContext(requestBody.factCheck);
     let factSources = [];
     let factCheckedAt = null;
+    let factEvidence = null;
+
+    if (researchOnly && !factContext?.placeName) {
+      return res.status(400).json({ error: 'Place details are required for fact-check research.' });
+    }
 
     if (factContext?.placeName) {
       phase = 'web fact-check research';
@@ -168,7 +181,7 @@ export default async function handler(req, res) {
         contents: [{ role: 'user', parts: [{ text: getResearchPrompt(factContext) }] }],
         tools: [{ google_search: {} }],
         generationConfig: { temperature: 0.1, maxOutputTokens: 3_000 }
-      }, 15_000);
+      }, researchOnly ? 50_000 : 15_000);
       const researchResult = await researchResponse.json().catch(() => ({}));
       if (!researchResponse.ok) return sendProviderError(res, researchResponse, researchResult);
 
@@ -184,7 +197,7 @@ export default async function handler(req, res) {
         });
       }
 
-      const evidence = [
+      factEvidence = [
         'SOURCE-GROUNDED LOCATION RESEARCH (use this evidence conservatively; it may contain uncertainty):',
         researchText.slice(0, 12_000),
         'Search sources returned for this research:',
@@ -192,16 +205,39 @@ export default async function handler(req, res) {
         'Use this research to fact-check only the sections identified as source-checked in the article request. For other fields, write prospective first-person editorial suggestions without adding location-specific factual claims or source-gap filler. Vertical-measurement exception: if this research marks the category-appropriate height/elevation UNVERIFIED or has no corroborated value, do not repeat or rely on the web-source measurement; provide a separate best estimate from the model’s learned geographic knowledge and label its basis AI estimate. Never label that estimate web-verified.'
       ].join('\n');
 
-      safeRequest.contents = [...safeRequest.contents, { role: 'user', parts: [{ text: evidence }] }];
+      safeRequest.contents = [...safeRequest.contents, { role: 'user', parts: [{ text: factEvidence }] }];
       factCheckedAt = new Date().toISOString();
+
+      if (researchOnly) {
+        return res.status(200).json({ factSources, factCheckedAt, factEvidence });
+      }
+    } else if (typeof requestBody.factEvidence === 'string' && requestBody.factEvidence.trim()) {
+      factEvidence = requestBody.factEvidence.slice(0, 24_000);
+      factSources = sanitizeSources(requestBody.factSources);
+      const parsedFactCheckedAt = Date.parse(requestBody.factCheckedAt);
+      factCheckedAt = Number.isFinite(parsedFactCheckedAt)
+        ? new Date(parsedFactCheckedAt).toISOString()
+        : null;
+      if (!factCheckedAt || factSources.length === 0) {
+        return res.status(422).json({ error: 'Verified article research is missing its source record.' });
+      }
+      safeRequest.contents = [...safeRequest.contents, { role: 'user', parts: [{ text: factEvidence }] }];
+    }
+
+    const finalPromptLength = safeRequest.contents
+      .flatMap((content) => content.parts)
+      .reduce((total, part) => total + (part?.text?.length || 0), 0);
+    if (finalPromptLength > MAX_PROMPT_CHARS) {
+      return res.status(400).json({ error: 'Generation prompt is too large.' });
     }
 
     phase = 'article generation';
-    const response = await callGemini(apiKey, safeRequest, 40_000);
+    const generationTimeout = requestBody.factCheck && !researchOnly ? 30_000 : 50_000;
+    const response = await callGemini(apiKey, safeRequest, generationTimeout);
 
     const result = await response.json().catch(() => ({}));
     if (!response.ok) return sendProviderError(res, response, result);
-    return res.status(200).json({ ...result, factSources, factCheckedAt });
+    return res.status(200).json({ ...result, factSources, factCheckedAt, factEvidence });
   } catch (error) {
     console.error(`Article ${phase} request failed:`, error.name, error.message);
     if (error.name === 'TimeoutError' || error.name === 'AbortError') {
