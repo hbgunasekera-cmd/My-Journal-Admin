@@ -413,6 +413,7 @@ function App() {
   const [toast, setToast] = useState({ show: false, msg: '' });
   const [bulkFactCheckProgress, setBulkFactCheckProgress] = useState(null);
   const [bulkFactCheckChoice, setBulkFactCheckChoice] = useState(null);
+  const [bulkGenerationProgress, setBulkGenerationProgress] = useState(null);
   const [bulkGenerationLogs, setBulkGenerationLogs] = useState([]);
   const [bulkGenerationErrorCount, setBulkGenerationErrorCount] = useState(0);
   const [bulkGenerationLogDialogOpen, setBulkGenerationLogDialogOpen] = useState(false);
@@ -426,6 +427,19 @@ function App() {
     setBulkGenerationErrorCount(0);
     setBulkGenerationLogDialogOpen(false);
   };
+  const startBulkGenerationProgress = (operation, total) => {
+    resetBulkGenerationLogs();
+    setBulkGenerationProgress({ operation, completed: 0, failed: 0, total, running: true });
+    setBulkGenerationLogDialogOpen(true);
+  };
+  const updateBulkGenerationProgress = (progress) => {
+    setBulkGenerationProgress((currentProgress) => currentProgress
+      ? { ...currentProgress, ...progress }
+      : currentProgress);
+  };
+  const getBulkGenerationPercent = (value, total) => (
+    total > 0 ? Math.round((value / total) * 100) : 0
+  );
   const recordBulkGenerationError = (operation, placeName, attemptNumber, error, disposition) => {
     const message = error?.message || error;
     const logEntry = {
@@ -1638,22 +1652,30 @@ function App() {
       return;
     }
 
-    resetBulkGenerationLogs();
+    startBulkGenerationProgress('Slug generation', targets.length);
     triggerToast(`Generating and syncing slugs for ${targets.length} locations...`);
 
     let updatedCount = 0;
+    let failedCount = 0;
 
-    for (const place of targets) {
+    for (let index = 0; index < targets.length; index += 1) {
+      const place = targets[index];
       const generatedSlug = generateCleanSlug(place.place_name);
-
-      const { error } = await supabaseClient
-        .from('travel_bucket_list')
-        .update({ slug: generatedSlug })
-        .eq('id', place.id);
+      let error = null;
+      try {
+        const result = await supabaseClient
+          .from('travel_bucket_list')
+          .update({ slug: generatedSlug })
+          .eq('id', place.id);
+        error = result.error;
+      } catch (updateError) {
+        error = updateError;
+      }
 
       if (!error) {
         updatedCount++;
       } else {
+        failedCount++;
         recordBulkGenerationError(
           'Slug generation',
           place.place_name,
@@ -1662,11 +1684,13 @@ function App() {
           'Slug was not saved; run bulk slug sync again to retry'
         );
       }
+      updateBulkGenerationProgress({ completed: updatedCount, failed: failedCount, current: index + 1 });
 
       // Brief 200ms delay to respect potential database rate limits
       await new Promise(r => setTimeout(r, 200));
     }
 
+    updateBulkGenerationProgress({ running: false });
     triggerToast(`Successfully synced slugs for ${updatedCount} locations!`);
     refreshAllData(); // Refresh UI global state
   };
@@ -2633,7 +2657,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
     if (!confirmed) return;
 
     bulkFactCheckStopRef.current = false;
-    resetBulkGenerationLogs();
+    startBulkGenerationProgress('Article fact-check', targets.length);
     bulkFactCheckInProgressRef.current = true;
     setBulkFactCheckProgress({
       current: 0,
@@ -2647,6 +2671,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
     let retryRound = 0;
     let pendingPlaces = [...targets];
     const attemptsByPlace = new Map();
+    const failedPlaces = new Set();
     const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
     const waitWhileRunning = async (milliseconds) => {
       const deadline = Date.now() + milliseconds;
@@ -2690,6 +2715,8 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
             });
             if (result === true) {
               rebuilt += 1;
+              failedPlaces.delete(place.id || place.place_name);
+              updateBulkGenerationProgress({ completed: rebuilt, failed: failedPlaces.size });
             } else {
               throw new Error('The article was not saved successfully.');
             }
@@ -2697,6 +2724,8 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
             const errorMessage = error?.message || '';
             retryCount += 1;
             retryQueue.push(place);
+            failedPlaces.add(place.id || place.place_name);
+            updateBulkGenerationProgress({ completed: rebuilt, failed: failedPlaces.size });
             recordBulkGenerationError(
               'Article fact-check',
               place.place_name,
@@ -2736,6 +2765,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
       }
 
       const remaining = pendingPlaces.length;
+      updateBulkGenerationProgress({ completed: rebuilt, failed: failedPlaces.size, running: false });
       if (rebuilt > 0) refreshAllData();
       if (remaining > 0) {
         triggerToast(`Fact-check stopped: ${rebuilt}/${targets.length} rebuilt successfully; ${remaining} still need processing. Choose only not-yet-fact-checked to resume.`);
@@ -3072,21 +3102,29 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
       return;
     }
 
-    resetBulkGenerationLogs();
+    startBulkGenerationProgress('Article generation', targets.length);
     triggerToast(`Processing ${targets.length} items...`);
 
     // 2. Sequential generation with automated safety cooldowns
+    let completedCount = 0;
+    const failedPlaces = new Set();
     for (const place of targets) {
       let success = false;
       let attemptNumber = 0;
+      const placeKey = place.id || place.place_name;
       while (!success) { // Keep trying until this specific place is done
         attemptNumber += 1;
         try {
           await generateTravelArticle(place);
           success = true; // Move to next place
+          failedPlaces.delete(placeKey);
+          completedCount += 1;
+          updateBulkGenerationProgress({ completed: completedCount, failed: failedPlaces.size });
           await new Promise(r => setTimeout(r, 4000)); // 4s safety gap
         } catch (err) {
           const isQuotaError = /quota|429|rate.?limit|resource_exhausted/i.test(err?.message || '');
+          failedPlaces.add(placeKey);
+          updateBulkGenerationProgress({ completed: completedCount, failed: failedPlaces.size });
           recordBulkGenerationError(
             'Article generation',
             place.place_name,
@@ -3106,6 +3144,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
       }
     }
 
+    updateBulkGenerationProgress({ running: false });
     triggerToast("Bulk generation finished!");
 
     // 3. Global state sync to display newly built stories
@@ -4288,7 +4327,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                   </span>
                 </button>
 
-                {bulkGenerationErrorCount > 0 && (
+                {(bulkGenerationErrorCount > 0 || bulkGenerationProgress?.running) && (
                   <button
                     type="button"
                     onClick={() => setBulkGenerationLogDialogOpen(true)}
@@ -4296,7 +4335,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                     title="View errors from bulk generation and sync operations"
                   >
                     <Icon name="alert-circle" className="w-3.5 h-3.5 text-rose-600" />
-                    <span>Bulk errors ({bulkGenerationErrorCount})</span>
+                    <span>{bulkGenerationErrorCount > 0 ? `Bulk errors (${bulkGenerationErrorCount})` : 'Bulk progress'}</span>
                   </button>
                 )}
 
@@ -5868,10 +5907,10 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
             <div className="flex items-start justify-between gap-4 p-5 border-b border-slate-100">
               <div>
                 <h2 id="bulk-generation-logs-title" className="text-sm font-black uppercase tracking-wide text-slate-900">
-                  Bulk operation error logs
+                  Bulk operation details
                 </h2>
                 <p className="text-xs text-slate-500 mt-1">
-                  {bulkGenerationErrorCount} error{bulkGenerationErrorCount === 1 ? '' : 's'} logged in this run; showing the latest {bulkGenerationLogs.length}.
+                  {bulkGenerationProgress?.operation || 'Bulk operation'} · {bulkGenerationErrorCount} error{bulkGenerationErrorCount === 1 ? '' : 's'} logged; showing the latest {bulkGenerationLogs.length}.
                 </p>
               </div>
               <button
@@ -5883,6 +5922,62 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                 <Icon name="x" className="w-4 h-4" />
               </button>
             </div>
+
+            {bulkGenerationProgress && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-4 border-b border-slate-100 bg-white">
+                <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-xs font-black uppercase tracking-wide text-emerald-800">Completed</span>
+                    <span className="text-sm font-black text-emerald-700">
+                      {getBulkGenerationPercent(bulkGenerationProgress.completed, bulkGenerationProgress.total)}%
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between mt-1 text-[11px] text-emerald-800">
+                    <span>{bulkGenerationProgress.completed}/{bulkGenerationProgress.total}</span>
+                    <span>{bulkGenerationProgress.running ? 'In progress' : 'Finished'}</span>
+                  </div>
+                  <div
+                    className="h-2 mt-3 overflow-hidden rounded-full bg-emerald-100"
+                    role="progressbar"
+                    aria-label="Bulk operation completed"
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={getBulkGenerationPercent(bulkGenerationProgress.completed, bulkGenerationProgress.total)}
+                  >
+                    <div
+                      className="h-full rounded-full bg-emerald-500 transition-all duration-300"
+                      style={{ width: `${getBulkGenerationPercent(bulkGenerationProgress.completed, bulkGenerationProgress.total)}%` }}
+                    />
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-xs font-black uppercase tracking-wide text-rose-800">Failed</span>
+                    <span className="text-sm font-black text-rose-700">
+                      {getBulkGenerationPercent(bulkGenerationProgress.failed, bulkGenerationProgress.total)}%
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between mt-1 text-[11px] text-rose-800">
+                    <span>{bulkGenerationProgress.failed}/{bulkGenerationProgress.total}</span>
+                    <span>{bulkGenerationProgress.running ? 'Failed or awaiting retry' : 'Failed'}</span>
+                  </div>
+                  <div
+                    className="h-2 mt-3 overflow-hidden rounded-full bg-rose-100"
+                    role="progressbar"
+                    aria-label="Bulk operation failed"
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={getBulkGenerationPercent(bulkGenerationProgress.failed, bulkGenerationProgress.total)}
+                  >
+                    <div
+                      className="h-full rounded-full bg-rose-500 transition-all duration-300"
+                      style={{ width: `${getBulkGenerationPercent(bulkGenerationProgress.failed, bulkGenerationProgress.total)}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div className="min-h-0 flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50">
               {bulkGenerationLogs.map((log) => (
@@ -5902,6 +5997,11 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                   </p>
                 </article>
               ))}
+              {bulkGenerationLogs.length === 0 && (
+                <div className="rounded-2xl border border-slate-200 bg-white p-5 text-center text-xs text-slate-500">
+                  No errors logged for this bulk operation.
+                </div>
+              )}
             </div>
 
             <div className="flex flex-wrap items-center justify-between gap-3 p-4 border-t border-slate-100">
