@@ -1891,7 +1891,7 @@ Return only JSON matching the provided schema. Keep the information concise and 
 - 'explorer_rating': editorial estimates, not measured facts; do not imply they are official ratings.
 - 'photography_notes': label recommendations as suggestions and avoid claiming observed light, weather, or conditions.
 - 'drone_notes': write cautious first-person photography advice; do not claim permission, launch areas, or flight conditions.
-- 'route_report': starting_point must contain only the nearest main town/city serving the locality, not the trailhead. Give distance_km and travel_time as the normal road route from that town to the location (never straight-line distance); include that town's name in travel_time. Include route conditions only when supported. Use concise, neutral wording.
+- 'route_report': starting_point must contain only the nearest main town/city serving the locality, not the trailhead. Give distance_km and travel_time as the normal road route from that town to the location (never straight-line distance); include that town's name in travel_time. Include these route values only when the research supports them; if it does not, omit the unsupported values and continue generating the rest of the article. Include route conditions only when supported. Use concise, neutral wording.
 - 'wish_i_knew': give specific, memorable preparation tips in first person; avoid repeating generic authority-check instructions.
 - 'best_time_to_visit': include specific months or hours only when supported; otherwise give a useful subjective planning approach such as choosing daylight and leaving a flexible schedule.
 - 'history': include source-supported history and local heritage details. If none are found, give verified geographic or place-category context without saying history could not be verified.
@@ -2064,7 +2064,6 @@ Return only JSON matching the provided schema. Keep the information concise and 
         const message = typeof data.error === 'string'
           ? data.error
           : data.error?.message || `Article generation failed (${response.status}).`;
-        triggerToast(`Article generation error: ${message}`);
         throw new Error(message);
       }
 
@@ -2241,15 +2240,20 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
         .replace(/\s+(?:district|town|city)$/i, '')
         .trim()
         .toLowerCase();
-      if (
-        !startingTown
-        || !Number.isFinite(routeDistance)
-        || routeDistance <= 0
-        || !routeTravelTime
-        || !startingTownName
-        || !routeTravelTime.toLowerCase().includes(startingTownName)
-      ) {
-        throw new Error(`Could not build the article because a sourced road distance and travel time from the nearest main town were not available for ${place.place_name}. Check the locality and retry.`);
+      const hasCompleteRoute = startingTown
+        && Number.isFinite(routeDistance)
+        && routeDistance > 0
+        && routeTravelTime
+        && startingTownName;
+      if (!hasCompleteRoute) {
+        // A missing sourced route should not discard an otherwise useful article.
+        // Omit the route facts rather than inventing a town, distance, or travel time.
+        delete routeReport.starting_point;
+        delete routeReport.distance_km;
+        delete routeReport.travel_time;
+      } else if (!routeTravelTime.toLowerCase().includes(startingTownName)) {
+        // Adding the already-researched origin to the wording does not change the estimate.
+        routeReport.travel_time = `From ${startingTown}: ${routeTravelTime}`;
       }
       for (const key of [
         'elevation', 'elevation_m', 'mountain_height', 'mountain_height_m',
@@ -2306,7 +2310,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
       return await saveArticleToDatabase(place, aiJson, { articleOnly });
 
     } catch (err) {
-      triggerToast(`Fetch Error: ${err.message}`);
+      triggerToast(`Article generation failed: ${err.message}`);
       throw err;
     }
   };
@@ -2314,21 +2318,29 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
   const bulkFactCheckArticles = async () => {
     if (bulkFactCheckInProgressRef.current) return;
 
-    const targets = places.filter((place) => (
+    const existingArticlePlaces = places.filter((place) => (
       place.status === 'done'
       && (
         (typeof place.ai_article?.story === 'string' && place.ai_article.story.trim().length > 0)
         || (typeof place.ai_article?.description === 'string' && place.ai_article.description.trim().length > 0)
       )
     ));
+    const targets = existingArticlePlaces.filter((place) => (
+      !isArticleFactCheckedForPlace(place.ai_article, place)
+    ));
+    const alreadyFactChecked = existingArticlePlaces.length - targets.length;
 
-    if (targets.length === 0) {
+    if (existingArticlePlaces.length === 0) {
       triggerToast('No completed/visited locations with existing articles found.');
+      return;
+    }
+    if (targets.length === 0) {
+      triggerToast(`All ${alreadyFactChecked} completed/visited articles are already fact-checked.`);
       return;
     }
 
     const confirmed = window.confirm(
-      `Fact-check and rebuild ${targets.length} existing articles for completed/visited locations? Each article is replaced only if generation succeeds. This updates article content only: it will not submit URLs to IndexNow, change the article creation date, or alter restriction and governing-body fields.`
+      `Fact-check and rebuild ${targets.length} existing articles that are not already fact-checked? ${alreadyFactChecked} already checked article${alreadyFactChecked === 1 ? ' is' : 's are'} skipped. Each article is replaced only if generation succeeds. This updates article content only: it will not submit URLs to IndexNow, change the article creation date, or alter restriction and governing-body fields.`
     );
     if (!confirmed) return;
 
@@ -2386,7 +2398,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
 
       const notAttempted = targets.length - rebuilt - failed;
       triggerToast(
-        `Article fact-check finished: ${rebuilt}/${targets.length} rebuilt; ${failed} failed${notAttempted ? `; ${notAttempted} not attempted after quota limit` : ''}.`
+        `Article fact-check finished: ${rebuilt}/${targets.length} rebuilt; ${failed} failed; ${alreadyFactChecked} already checked skipped${notAttempted ? `; ${notAttempted} not attempted after quota limit` : ''}.`
       );
       refreshAllData();
     } finally {
@@ -3894,7 +3906,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                   onClick={bulkFactCheckArticles}
                   disabled={Boolean(bulkFactCheckProgress)}
                   className="flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all border bg-cyan-50 border-cyan-200 text-cyan-700 hover:bg-cyan-100 active:scale-95 shadow-sm disabled:opacity-60 disabled:cursor-wait"
-                  title="Fact-check and rebuild existing articles for completed/visited locations; location metadata is unchanged"
+                  title="Fact-check existing completed/visited articles that are not already checked; checked articles are skipped"
                 >
                   <Icon
                     name="shield-check"
