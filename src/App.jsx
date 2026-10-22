@@ -3815,9 +3815,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
           const type = isVideoShare ? 'Video Clip' : rawType?.trim() || category || 'Unknown Type';
           const typeSummary = summary.types[type] || { hits: 0, countries: {} };
           typeSummary.hits += 1;
-          if (isVideoShare) {
-            typeSummary.countries[country] = (typeSummary.countries[country] || 0) + 1;
-          }
+          typeSummary.countries[country] = (typeSummary.countries[country] || 0) + 1;
           summary.types[type] = typeSummary;
         }
 
@@ -5706,9 +5704,9 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                               <div className="pb-3 animate-in fade-in slide-in-from-top-2">
                                 <div className="bg-black/20 rounded-xl p-3 space-y-2 border border-white/5 shadow-inner">
                                   <p className="text-[8px] font-black uppercase tracking-widest text-white/40 mb-2 border-b border-white/10 pb-1">
-                                    {item.videoId ? 'Video Shares by Country' : 'Shares by Type'}
+                                    {item.category === 'Video Clip' ? 'Video Shares by Country' : 'Shares by Type & Country'}
                                   </p>
-                                  {item.videoId ? (
+                                  {item.category === 'Video Clip' ? (
                                     <div className="space-y-1 max-h-40 overflow-y-auto custom-scrollbar pr-1">
                                       {Object.entries(item.countries || {})
                                         .sort((a, b) => b[1] - a[1])
@@ -5725,9 +5723,19 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                                         .sort((a, b) => b[1].hits - a[1].hits)
                                         .map(([type, typeSummary]) => (
                                           <div key={type} className="rounded-lg bg-white/5 px-2.5 py-2">
-                                            <div className="flex justify-between items-center">
+                                            <div className="flex justify-between items-center mb-1.5">
                                               <span className="text-[9px] font-black text-white/90">{type}</span>
                                               <span className="text-[9px] font-black text-emerald-200">{typeSummary.hits}</span>
+                                            </div>
+                                            <div className="space-y-1 border-l border-white/10 pl-2">
+                                              {Object.entries(typeSummary.countries || {})
+                                                .sort((a, b) => b[1] - a[1])
+                                                .map(([country, count]) => (
+                                                  <div key={country} className="flex justify-between items-center">
+                                                    <span className="text-[8px] font-bold text-white/60">{country}</span>
+                                                    <span className="text-[8px] font-black text-emerald-300">{count}</span>
+                                                  </div>
+                                                ))}
                                             </div>
                                           </div>
                                         ))}
