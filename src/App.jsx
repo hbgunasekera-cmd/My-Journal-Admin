@@ -415,7 +415,6 @@ function App() {
   const [bulkFactCheckChoice, setBulkFactCheckChoice] = useState(null);
   const [bulkGenerationProgress, setBulkGenerationProgress] = useState(null);
   const [bulkGenerationLogs, setBulkGenerationLogs] = useState([]);
-  const [bulkGenerationErrorCount, setBulkGenerationErrorCount] = useState(0);
   const [bulkGenerationLogDialogOpen, setBulkGenerationLogDialogOpen] = useState(false);
   const triggerToast = React.useCallback((msg) => {
     setToast({ show: true, msg });
@@ -424,7 +423,6 @@ function App() {
   const resetBulkGenerationLogs = () => {
     bulkGenerationHasShownLogRef.current = false;
     setBulkGenerationLogs([]);
-    setBulkGenerationErrorCount(0);
     setBulkGenerationLogDialogOpen(false);
   };
   const startBulkGenerationProgress = (operation, total) => {
@@ -452,11 +450,15 @@ function App() {
       disposition
     };
     setBulkGenerationLogs((currentLogs) => [logEntry, ...currentLogs].slice(0, 100));
-    setBulkGenerationErrorCount((count) => count + 1);
     if (!bulkGenerationHasShownLogRef.current) {
       bulkGenerationHasShownLogRef.current = true;
       setBulkGenerationLogDialogOpen(true);
     }
+  };
+  const clearBulkGenerationErrorsForPlace = (operation, placeName) => {
+    setBulkGenerationLogs((currentLogs) => currentLogs.filter((log) => (
+      log.operation !== operation || log.placeName !== placeName
+    )));
   };
 
   // --- Active Trip & Route Planning States ---
@@ -1674,6 +1676,7 @@ function App() {
 
       if (!error) {
         updatedCount++;
+        clearBulkGenerationErrorsForPlace('Slug generation', place.place_name);
       } else {
         failedCount++;
         recordBulkGenerationError(
@@ -2716,6 +2719,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
             if (result === true) {
               rebuilt += 1;
               failedPlaces.delete(place.id || place.place_name);
+              clearBulkGenerationErrorsForPlace('Article fact-check', place.place_name);
               updateBulkGenerationProgress({ completed: rebuilt, failed: failedPlaces.size });
             } else {
               throw new Error('The article was not saved successfully.');
@@ -3119,6 +3123,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
           success = true; // Move to next place
           failedPlaces.delete(placeKey);
           completedCount += 1;
+          clearBulkGenerationErrorsForPlace('Article generation', place.place_name);
           updateBulkGenerationProgress({ completed: completedCount, failed: failedPlaces.size });
           await new Promise(r => setTimeout(r, 4000)); // 4s safety gap
         } catch (err) {
@@ -4327,7 +4332,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                   </span>
                 </button>
 
-                {(bulkGenerationErrorCount > 0 || bulkGenerationProgress?.running) && (
+                {(bulkGenerationLogs.length > 0 || bulkGenerationProgress?.running) && (
                   <button
                     type="button"
                     onClick={() => setBulkGenerationLogDialogOpen(true)}
@@ -4335,7 +4340,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                     title="View errors from bulk generation and sync operations"
                   >
                     <Icon name="alert-circle" className="w-3.5 h-3.5 text-rose-600" />
-                    <span>{bulkGenerationErrorCount > 0 ? `Bulk errors (${bulkGenerationErrorCount})` : 'Bulk progress'}</span>
+                    <span>{bulkGenerationLogs.length > 0 ? `Bulk errors (${bulkGenerationLogs.length})` : 'Bulk progress'}</span>
                   </button>
                 )}
 
@@ -5910,7 +5915,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                   Bulk operation details
                 </h2>
                 <p className="text-xs text-slate-500 mt-1">
-                  {bulkGenerationProgress?.operation || 'Bulk operation'} · {bulkGenerationErrorCount} error{bulkGenerationErrorCount === 1 ? '' : 's'} logged; showing the latest {bulkGenerationLogs.length}.
+                  {bulkGenerationProgress?.operation || 'Bulk operation'} · {bulkGenerationLogs.length} unresolved error{bulkGenerationLogs.length === 1 ? '' : 's'} shown.
                 </p>
               </div>
               <button
