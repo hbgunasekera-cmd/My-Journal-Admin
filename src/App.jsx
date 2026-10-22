@@ -3777,13 +3777,23 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
     // Aggregate location metrics, retaining share type counts when requested.
     const aggregateLocationData = (dataset, includeShareTypes = false) => {
       return dataset.reduce((acc, item) => {
-        const locName = item.travel_bucket_list?.place_name || 'Unknown Location';
-        const category = item.travel_bucket_list?.category || 'General';
+        const isVideoShare = includeShareTypes && String(item.type || '').trim().toLowerCase() === 'video';
+        const videoId = typeof item.video_id === 'string' ? item.video_id.trim() : '';
+        const videoTitle = typeof item.video_title === 'string' ? item.video_title.trim() : '';
+        const locName = isVideoShare
+          ? videoTitle || (videoId ? `Video clip ${videoId}` : 'Untitled video clip')
+          : item.travel_bucket_list?.place_name || 'Unknown Location';
+        const category = isVideoShare ? 'Video Clip' : item.travel_bucket_list?.category || 'General';
         const country = item.country || 'Unknown';
-        const existing = acc.find((entry) => entry.name === locName);
+        const groupKey = isVideoShare
+          ? `video:${videoId || videoTitle || item.id || locName}`
+          : `location:${locName}`;
+        const existing = acc.find((entry) => entry.key === groupKey);
         const summary = existing || {
+          key: groupKey,
           name: locName,
           category,
+          ...(isVideoShare && videoId ? { videoId } : {}),
           hits: 0,
           countries: {},
           ...(includeShareTypes ? { types: {} } : {})
@@ -3802,10 +3812,9 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
             item.channel,
             item.method
           ].find((value) => typeof value === 'string' && value.trim());
-          const type = rawType?.trim() || category || 'Unknown Type';
-          const typeSummary = summary.types[type] || { hits: 0, countries: {} };
+          const type = isVideoShare ? 'Video Clip' : rawType?.trim() || category || 'Unknown Type';
+          const typeSummary = summary.types[type] || { hits: 0 };
           typeSummary.hits += 1;
-          typeSummary.countries[country] = (typeSummary.countries[country] || 0) + 1;
           summary.types[type] = typeSummary;
         }
 
@@ -5657,13 +5666,14 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                   <div className="bg-white/10 rounded-[2rem] p-5 flex-1 flex flex-col min-h-0 border border-white/5">
                     <div className="overflow-y-auto custom-scrollbar pr-2 flex-1 space-y-1">
                       {dashboardStats?.sharesSummary?.map((item, i) => {
-                        const isExpanded = expandedShareLoc === item.name;
+                        const shareKey = item.key || item.name;
+                        const isExpanded = expandedShareLoc === shareKey;
 
                         return (
                           <div
-                            key={i}
+                            key={shareKey || i}
                             className="flex flex-col border-b border-white/10 last:border-0 group cursor-pointer transition-colors hover:bg-white/5 rounded-xl px-2 -mx-2"
-                            onClick={() => setExpandedShareLoc(isExpanded ? null : item.name)}
+                            onClick={() => setExpandedShareLoc(isExpanded ? null : shareKey)}
                           >
                             <div className="flex justify-between items-center py-3">
                               <div className="flex flex-col truncate pr-4">
@@ -5673,6 +5683,11 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                                 <p className="text-[8px] font-bold text-white/50 uppercase tracking-widest">
                                   {item.category}
                                 </p>
+                                {item.videoId && (
+                                  <p className="text-[8px] font-bold text-white/40 mt-1 truncate" title={`Video ID: ${item.videoId}`}>
+                                    Video ID: {item.videoId}
+                                  </p>
+                                )}
                               </div>
                               <div className="text-right shrink-0 flex items-center gap-2">
                                 <p className="text-sm font-black tracking-tighter text-white">{item.hits}</p>
@@ -5683,7 +5698,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                               </div>
                             </div>
 
-                            {/* Share Type and Country Breakdown */}
+                            {/* Share Type Breakdown */}
                             {isExpanded && (
                               <div className="pb-3 animate-in fade-in slide-in-from-top-2">
                                 <div className="bg-black/20 rounded-xl p-3 space-y-2 border border-white/5 shadow-inner">
@@ -5698,16 +5713,6 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                                           <div className="flex justify-between items-center mb-1.5">
                                             <span className="text-[9px] font-black text-white/90">{type}</span>
                                             <span className="text-[9px] font-black text-emerald-200">{typeSummary.hits}</span>
-                                          </div>
-                                          <div className="space-y-1 border-l border-white/10 pl-2">
-                                            {Object.entries(typeSummary.countries || {})
-                                              .sort((a, b) => b[1] - a[1])
-                                              .map(([country, count]) => (
-                                                <div key={country} className="flex justify-between items-center">
-                                                  <span className="text-[8px] font-bold text-white/60">{country}</span>
-                                                  <span className="text-[8px] font-black text-emerald-300">{count}</span>
-                                                </div>
-                                              ))}
                                           </div>
                                         </div>
                                       ))}
