@@ -2592,7 +2592,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
       ? `all ${targets.length} completed/visited articles, including ${alreadyFactChecked} already fact-checked`
       : `${targets.length} completed/visited articles that are not already fact-checked, skipping ${alreadyFactChecked} already checked`;
     const confirmed = window.confirm(
-      `Fact-check and rebuild ${selectionDescription}? Each article is replaced only if generation succeeds. This updates article content only: it will not submit URLs to IndexNow, change article creation dates, or alter restriction and governing-body fields.`
+      `Rebuild ${selectionDescription}?\nOnly article content changes, and only after successful generation.`
     );
     setBulkFactCheckChoice(null);
     if (!confirmed) return;
