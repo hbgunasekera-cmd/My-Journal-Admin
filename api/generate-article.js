@@ -1,7 +1,7 @@
 import { requireTrustedMutation } from '../server/api-security.js';
 
 const MAX_PROMPT_CHARS = 90_000;
-const MAX_OUTPUT_TOKENS = 8_192;
+const MAX_OUTPUT_TOKENS = 16_384;
 
 const readText = (result) => (result?.candidates?.[0]?.content?.parts || [])
   .map((part) => part?.text)
@@ -75,7 +75,7 @@ Location supplied by the editor:
 Prioritize Sri Lankan government, protected-area authorities, official heritage or tourism organizations, universities, and established reference sources. Search in this order:
 1. Search the exact spot name together with the supplied locality and category.
 2. If locality-based results do not identify the exact spot and coordinates are supplied, use the database coordinate pair to search maps and reverse-geocode the named feature at that point. Search the coordinates with the spot name and category, and use the mapped feature to guide follow-up source searches. Do not treat a nearby road, settlement, or different feature as the exact spot.
-3. If the exact spot is still not identified, determine its nearest main city/town from the coordinates or supplied locality, then perform another Google Search for the spot name together with that city/town. Try plausible spelling/transliteration variants and local or alternate names in these searches as well. Perform the coordinate-based search when coordinates are supplied and the town-based search before returning UNCONFIRMED.
+3. If the exact spot is still not identified, determine its nearest main city/town from the coordinates or supplied locality, then perform another Google Search for the spot name together with that city/town. Try plausible spelling/transliteration variants and local or alternate names in these searches as well. For waterfalls, search variants using 'Ella', 'Oya', 'Falls', and 'Waterfall'; for peaks, include 'Kanda' and 'Mountain' where appropriate. Perform the coordinate-based search when coordinates are supplied and the town-based search before returning UNCONFIRMED.
 Confirm this exact place when reliable sources identify the same spot through its name and coordinates, a clearly identified mapped feature, nearest city/town, or alternate name; do not require an exact spelling or locality-text match. Do not treat a same-name place in another area as a match. Start with exactly one line: ENTITY_MATCH: CONFIRMED or ENTITY_MATCH: UNCONFIRMED. If the searches still do not identify the same place, use UNCONFIRMED.
 
 Required measurements:
@@ -153,11 +153,21 @@ export default async function handler(req, res) {
 
   const generationConfig = requestBody?.generationConfig || {};
   const requestedTokens = Number(generationConfig.maxOutputTokens) || 4096;
+  const suppliedThinkingBudget = Number(generationConfig.thinkingConfig?.thinkingBudget);
+  const thinkingBudget = Number.isFinite(suppliedThinkingBudget)
+    ? Math.max(0, Math.min(suppliedThinkingBudget, 2_048))
+    : (requestedTokens <= 1_024 ? 0 : 512);
   const safeRequest = {
     contents: safeContents,
     generationConfig: {
       ...generationConfig,
       maxOutputTokens: Math.max(256, Math.min(requestedTokens, MAX_OUTPUT_TOKENS)),
+      thinkingConfig: {
+        ...(generationConfig.thinkingConfig && typeof generationConfig.thinkingConfig === 'object'
+          ? generationConfig.thinkingConfig
+          : {}),
+        thinkingBudget
+      },
       temperature: Math.max(0, Math.min(Number(generationConfig.temperature) || 0.1, 1)),
       responseMimeType: 'application/json'
     }
@@ -180,13 +190,18 @@ export default async function handler(req, res) {
       const researchResponse = await callGemini(apiKey, {
         contents: [{ role: 'user', parts: [{ text: getResearchPrompt(factContext) }] }],
         tools: [{ google_search: {} }],
-        generationConfig: { temperature: 0.1, maxOutputTokens: 3_000 }
+        generationConfig: {
+          temperature: 0.1,
+          maxOutputTokens: 3_000,
+          thinkingConfig: { thinkingBudget: 512 }
+        }
       }, researchOnly ? 50_000 : 15_000);
       const researchResult = await researchResponse.json().catch(() => ({}));
       if (!researchResponse.ok) return sendProviderError(res, researchResponse, researchResult);
 
       const researchText = readText(researchResult);
-      const entityMatch = researchText.match(/^\s*ENTITY_MATCH:\s*(CONFIRMED|UNCONFIRMED)\b/im);
+      const entityMatch = researchText.match(/(?:^|\n)\s*ENTITY_MATCH:\s*(CONFIRMED|UNCONFIRMED)\b/im)
+        || researchText.match(/\bENTITY_MATCH:\s*(CONFIRMED|UNCONFIRMED)\b/i);
       factSources = getGroundedSources(researchResult);
 
       if (entityMatch?.[1] !== 'CONFIRMED' || factSources.length === 0) {
