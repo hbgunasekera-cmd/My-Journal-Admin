@@ -1863,7 +1863,7 @@ function App() {
   };
 
 
-  const generateTravelArticle = async (place, { articleOnly = false } = {}) => {
+  const generateTravelArticle = async (place, { articleOnly = false, quiet = false } = {}) => {
     const contextPrompt = `Create a useful, location-specific travel guide for the ${place.category} "${place.place_name}" in ${place.locality || 'Sri Lanka'}.
 
 FACT-CHECK SCOPE — USE WEB-VERIFIED FACTS ONLY IN THESE ARTICLE SECTIONS:
@@ -2310,7 +2310,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
       return await saveArticleToDatabase(place, aiJson, { articleOnly });
 
     } catch (err) {
-      triggerToast(`Article generation failed: ${err.message}`);
+      if (!quiet) triggerToast(`Article generation failed: ${err.message}`);
       throw err;
     }
   };
@@ -2363,29 +2363,45 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
         });
 
         let result = null;
-        try {
-          result = await generateTravelArticle(place, { articleOnly: true });
-        } catch (error) {
-          const isQuotaError = /quota|429/i.test(error?.message || '');
-          if (isQuotaError && !quotaPauseUsed) {
-            quotaPauseUsed = true;
-            setBulkFactCheckProgress({
-              current: index + 1,
-              total: targets.length,
-              placeName: place.place_name,
-              waitingForQuota: true
-            });
-            triggerToast('AI quota reached. Waiting 65 seconds before one retry.');
-            await delay(65_000);
-            try {
-              result = await generateTravelArticle(place, { articleOnly: true });
-            } catch (retryError) {
-              if (/quota|429/i.test(retryError?.message || '')) quotaLimitReached = true;
-              console.error(`Article fact-check failed for ${place.place_name}:`, retryError);
+        let finished = false;
+        let transientRetryUsed = false;
+        while (!finished) {
+          try {
+            result = await generateTravelArticle(place, { articleOnly: true, quiet: true });
+            finished = true;
+          } catch (error) {
+            const errorMessage = error?.message || '';
+            const isQuotaError = /quota|429/i.test(errorMessage);
+            if (isQuotaError && !quotaPauseUsed) {
+              quotaPauseUsed = true;
+              setBulkFactCheckProgress({
+                current: index + 1,
+                total: targets.length,
+                placeName: place.place_name,
+                waitingForQuota: true
+              });
+              triggerToast('AI quota reached. Waiting 65 seconds before one retry.');
+              await delay(65_000);
+              setBulkFactCheckProgress({
+                current: index + 1,
+                total: targets.length,
+                placeName: place.place_name,
+                waitingForQuota: false
+              });
+              continue;
             }
-          } else {
+
             if (isQuotaError) quotaLimitReached = true;
+            const isTransientServiceError = /timed out|could not connect to the ai service|failed to fetch|networkerror|network request failed/i.test(errorMessage);
+            if (isTransientServiceError && !transientRetryUsed) {
+              transientRetryUsed = true;
+              triggerToast(`Temporary AI service issue for ${place.place_name}; retrying once.`);
+              await delay(1_500);
+              continue;
+            }
+
             console.error(`Article fact-check failed for ${place.place_name}:`, error);
+            finished = true;
           }
         }
 

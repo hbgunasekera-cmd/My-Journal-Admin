@@ -67,8 +67,9 @@ Location supplied by the editor:
 
 Prioritize Sri Lankan government, protected-area authorities, official heritage or tourism organizations, universities, and established reference sources. Search in this order:
 1. Search the exact spot name together with the supplied locality and category.
-2. If that does not find reliable information for the exact spot, use the supplied locality or coordinates to identify its nearest main city/town, then search the spot name together with that city/town. Try plausible spelling/transliteration variants and local or alternate names in those searches as well.
-Confirm this exact place when reliable sources identify the same spot through its name and nearest city/town, supplied coordinates, or a clearly identified alternate name; do not require an exact spelling or locality-text match. Do not treat a same-name place in another area as a match. Start with exactly one line: ENTITY_MATCH: CONFIRMED or ENTITY_MATCH: UNCONFIRMED. If the searches still do not identify the same place, use UNCONFIRMED.
+2. If locality-based results do not identify the exact spot and coordinates are supplied, use the database coordinate pair to search maps and reverse-geocode the named feature at that point. Search the coordinates with the spot name and category, and use the mapped feature to guide follow-up source searches. Do not treat a nearby road, settlement, or different feature as the exact spot.
+3. If the exact spot is still not identified, determine its nearest main city/town from the coordinates or supplied locality, then perform another Google Search for the spot name together with that city/town. Try plausible spelling/transliteration variants and local or alternate names in these searches as well. Perform the coordinate-based search when coordinates are supplied and the town-based search before returning UNCONFIRMED.
+Confirm this exact place when reliable sources identify the same spot through its name and coordinates, a clearly identified mapped feature, nearest city/town, or alternate name; do not require an exact spelling or locality-text match. Do not treat a same-name place in another area as a match. Start with exactly one line: ENTITY_MATCH: CONFIRMED or ENTITY_MATCH: UNCONFIRMED. If the searches still do not identify the same place, use UNCONFIRMED.
 
 Required measurements:
 - For a waterfall, research the waterfall's vertical drop/height in metres; do not label it as site elevation.
@@ -167,7 +168,7 @@ export default async function handler(req, res) {
         contents: [{ role: 'user', parts: [{ text: getResearchPrompt(factContext) }] }],
         tools: [{ google_search: {} }],
         generationConfig: { temperature: 0.1, maxOutputTokens: 3_000 }
-      });
+      }, 15_000);
       const researchResult = await researchResponse.json().catch(() => ({}));
       if (!researchResponse.ok) return sendProviderError(res, researchResponse, researchResult);
 
@@ -178,7 +179,7 @@ export default async function handler(req, res) {
       if (entityMatch?.[1] !== 'CONFIRMED' || factSources.length === 0) {
         return res.status(422).json({
           error: {
-            message: 'The location could not be matched to reliable web sources, so the article was left unchanged. Check the place name and locality, add coordinates if available, then try again.'
+            message: 'The exact location could not be confirmed from the supplied locality, saved coordinates, or nearest-town search, so the article was left unchanged. Check the place name and map pin, then try again.'
           }
         });
       }
@@ -196,7 +197,7 @@ export default async function handler(req, res) {
     }
 
     phase = 'article generation';
-    const response = await callGemini(apiKey, safeRequest);
+    const response = await callGemini(apiKey, safeRequest, 40_000);
 
     const result = await response.json().catch(() => ({}));
     if (!response.ok) return sendProviderError(res, response, result);
