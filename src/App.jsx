@@ -3813,8 +3813,11 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
             item.method
           ].find((value) => typeof value === 'string' && value.trim());
           const type = isVideoShare ? 'Video Clip' : rawType?.trim() || category || 'Unknown Type';
-          const typeSummary = summary.types[type] || { hits: 0 };
+          const typeSummary = summary.types[type] || { hits: 0, countries: {} };
           typeSummary.hits += 1;
+          if (isVideoShare) {
+            typeSummary.countries[country] = (typeSummary.countries[country] || 0) + 1;
+          }
           summary.types[type] = typeSummary;
         }
 
@@ -5714,6 +5717,18 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                                             <span className="text-[9px] font-black text-white/90">{type}</span>
                                             <span className="text-[9px] font-black text-emerald-200">{typeSummary.hits}</span>
                                           </div>
+                                          {type === 'Video Clip' && Object.keys(typeSummary.countries || {}).length > 0 && (
+                                            <div className="space-y-1 border-l border-white/10 pl-2">
+                                              {Object.entries(typeSummary.countries)
+                                                .sort((a, b) => b[1] - a[1])
+                                                .map(([country, count]) => (
+                                                  <div key={country} className="flex justify-between items-center">
+                                                    <span className="text-[8px] font-bold text-white/60">{country}</span>
+                                                    <span className="text-[8px] font-black text-emerald-300">{count}</span>
+                                                  </div>
+                                                ))}
+                                            </div>
+                                          )}
                                         </div>
                                       ))}
                                   </div>
