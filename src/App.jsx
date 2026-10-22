@@ -413,10 +413,37 @@ function App() {
   const [toast, setToast] = useState({ show: false, msg: '' });
   const [bulkFactCheckProgress, setBulkFactCheckProgress] = useState(null);
   const [bulkFactCheckChoice, setBulkFactCheckChoice] = useState(null);
+  const [bulkGenerationLogs, setBulkGenerationLogs] = useState([]);
+  const [bulkGenerationErrorCount, setBulkGenerationErrorCount] = useState(0);
+  const [bulkGenerationLogDialogOpen, setBulkGenerationLogDialogOpen] = useState(false);
   const triggerToast = React.useCallback((msg) => {
     setToast({ show: true, msg });
     setTimeout(() => setToast({ show: false, msg: '' }), 2500);
   }, []);
+  const resetBulkGenerationLogs = () => {
+    bulkGenerationHasShownLogRef.current = false;
+    setBulkGenerationLogs([]);
+    setBulkGenerationErrorCount(0);
+    setBulkGenerationLogDialogOpen(false);
+  };
+  const recordBulkGenerationError = (operation, placeName, attemptNumber, error, disposition) => {
+    const message = error?.message || error;
+    const logEntry = {
+      id: `${placeName}-${attemptNumber}-${Date.now()}`,
+      operation,
+      placeName,
+      attemptNumber,
+      timestamp: new Date().toLocaleTimeString(),
+      message: String(message || 'Unknown generation error.'),
+      disposition
+    };
+    setBulkGenerationLogs((currentLogs) => [logEntry, ...currentLogs].slice(0, 100));
+    setBulkGenerationErrorCount((count) => count + 1);
+    if (!bulkGenerationHasShownLogRef.current) {
+      bulkGenerationHasShownLogRef.current = true;
+      setBulkGenerationLogDialogOpen(true);
+    }
+  };
 
   // --- Active Trip & Route Planning States ---
   const [selectedTrip, setSelectedTrip] = useState([]);
@@ -443,6 +470,7 @@ function App() {
   const youtubeSyncInProgressRef = useRef(false);
   const bulkFactCheckInProgressRef = useRef(false);
   const bulkFactCheckStopRef = useRef(false);
+  const bulkGenerationHasShownLogRef = useRef(false);
   const REFRESH_INTERVAL_SECONDS = 600;
   const [timeLeft, setTimeLeft] = useState(REFRESH_INTERVAL_SECONDS);
 
@@ -1610,6 +1638,7 @@ function App() {
       return;
     }
 
+    resetBulkGenerationLogs();
     triggerToast(`Generating and syncing slugs for ${targets.length} locations...`);
 
     let updatedCount = 0;
@@ -1625,7 +1654,13 @@ function App() {
       if (!error) {
         updatedCount++;
       } else {
-        console.error(`Failed to update slug for ${place.place_name}:`, error);
+        recordBulkGenerationError(
+          'Slug generation',
+          place.place_name,
+          1,
+          error,
+          'Slug was not saved; run bulk slug sync again to retry'
+        );
       }
 
       // Brief 200ms delay to respect potential database rate limits
@@ -2598,6 +2633,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
     if (!confirmed) return;
 
     bulkFactCheckStopRef.current = false;
+    resetBulkGenerationLogs();
     bulkFactCheckInProgressRef.current = true;
     setBulkFactCheckProgress({
       current: 0,
@@ -2661,7 +2697,13 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
             const errorMessage = error?.message || '';
             retryCount += 1;
             retryQueue.push(place);
-            console.error(`Article fact-check attempt ${attemptNumber} failed for ${place.place_name}; it will be retried:`, error);
+            recordBulkGenerationError(
+              'Article fact-check',
+              place.place_name,
+              attemptNumber,
+              error,
+              'Queued for automatic retry'
+            );
             if (/quota|429|rate.?limit|resource_exhausted/i.test(errorMessage)) {
               quotaHit = true;
               retryQueue.push(...pendingPlaces.slice(index + 1));
@@ -3030,18 +3072,29 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
       return;
     }
 
+    resetBulkGenerationLogs();
     triggerToast(`Processing ${targets.length} items...`);
 
     // 2. Sequential generation with automated safety cooldowns
     for (const place of targets) {
       let success = false;
+      let attemptNumber = 0;
       while (!success) { // Keep trying until this specific place is done
+        attemptNumber += 1;
         try {
           await generateTravelArticle(place);
           success = true; // Move to next place
           await new Promise(r => setTimeout(r, 4000)); // 4s safety gap
         } catch (err) {
-          if (err.message.includes("quota") || err.message.includes("429")) {
+          const isQuotaError = /quota|429|rate.?limit|resource_exhausted/i.test(err?.message || '');
+          recordBulkGenerationError(
+            'Article generation',
+            place.place_name,
+            attemptNumber,
+            err,
+            isQuotaError ? 'Waiting for quota cooldown, then retrying' : 'Skipped for this run'
+          );
+          if (isQuotaError) {
             triggerToast("Quota Full. Pausing for 65s...");
             await new Promise(r => setTimeout(r, 65000)); // Wait for API reset window
             // success remains false, so the 'while' loop will retry this 'place' again
@@ -4234,6 +4287,18 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                       : 'Fact-check Articles'}
                   </span>
                 </button>
+
+                {bulkGenerationErrorCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setBulkGenerationLogDialogOpen(true)}
+                    className="flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all border bg-rose-50 border-rose-200 text-rose-700 hover:bg-rose-100 active:scale-95 shadow-sm"
+                    title="View errors from bulk generation and sync operations"
+                  >
+                    <Icon name="alert-circle" className="w-3.5 h-3.5 text-rose-600" />
+                    <span>Bulk errors ({bulkGenerationErrorCount})</span>
+                  </button>
+                )}
 
                 {/* GENERATE SLUGS */}
                 <button
@@ -5788,6 +5853,86 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
         })()}
 
       </main>
+
+      {bulkGenerationLogDialogOpen && (
+        <div
+          className="fixed inset-0 z-[6200] bg-slate-950/65 backdrop-blur-sm flex items-center justify-center p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="bulk-generation-logs-title"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) setBulkGenerationLogDialogOpen(false);
+          }}
+        >
+          <div className="w-full max-w-3xl max-h-[85vh] rounded-3xl bg-white shadow-2xl border border-slate-200 flex flex-col overflow-hidden">
+            <div className="flex items-start justify-between gap-4 p-5 border-b border-slate-100">
+              <div>
+                <h2 id="bulk-generation-logs-title" className="text-sm font-black uppercase tracking-wide text-slate-900">
+                  Bulk operation error logs
+                </h2>
+                <p className="text-xs text-slate-500 mt-1">
+                  {bulkGenerationErrorCount} error{bulkGenerationErrorCount === 1 ? '' : 's'} logged in this run; showing the latest {bulkGenerationLogs.length}.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setBulkGenerationLogDialogOpen(false)}
+                className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100"
+                aria-label="Close bulk operation error logs"
+              >
+                <Icon name="x" className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50">
+              {bulkGenerationLogs.map((log) => (
+                <article key={log.id} className="rounded-2xl border border-rose-200 bg-white p-4 shadow-sm">
+                  <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+                    <div>
+                      <span className="block text-[9px] font-black uppercase tracking-wide text-rose-600">{log.operation}</span>
+                      <h3 className="mt-1 text-xs font-black text-slate-900">{log.placeName}</h3>
+                    </div>
+                    <span className="text-[10px] font-bold text-slate-500">
+                      Attempt {log.attemptNumber} · {log.timestamp}
+                    </span>
+                  </div>
+                  <p className="mt-2 text-xs leading-relaxed text-rose-800 break-words">{log.message}</p>
+                  <p className="mt-2 text-[10px] font-semibold uppercase tracking-wide text-cyan-700">
+                    {log.disposition}
+                  </p>
+                </article>
+              ))}
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-3 p-4 border-t border-slate-100">
+              <p className="text-[10px] text-slate-500">The latest 100 entries are kept for this bulk run.</p>
+              <div className="flex items-center gap-2">
+                {bulkFactCheckProgress && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      bulkFactCheckStopRef.current = true;
+                      setBulkFactCheckProgress((progress) => progress
+                        ? { ...progress, stopping: true, waitingForQuota: false, waitingForRetry: false }
+                        : progress);
+                    }}
+                    className="px-4 py-2 rounded-xl text-[10px] font-black uppercase text-rose-700 bg-rose-50 border border-rose-200 hover:bg-rose-100"
+                  >
+                    Stop fact-check retries
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setBulkGenerationLogDialogOpen(false)}
+                  className="px-4 py-2 rounded-xl text-[10px] font-black uppercase text-slate-600 bg-slate-100 hover:bg-slate-200"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {bulkFactCheckChoice && (
         <div
