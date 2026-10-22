@@ -52,6 +52,9 @@ const getFactContext = (value) => {
     placeName: cleanString(value.placeName),
     category: cleanString(value.category),
     locality: cleanString(value.locality),
+    researchAttempt: Number.isFinite(Number(value.researchAttempt))
+      ? Math.max(0, Math.floor(Number(value.researchAttempt)))
+      : 0,
     coordinates: Number.isFinite(latitude) && latitude >= -90 && latitude <= 90
       && Number.isFinite(longitude) && longitude >= -180 && longitude <= 180
       ? { latitude, longitude }
@@ -63,8 +66,18 @@ const getResearchPrompt = (place) => {
   const coordinates = place.coordinates
     ? `${place.coordinates.latitude}, ${place.coordinates.longitude}`
     : 'not supplied';
+  const retryStrategies = [
+    'Prioritize coordinate reverse lookup and maps: identify the named natural or heritage feature closest to the saved point, then search that mapped name with the original name and category.',
+    'Prioritize the nearest main town/city and district: search the spot name with each, then search plausible Romanized and local-language spellings together with the category.',
+    'Prioritize alternate naming: remove generic suffixes such as Ella, Oya, Falls, Peak, Kanda, or Mountain, search the remaining name with the category, and compare any aliases against the saved point and locality.',
+    'Prioritize authoritative and regional references: search the feature name with the nearest town, district, protected area, and likely local spelling; use mapped coordinates to reject same-name places elsewhere.'
+  ];
+  const retrySearchStrategy = place.researchAttempt > 0
+    ? `
+This is verification attempt ${place.researchAttempt + 1}; the previous attempt did not confirm the spot. Change the focus of this retry instead of repeating only the same exact-name/locality search. ${retryStrategies[(place.researchAttempt - 1) % retryStrategies.length]} The baseline coordinate, locality, and nearest-town checks below still apply. Accept an alternate name only when it identifies this same feature in the supplied area. Do not return UNCONFIRMED until the distinct searches for this attempt have been tried.`
+    : '';
 
-  return `Research this Sri Lankan location using Google Search. Return a concise factual evidence brief for a visitor guide, not an article.
+  return `Research this Sri Lankan location using Google Search. Return a concise factual evidence brief for a visitor guide, not an article.${retrySearchStrategy}
 
 Location supplied by the editor:
 - Name: ${place.placeName || 'not supplied'}

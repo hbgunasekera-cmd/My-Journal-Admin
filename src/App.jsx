@@ -442,6 +442,7 @@ function App() {
   const activeSharesRef = useRef(new Set());
   const youtubeSyncInProgressRef = useRef(false);
   const bulkFactCheckInProgressRef = useRef(false);
+  const bulkFactCheckStopRef = useRef(false);
   const REFRESH_INTERVAL_SECONDS = 600;
   const [timeLeft, setTimeLeft] = useState(REFRESH_INTERVAL_SECONDS);
 
@@ -1864,7 +1865,11 @@ function App() {
   };
 
 
-  const generateTravelArticle = async (place, { articleOnly = false, quiet = false } = {}) => {
+  const generateTravelArticle = async (place, {
+    articleOnly = false,
+    quiet = false,
+    researchAttempt = 0
+  } = {}) => {
     const contextPrompt = `Create a useful, location-specific travel guide for the ${place.category} "${place.place_name}" in ${place.locality || 'Sri Lanka'}.
 
 FACT-CHECK SCOPE — USE WEB-VERIFIED FACTS ONLY IN THESE ARTICLE SECTIONS:
@@ -2051,7 +2056,8 @@ Return only JSON matching the provided schema. Keep the information concise and 
         category: place.category,
         locality: place.locality,
         latitude: place.latitude,
-        longitude: place.longitude
+        longitude: place.longitude,
+        researchAttempt
       };
       const researchResponse = await fetch('/api/generate-article', {
         method: 'POST',
@@ -2591,80 +2597,111 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
     setBulkFactCheckChoice(null);
     if (!confirmed) return;
 
+    bulkFactCheckStopRef.current = false;
     bulkFactCheckInProgressRef.current = true;
-    setBulkFactCheckProgress({ current: 0, total: targets.length, waitingForQuota: false });
+    setBulkFactCheckProgress({
+      current: 0,
+      total: targets.length,
+      retryRound: 1,
+      waitingForQuota: false,
+      waitingForRetry: false
+    });
     let rebuilt = 0;
-    let failed = 0;
-    let quotaPauseUsed = false;
-    let quotaLimitReached = false;
+    let retryCount = 0;
+    let retryRound = 0;
+    let pendingPlaces = [...targets];
+    const attemptsByPlace = new Map();
     const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+    const waitWhileRunning = async (milliseconds) => {
+      const deadline = Date.now() + milliseconds;
+      while (!bulkFactCheckStopRef.current) {
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) return true;
+        await delay(Math.min(remaining, 1_000));
+      }
+      return false;
+    };
 
     try {
-      for (let index = 0; index < targets.length; index += 1) {
-        const place = targets[index];
-        setBulkFactCheckProgress({
-          current: index + 1,
-          total: targets.length,
-          placeName: place.place_name,
-          waitingForQuota: false
-        });
+      while (pendingPlaces.length > 0 && !bulkFactCheckStopRef.current) {
+        retryRound += 1;
+        const retryQueue = [];
+        let quotaHit = false;
 
-        let result = null;
-        let finished = false;
-        let transientRetryUsed = false;
-        while (!finished) {
+        for (let index = 0; index < pendingPlaces.length; index += 1) {
+          if (bulkFactCheckStopRef.current) {
+            retryQueue.push(...pendingPlaces.slice(index));
+            break;
+          }
+
+          const place = pendingPlaces[index];
+          const attemptNumber = (attemptsByPlace.get(place.id) || 0) + 1;
+          attemptsByPlace.set(place.id, attemptNumber);
+          setBulkFactCheckProgress({
+            current: index + 1,
+            total: pendingPlaces.length,
+            retryRound,
+            placeName: place.place_name,
+            waitingForQuota: false,
+            waitingForRetry: false
+          });
+
           try {
-            result = await generateTravelArticle(place, { articleOnly: true, quiet: true });
-            finished = true;
+            const result = await generateTravelArticle(place, {
+              articleOnly: true,
+              quiet: true,
+              researchAttempt: attemptNumber - 1
+            });
+            if (result === true) {
+              rebuilt += 1;
+            } else {
+              throw new Error('The article was not saved successfully.');
+            }
           } catch (error) {
             const errorMessage = error?.message || '';
-            const isQuotaError = /quota|429/i.test(errorMessage);
-            if (isQuotaError && !quotaPauseUsed) {
-              quotaPauseUsed = true;
-              setBulkFactCheckProgress({
-                current: index + 1,
-                total: targets.length,
-                placeName: place.place_name,
-                waitingForQuota: true
-              });
-              triggerToast('AI quota reached. Waiting 65 seconds before one retry.');
-              await delay(65_000);
-              setBulkFactCheckProgress({
-                current: index + 1,
-                total: targets.length,
-                placeName: place.place_name,
-                waitingForQuota: false
-              });
-              continue;
+            retryCount += 1;
+            retryQueue.push(place);
+            console.error(`Article fact-check attempt ${attemptNumber} failed for ${place.place_name}; it will be retried:`, error);
+            if (/quota|429|rate.?limit|resource_exhausted/i.test(errorMessage)) {
+              quotaHit = true;
+              retryQueue.push(...pendingPlaces.slice(index + 1));
+              break;
             }
+          }
 
-            if (isQuotaError) quotaLimitReached = true;
-            const isTransientServiceError = /timed out|could not connect to the ai service|failed to fetch|networkerror|network request failed/i.test(errorMessage);
-            if (isTransientServiceError && !transientRetryUsed) {
-              transientRetryUsed = true;
-              triggerToast(`Temporary AI service issue for ${place.place_name}; retrying once.`);
-              await delay(1_500);
-              continue;
-            }
-
-            console.error(`Article fact-check failed for ${place.place_name}:`, error);
-            finished = true;
+          if (index < pendingPlaces.length - 1 && !bulkFactCheckStopRef.current) {
+            await waitWhileRunning(3_000);
           }
         }
 
-        if (result === true) rebuilt += 1;
-        else failed += 1;
+        pendingPlaces = retryQueue;
+        if (pendingPlaces.length === 0 || bulkFactCheckStopRef.current) break;
 
-        if (quotaLimitReached) break;
-        if (index < targets.length - 1) await delay(3_000);
+        const backoffMs = Math.min(60_000, 3_000 * (2 ** Math.min(retryRound - 1, 4)));
+        const retryDelayMs = quotaHit ? 65_000 : backoffMs;
+        setBulkFactCheckProgress({
+          current: rebuilt,
+          total: targets.length,
+          retryRound: retryRound + 1,
+          placeName: pendingPlaces[0]?.place_name,
+          waitingForQuota: quotaHit,
+          waitingForRetry: !quotaHit
+        });
+        triggerToast(quotaHit
+          ? `AI quota/rate limit reached. Retrying ${pendingPlaces.length} remaining article(s) in 65 seconds.`
+          : `Retrying ${pendingPlaces.length} article(s) with errors (round ${retryRound + 1}).`);
+        await waitWhileRunning(retryDelayMs);
       }
 
-      const notAttempted = targets.length - rebuilt - failed;
-      triggerToast(
-        `Article fact-check finished: ${rebuilt}/${targets.length} rebuilt; ${failed} failed; ${includeAlreadyFactChecked ? `${alreadyFactChecked} previously checked included` : `${skippedAlreadyChecked} already checked skipped`}${notAttempted ? `; ${notAttempted} not attempted after quota limit` : ''}.`
-      );
-      refreshAllData();
+      const remaining = pendingPlaces.length;
+      if (rebuilt > 0) refreshAllData();
+      if (remaining > 0) {
+        triggerToast(`Fact-check stopped: ${rebuilt}/${targets.length} rebuilt successfully; ${remaining} still need processing. Choose only not-yet-fact-checked to resume.`);
+      } else {
+        triggerToast(`Fact-check complete: all ${rebuilt} selected articles rebuilt successfully${retryCount ? ` after ${retryCount} ${retryCount === 1 ? 'retry' : 'retries'}` : ''}. ${includeAlreadyFactChecked ? `${alreadyFactChecked} previously checked included` : `${skippedAlreadyChecked} already checked skipped`}.`);
+      }
     } finally {
+      bulkFactCheckStopRef.current = false;
       bulkFactCheckInProgressRef.current = false;
       setBulkFactCheckProgress(null);
     }
@@ -4166,18 +4203,34 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                 </button>
 
                 <button
-                  onClick={bulkFactCheckArticles}
-                  disabled={Boolean(bulkFactCheckProgress)}
+                  onClick={() => {
+                    if (bulkFactCheckProgress) {
+                      bulkFactCheckStopRef.current = true;
+                      setBulkFactCheckProgress((progress) => progress
+                        ? { ...progress, stopping: true, waitingForQuota: false, waitingForRetry: false }
+                        : progress);
+                      return;
+                    }
+                    bulkFactCheckArticles();
+                  }}
                   className="flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all border bg-cyan-50 border-cyan-200 text-cyan-700 hover:bg-cyan-100 active:scale-95 shadow-sm disabled:opacity-60 disabled:cursor-wait"
-                  title="Choose whether to rebuild all completed articles or only articles not yet fact-checked"
+                  title={bulkFactCheckProgress
+                    ? 'Stop after the current article attempt'
+                    : 'Choose whether to rebuild all completed articles or only articles not yet fact-checked'}
                 >
                   <Icon
-                    name="shield-check"
-                    className={`w-3.5 h-3.5 text-cyan-600 ${bulkFactCheckProgress ? 'animate-spin' : ''}`}
+                    name={bulkFactCheckProgress ? 'x' : 'shield-check'}
+                    className={`w-3.5 h-3.5 ${bulkFactCheckProgress ? 'text-rose-600' : 'text-cyan-600'}`}
                   />
                   <span>
                     {bulkFactCheckProgress
-                      ? `${bulkFactCheckProgress.waitingForQuota ? 'Waiting' : 'Article'} ${bulkFactCheckProgress.current}/${bulkFactCheckProgress.total}`
+                      ? bulkFactCheckProgress.stopping
+                        ? 'Stopping…'
+                        : bulkFactCheckProgress.waitingForQuota
+                          ? `Quota wait · retry ${bulkFactCheckProgress.retryRound}`
+                          : bulkFactCheckProgress.waitingForRetry
+                            ? `Retry ${bulkFactCheckProgress.retryRound}`
+                            : `Article ${bulkFactCheckProgress.current}/${bulkFactCheckProgress.total}`
                       : 'Fact-check Articles'}
                   </span>
                 </button>
