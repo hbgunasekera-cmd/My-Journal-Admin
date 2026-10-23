@@ -3875,6 +3875,10 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
       latest: latestMetrics,
       totalVisits: parsedData.length,
       totalSubscribers: safeSubscribers.length,
+      locationLikesCount: safeLikes.length,
+      videoLikesCount: safeVideoLikes.length,
+      locationSharesCount: safeShares.length,
+      videoSharesCount: safeVideoShares.length,
       totalLikes: safeLikes.length + safeVideoLikes.length,
       totalShares: safeShares.length + safeVideoShares.length,
       countries: getSortedMetrics(parsedData, 'country'),
@@ -5416,7 +5420,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                 </div>
 
                 {/* Quick Metric Pills */}
-                <div className="flex items-center gap-4 bg-slate-900 px-5 py-2.5 rounded-full border border-slate-800 shadow-lg text-white">
+                <div className="flex flex-wrap items-center justify-center sm:justify-start gap-x-4 gap-y-2 bg-slate-900 px-5 py-2.5 rounded-[1.5rem] sm:rounded-full border border-slate-800 shadow-lg text-white">
 
                   {/* Verified Person & Progress Circle Badge */}
                   <div className="flex items-center gap-2.5 cursor-help group" title="Verified Persons">
@@ -5436,27 +5440,47 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                     </div>
                   </div>
 
-                  <div className="w-px h-3.5 bg-slate-800" />
+                  <div className="hidden sm:block w-px h-3.5 bg-slate-800" />
 
-                  {/* Total Likes */}
-                  <div className="flex items-center gap-1.5 cursor-help group" title="Total location and video likes">
+                  {/* Location Likes */}
+                  <div className="flex items-center gap-1.5 cursor-help group" title="Location likes">
                     <Icon name="heart" className="w-4 h-4 text-rose-400 fill-rose-500/20 group-hover:scale-110 transition-transform" />
                     <span className="text-[11px] font-black text-white">
-                      {dashboardStats.totalLikes || 0}
+                      {dashboardStats.locationLikesCount || 0}
                     </span>
                   </div>
 
-                  <div className="w-px h-3.5 bg-slate-800" />
+                  <div className="hidden sm:block w-px h-3.5 bg-slate-800" />
 
-                  {/* Total Shares */}
-                  <div className="flex items-center gap-1.5 cursor-help group" title="Total location and video shares">
+                  {/* Video Likes */}
+                  <div className="flex items-center gap-1.5 cursor-help group" title="Video likes">
+                    <Icon name="heart" className="w-4 h-4 text-violet-300 fill-violet-400/20 group-hover:scale-110 transition-transform" />
+                    <span className="text-[11px] font-black text-white">
+                      {dashboardStats.videoLikesCount || 0}
+                    </span>
+                  </div>
+
+                  <div className="hidden sm:block w-px h-3.5 bg-slate-800" />
+
+                  {/* Location Shares */}
+                  <div className="flex items-center gap-1.5 cursor-help group" title="Location shares">
                     <Icon name="share-2" className="w-4 h-4 text-cyan-400 group-hover:scale-110 transition-transform" />
                     <span className="text-[11px] font-black text-white">
-                      {dashboardStats.totalShares || 0}
+                      {dashboardStats.locationSharesCount || 0}
                     </span>
                   </div>
 
-                  <div className="w-px h-3.5 bg-slate-800" />
+                  <div className="hidden sm:block w-px h-3.5 bg-slate-800" />
+
+                  {/* Video Shares */}
+                  <div className="flex items-center gap-1.5 cursor-help group" title="Video shares">
+                    <Icon name="share-2" className="w-4 h-4 text-sky-300 group-hover:scale-110 transition-transform" />
+                    <span className="text-[11px] font-black text-white">
+                      {dashboardStats.videoSharesCount || 0}
+                    </span>
+                  </div>
+
+                  <div className="hidden sm:block w-px h-3.5 bg-slate-800" />
 
                   {/* Total Subscribers */}
                   <div className="flex items-center gap-1.5 cursor-help group" title="Total Subscribers">
@@ -5466,7 +5490,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                     </span>
                   </div>
 
-                  <div className="w-px h-3.5 bg-slate-800" />
+                  <div className="hidden sm:block w-px h-3.5 bg-slate-800" />
 
                   {/* Pending Comments */}
                   <div className="flex items-center gap-1.5 cursor-help group" title="Pending Comments">
@@ -5484,7 +5508,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                     </span>
                   </div>
 
-                  <div className="w-px h-3.5 bg-slate-800" />
+                  <div className="hidden sm:block w-px h-3.5 bg-slate-800" />
 
                   {/* Pending Suggestions */}
                   <div className="flex items-center gap-1.5 cursor-help group" title="Pending Suggestions">
