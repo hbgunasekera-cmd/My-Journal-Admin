@@ -390,9 +390,13 @@ function App() {
   const [allComments, setAllComments] = useState([]);
   const [likesData, setLikesData] = useState([]);
   const [sharesData, setSharesData] = useState([]);
+  const [videoLikesData, setVideoLikesData] = useState([]);
+  const [videoSharesData, setVideoSharesData] = useState([]);
   const [subscribersData, setSubscribersData] = useState([]);
   const [expandedLikeLoc, setExpandedLikeLoc] = useState(null);
   const [expandedShareLoc, setExpandedShareLoc] = useState(null);
+  const [expandedVideoLike, setExpandedVideoLike] = useState(null);
+  const [expandedVideoShare, setExpandedVideoShare] = useState(null);
   const [weatherData, setWeatherData] = useState({});
 
   // --- UI, Search & Filter States ---
@@ -1567,9 +1571,10 @@ function App() {
  * @param {string} tableName - The name of the Supabase table.
  * @param {string} orderByColumn - The column to sort by (default: 'created_at').
  * @param {boolean} ascending - Sort order (default: false).
+ * @param {string} selectColumns - Supabase select expression (default: '*').
  * @returns {Promise<Array>} - A promise that resolves to the complete array of records.
  */
-  const fetchAllRecords = React.useCallback(async (tableName, orderByColumn = 'created_at', ascending = false) => {
+  const fetchAllRecords = React.useCallback(async (tableName, orderByColumn = 'created_at', ascending = false, selectColumns = '*') => {
     let allData = [];
     let from = 0;
     const step = 1000;
@@ -1578,7 +1583,7 @@ function App() {
     while (hasMore) {
       const { data, error } = await supabaseClient
         .from(tableName)
-        .select('*')
+        .select(selectColumns)
         .order(orderByColumn, { ascending })
         .range(from, from + step - 1);
 
@@ -1606,6 +1611,15 @@ function App() {
    */
   const refreshAllData = React.useCallback(async () => {
     try {
+      const fetchInteractionRecords = async (tableName, selectColumns) => {
+        try {
+          return await fetchAllRecords(tableName, 'created_at', false, selectColumns);
+        } catch (error) {
+          console.error(`${tableName} fetch error:`, error);
+          return [];
+        }
+      };
+
       const [
         placesData,
         sr,
@@ -1614,30 +1628,35 @@ function App() {
         c,
         l,
         sub,
-        sh // 1. Add this variable for shares
+        sh,
+        videoLikes,
+        videoShares
       ] = await Promise.all([
         fetchAllRecords('travel_bucket_list'),
         supabaseClient.from('saved_travel_routes').select('*').order('sort_order', { ascending: true }).order('created_at', { ascending: false }),
         supabaseClient.from('page_visits').select('*').limit(20000),
         supabaseClient.from('pending_approvals').select('*').order('created_at', { ascending: false }),
         supabaseClient.from('location_comments').select('*, travel_bucket_list(place_name)').order('created_at', { ascending: false }),
-        supabaseClient.from('location_likes').select('*, travel_bucket_list(place_name)'),
+        fetchInteractionRecords('location_likes', '*, travel_bucket_list(place_name, category)'),
         supabaseClient.from('subscribers').select('*').order('subscribed_at', { ascending: false }),
-        supabaseClient.from('location_shares').select('*, travel_bucket_list(place_name, category)') // 2. Add the shares query
+        fetchInteractionRecords('location_shares', '*, travel_bucket_list(place_name, category)'),
+        fetchInteractionRecords('video_likes', '*, hub_videos(title)'),
+        fetchInteractionRecords('video_shares', '*, hub_videos(title)')
       ]);
 
       if (sub.error) console.error("Subscribers fetch error:", sub.error);
       if (sr.error) console.error("Saved routes fetch error:", sr.error);
-      if (sh.error) console.error("Shares fetch error:", sh.error); // Optional error handling
 
       setPlaces(placesData || []);
       setSavedRoutes(sr.data || []);
       setAnalyticsData(v.data || []);
       setPendingApprovals(a.data || []);
       setAllComments(c.data || []);
-      setLikesData(l.data || []);
+      setLikesData(l || []);
       setSubscribersData(sub.data || []);
-      setSharesData(sh.data || []); // 3. Set the state
+      setSharesData(sh || []);
+      setVideoLikesData(videoLikes || []);
+      setVideoSharesData(videoShares || []);
 
     } catch (error) {
       console.error("Data sync error:", error);
@@ -3605,6 +3624,8 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
   const dashboardStats = React.useMemo(() => {
     const safeAnalytics = Array.isArray(analyticsData) ? analyticsData : [];
     const safeLikes = Array.isArray(likesData) ? likesData : [];
+    const safeVideoLikes = Array.isArray(videoLikesData) ? videoLikesData : [];
+    const safeVideoShares = Array.isArray(videoSharesData) ? videoSharesData : [];
     const safeSubscribers = Array.isArray(subscribersData) ? subscribersData : [];
     const safeShares = Array.isArray(sharesData) ? sharesData : [];
 
@@ -3774,39 +3795,45 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
       return Object.entries(counts).sort((a, b) => b[1] - a[1]);
     };
 
-    // Aggregate location metrics, retaining share type counts when requested.
+    // Aggregate location metrics by the FK first so duplicate place names stay distinct.
     const aggregateLocationData = (dataset, includeShareTypes = false) => {
-      return dataset.reduce((acc, item) => {
+      const grouped = new Map();
+      dataset.forEach((item) => {
+        const location = Array.isArray(item.travel_bucket_list)
+          ? item.travel_bucket_list[0]
+          : item.travel_bucket_list;
         const isVideoShare = includeShareTypes && String(item.type || '').trim().toLowerCase() === 'video';
         const videoId = typeof item.video_id === 'string' ? item.video_id.trim() : '';
         const videoTitle = typeof item.video_title === 'string' ? item.video_title.trim() : '';
         const locName = isVideoShare
-          ? videoTitle || (videoId ? `Video clip ${videoId}` : 'Untitled video clip')
-          : item.travel_bucket_list?.place_name || 'Unknown Location';
-        const category = isVideoShare ? 'Video Clip' : item.travel_bucket_list?.category || 'General';
+          ? videoTitle || location?.place_name || (videoId ? `Video clip ${videoId}` : 'Video clip')
+          : location?.place_name || 'Unknown Location';
+        const category = isVideoShare ? 'Video Clip' : location?.category || 'General';
         const country = item.country || 'Unknown';
-        const groupKey = isVideoShare
-          ? `video:${videoId || videoTitle || item.id || locName}`
-          : `location:${locName}`;
-        const existing = acc.find((entry) => entry.key === groupKey);
-        const summary = existing || {
-          key: groupKey,
-          name: locName,
-          category,
-          ...(isVideoShare && videoId ? { videoId } : {}),
-          hits: 0,
-          countries: {},
-          ...(includeShareTypes ? { types: {} } : {})
-        };
+        const locationId = typeof item.location_id === 'string' ? item.location_id.trim() : '';
+        const groupKey = `${isVideoShare ? 'location-video' : 'location'}:${locationId || locName}:${isVideoShare ? videoId || videoTitle : ''}`;
+        let summary = grouped.get(groupKey);
+        if (!summary) {
+          summary = {
+            key: groupKey,
+            name: locName,
+            category,
+            ...(isVideoShare && videoId ? { videoId } : {}),
+            hits: 0,
+            countries: {},
+            ...(includeShareTypes ? { types: {} } : {})
+          };
+          grouped.set(groupKey, summary);
+        }
 
         summary.hits += 1;
         summary.countries[country] = (summary.countries[country] || 0) + 1;
 
         if (includeShareTypes) {
           const rawType = [
+            item.type,
             item.share_type,
             item.platform,
-            item.type,
             item.share_platform,
             item.share_method,
             item.channel,
@@ -3818,17 +3845,38 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
           typeSummary.countries[country] = (typeSummary.countries[country] || 0) + 1;
           summary.types[type] = typeSummary;
         }
+      });
+      return [...grouped.values()].sort((a, b) => b.hits - a.hits);
+    };
 
-        if (!existing) acc.push(summary);
-        return acc;
-      }, []).sort((a, b) => b.hits - a.hits);
+    const aggregateVideoData = (dataset) => {
+      const grouped = new Map();
+      dataset.forEach((item) => {
+        const video = Array.isArray(item.hub_videos) ? item.hub_videos[0] : item.hub_videos;
+        const videoId = typeof item.video_id === 'string' ? item.video_id.trim() : '';
+        const videoTitle = String(video?.title || item.video_title || '').trim();
+        const name = videoTitle || (videoId ? `Video ${videoId}` : 'Unknown Video');
+        const key = `video:${videoId || name}`;
+        let summary = grouped.get(key);
+
+        if (!summary) {
+          summary = { key, name, videoId, hits: 0, countries: {} };
+          grouped.set(key, summary);
+        }
+
+        const country = item.country || 'Unknown';
+        summary.hits += 1;
+        summary.countries[country] = (summary.countries[country] || 0) + 1;
+      });
+      return [...grouped.values()].sort((a, b) => b.hits - a.hits);
     };
 
     return {
       latest: latestMetrics,
       totalVisits: parsedData.length,
       totalSubscribers: safeSubscribers.length,
-      totalShares: safeShares.length,
+      totalLikes: safeLikes.length + safeVideoLikes.length,
+      totalShares: safeShares.length + safeVideoShares.length,
       countries: getSortedMetrics(parsedData, 'country'),
       regions: getSortedMetrics(parsedData, 'region'),
       cities: getSortedMetrics(parsedData, 'city'),
@@ -3840,9 +3888,11 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
       os: getSortedMetrics(parsedData, 'os'),
       trafficType: getSortedMetrics(parsedData, v => v.isBot ? 'Bot/Crawler' : 'Real Person'),
       likesSummary: aggregateLocationData(safeLikes),
-      sharesSummary: aggregateLocationData(safeShares, true)
+      sharesSummary: aggregateLocationData(safeShares, true),
+      videoLikesSummary: aggregateVideoData(safeVideoLikes),
+      videoSharesSummary: aggregateVideoData(safeVideoShares)
     };
-  }, [analyticsData, likesData, subscribersData, sharesData]);
+  }, [analyticsData, likesData, videoLikesData, videoSharesData, subscribersData, sharesData]);
 
   /**
    * Circular Progress Ring Indicator for Dashboard Refresh Countdown
@@ -5389,20 +5439,20 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                   <div className="w-px h-3.5 bg-slate-800" />
 
                   {/* Total Likes */}
-                  <div className="flex items-center gap-1.5 cursor-help group" title="Total Likes">
+                  <div className="flex items-center gap-1.5 cursor-help group" title="Total location and video likes">
                     <Icon name="heart" className="w-4 h-4 text-rose-400 fill-rose-500/20 group-hover:scale-110 transition-transform" />
                     <span className="text-[11px] font-black text-white">
-                      {dashboardStats.likesSummary ? dashboardStats.likesSummary.reduce((a, b) => a + b.hits, 0) : 0}
+                      {dashboardStats.totalLikes || 0}
                     </span>
                   </div>
 
                   <div className="w-px h-3.5 bg-slate-800" />
 
                   {/* Total Shares */}
-                  <div className="flex items-center gap-1.5 cursor-help group" title="Total Shares">
+                  <div className="flex items-center gap-1.5 cursor-help group" title="Total location and video shares">
                     <Icon name="share-2" className="w-4 h-4 text-cyan-400 group-hover:scale-110 transition-transform" />
                     <span className="text-[11px] font-black text-white">
-                      {dashboardStats.sharesSummary ? dashboardStats.sharesSummary.reduce((a, b) => a + b.hits, 0) : 0}
+                      {dashboardStats.totalShares || 0}
                     </span>
                   </div>
 
@@ -5582,7 +5632,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                 <div className="bg-rose-500 rounded-[2.5rem] p-8 text-white shadow-xl flex flex-col h-[450px]">
                   <div className="flex justify-between items-start mb-6">
                     <div>
-                      <p className="text-[10px] font-black uppercase text-pink-900 mb-1 tracking-widest">Popular Locations</p>
+                      <p className="text-[10px] font-black uppercase text-pink-900 mb-1 tracking-widest">Location Likes</p>
                       <p className="text-4xl font-black italic tracking-tighter">
                         {dashboardStats.likesSummary.reduce((a, b) => a + b.hits, 0)}
                         <span className="text-sm opacity-60 ml-2 font-bold uppercase tracking-widest">Likes</span>
@@ -5741,6 +5791,125 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                                         ))}
                                     </div>
                                   )}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+
+
+                {/* 4. VIDEO LIKES */}
+                <div className="bg-violet-600 rounded-[2.5rem] p-8 text-white shadow-xl flex flex-col h-[450px]">
+                  <div className="flex justify-between items-start mb-6">
+                    <div>
+                      <p className="text-[10px] font-black uppercase text-violet-950 mb-1 tracking-widest">Video Likes</p>
+                      <p className="text-4xl font-black italic tracking-tighter">
+                        {dashboardStats.videoLikesSummary.reduce((total, item) => total + item.hits, 0)}
+                        <span className="text-sm opacity-60 ml-2 font-bold uppercase tracking-widest">Likes</span>
+                      </p>
+                    </div>
+                    <div className="w-12 h-12 bg-white/20 rounded-2xl flex items-center justify-center backdrop-blur-md">
+                      <Icon name="heart" className="w-6 h-6 fill-white text-white" />
+                    </div>
+                  </div>
+
+                  <div className="bg-white/10 rounded-[2rem] p-5 flex-1 flex flex-col min-h-0 border border-white/5">
+                    <div className="overflow-y-auto custom-scrollbar pr-2 flex-1 space-y-1">
+                      {dashboardStats.videoLikesSummary.length === 0 ? (
+                        <p className="text-xs font-bold text-white/60 text-center py-6">No video likes recorded yet.</p>
+                      ) : dashboardStats.videoLikesSummary.map((item) => {
+                        const isExpanded = expandedVideoLike === item.key;
+                        return (
+                          <div
+                            key={item.key}
+                            className="flex flex-col border-b border-white/10 last:border-0 group cursor-pointer transition-colors hover:bg-white/5 rounded-xl px-2 -mx-2"
+                            onClick={() => setExpandedVideoLike(isExpanded ? null : item.key)}
+                          >
+                            <div className="flex justify-between items-center py-3">
+                              <div className="flex flex-col truncate pr-4">
+                                <p className="text-[11px] font-black uppercase truncate text-white group-hover:text-violet-200 transition-colors">{item.name}</p>
+                                {item.videoId && <p className="text-[8px] font-bold text-white/40 mt-1 truncate">Video ID: {item.videoId}</p>}
+                              </div>
+                              <div className="text-right shrink-0 flex items-center gap-2">
+                                <p className="text-sm font-black tracking-tighter text-white">{item.hits}</p>
+                                <Icon name="navigation" className={`w-3 h-3 text-white/30 transition-transform ${isExpanded ? 'rotate-180' : 'rotate-90'}`} />
+                              </div>
+                            </div>
+                            {isExpanded && (
+                              <div className="pb-3 animate-in fade-in slide-in-from-top-2">
+                                <div className="bg-black/20 rounded-xl p-3 border border-white/5 shadow-inner">
+                                  <p className="text-[8px] font-black uppercase tracking-widest text-white/40 mb-2 border-b border-white/10 pb-1">Likes by Country</p>
+                                  <div className="space-y-1.5 max-h-32 overflow-y-auto custom-scrollbar pr-1">
+                                    {Object.entries(item.countries).sort((a, b) => b[1] - a[1]).map(([country, count]) => (
+                                      <div key={country} className="flex justify-between items-center">
+                                        <span className="text-[9px] font-bold text-white/80">{country}</span>
+                                        <span className="text-[9px] font-black text-violet-200">{count}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+
+                {/* 5. VIDEO SHARES */}
+                <div className="bg-cyan-600 rounded-[2.5rem] p-8 text-white shadow-xl flex flex-col h-[450px]">
+                  <div className="flex justify-between items-start mb-6">
+                    <div>
+                      <p className="text-[10px] font-black uppercase text-cyan-950 mb-1 tracking-widest">Video Shares</p>
+                      <p className="text-4xl font-black italic tracking-tighter">
+                        {dashboardStats.videoSharesSummary.reduce((total, item) => total + item.hits, 0)}
+                        <span className="text-sm opacity-60 ml-2 font-bold uppercase tracking-widest">Shares</span>
+                      </p>
+                    </div>
+                    <div className="w-12 h-12 bg-white/20 rounded-2xl flex items-center justify-center backdrop-blur-md">
+                      <Icon name="share-2" className="w-6 h-6 text-white" />
+                    </div>
+                  </div>
+
+                  <div className="bg-white/10 rounded-[2rem] p-5 flex-1 flex flex-col min-h-0 border border-white/5">
+                    <div className="overflow-y-auto custom-scrollbar pr-2 flex-1 space-y-1">
+                      {dashboardStats.videoSharesSummary.length === 0 ? (
+                        <p className="text-xs font-bold text-white/60 text-center py-6">No video shares recorded yet.</p>
+                      ) : dashboardStats.videoSharesSummary.map((item) => {
+                        const isExpanded = expandedVideoShare === item.key;
+                        return (
+                          <div
+                            key={item.key}
+                            className="flex flex-col border-b border-white/10 last:border-0 group cursor-pointer transition-colors hover:bg-white/5 rounded-xl px-2 -mx-2"
+                            onClick={() => setExpandedVideoShare(isExpanded ? null : item.key)}
+                          >
+                            <div className="flex justify-between items-center py-3">
+                              <div className="flex flex-col truncate pr-4">
+                                <p className="text-[11px] font-black uppercase truncate text-white group-hover:text-cyan-200 transition-colors">{item.name}</p>
+                                {item.videoId && <p className="text-[8px] font-bold text-white/40 mt-1 truncate">Video ID: {item.videoId}</p>}
+                              </div>
+                              <div className="text-right shrink-0 flex items-center gap-2">
+                                <p className="text-sm font-black tracking-tighter text-white">{item.hits}</p>
+                                <Icon name="navigation" className={`w-3 h-3 text-white/30 transition-transform ${isExpanded ? 'rotate-180' : 'rotate-90'}`} />
+                              </div>
+                            </div>
+                            {isExpanded && (
+                              <div className="pb-3 animate-in fade-in slide-in-from-top-2">
+                                <div className="bg-black/20 rounded-xl p-3 border border-white/5 shadow-inner">
+                                  <p className="text-[8px] font-black uppercase tracking-widest text-white/40 mb-2 border-b border-white/10 pb-1">Shares by Country</p>
+                                  <div className="space-y-1.5 max-h-32 overflow-y-auto custom-scrollbar pr-1">
+                                    {Object.entries(item.countries).sort((a, b) => b[1] - a[1]).map(([country, count]) => (
+                                      <div key={country} className="flex justify-between items-center">
+                                        <span className="text-[9px] font-bold text-white/80">{country}</span>
+                                        <span className="text-[9px] font-black text-cyan-200">{count}</span>
+                                      </div>
+                                    ))}
+                                  </div>
                                 </div>
                               </div>
                             )}
