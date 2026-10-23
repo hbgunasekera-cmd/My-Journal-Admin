@@ -5464,7 +5464,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
 
                   {/* Location Shares */}
                   <div className="flex items-center gap-1.5 cursor-help group" title="Location shares">
-                    <Icon name="share-2" className="w-4 h-4 text-cyan-400 group-hover:scale-110 transition-transform" />
+                    <Icon name="share-2" className="w-4 h-4 text-emerald-400 group-hover:scale-110 transition-transform" />
                     <span className="text-[11px] font-black text-white">
                       {dashboardStats.locationSharesCount || 0}
                     </span>
@@ -5474,7 +5474,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
 
                   {/* Video Shares */}
                   <div className="flex items-center gap-1.5 cursor-help group" title="Video shares">
-                    <Icon name="share-2" className="w-4 h-4 text-sky-300 group-hover:scale-110 transition-transform" />
+                    <Icon name="share-2" className="w-4 h-4 text-cyan-400 group-hover:scale-110 transition-transform" />
                     <span className="text-[11px] font-black text-white">
                       {dashboardStats.videoSharesCount || 0}
                     </span>
