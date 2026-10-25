@@ -195,6 +195,7 @@ export default async function handler(req, res) {
   let phase = 'article generation';
   try {
     const researchOnly = requestBody.researchOnly === true;
+    const aiOnly = requestBody.aiOnly === true;
     const factContext = getFactContext(requestBody.factCheck);
     const hasFactCheckContext = Object.prototype.hasOwnProperty.call(requestBody, 'factCheck');
     const articleLocation = getFactContext(requestBody.articleLocation);
@@ -210,6 +211,12 @@ export default async function handler(req, res) {
     }
     if (typeof requestBody.factEvidence === 'string' && requestBody.factEvidence.trim() && !articleLocation) {
       return res.status(400).json({ error: 'Location-bound article evidence requires the exact location name, locality/area, and valid latitude and longitude.' });
+    }
+    if (aiOnly && !articleLocation) {
+      return res.status(400).json({ error: 'AI-only article generation requires the exact location name, locality/area, and valid latitude and longitude.' });
+    }
+    if (aiOnly && typeof requestBody.factEvidence === 'string' && requestBody.factEvidence.trim()) {
+      return res.status(400).json({ error: 'AI-only article generation cannot include web fact-check evidence.' });
     }
 
     if (factContext?.placeName) {
@@ -282,6 +289,19 @@ export default async function handler(req, res) {
       ];
     }
 
+    if (aiOnly) {
+      const aiOnlyLocationAnchor = [
+        'AI-ONLY ARTICLE GENERATION: do not perform web search or use web sources. Use model knowledge only.',
+        'Exact target identity; all three fields must match together:',
+        `Name: ${articleLocation.placeName}`,
+        `Locality/area: ${articleLocation.locality}`,
+        `Category: ${articleLocation.category || 'location'}`,
+        `Database coordinates: ${articleLocation.coordinates.latitude}, ${articleLocation.coordinates.longitude}`,
+        'Exclude facts about any similarly named place in a different locality. If a site-specific fact is not confidently known for this exact identity, omit it instead of guessing. Mark numeric estimates as AI estimates and never as web-verified.'
+      ].join('\n');
+      safeRequest.contents = [...safeRequest.contents, { role: 'user', parts: [{ text: aiOnlyLocationAnchor }] }];
+    }
+
     const finalPromptLength = safeRequest.contents
       .flatMap((content) => content.parts)
       .reduce((total, part) => total + (part?.text?.length || 0), 0);
@@ -295,7 +315,13 @@ export default async function handler(req, res) {
 
     const result = await response.json().catch(() => ({}));
     if (!response.ok) return sendProviderError(res, response, result);
-    return res.status(200).json({ ...result, factSources, factCheckedAt, factEvidence });
+    return res.status(200).json({
+      ...result,
+      factSources,
+      factCheckedAt,
+      factEvidence,
+      generationMode: aiOnly ? 'ai_only_fallback' : factCheckedAt ? 'web_fact_checked' : null
+    });
   } catch (error) {
     console.error(`Article ${phase} request failed:`, error.name, error.message);
     if (error.name === 'TimeoutError' || error.name === 'AbortError') {
