@@ -1946,12 +1946,53 @@ function App() {
   };
 
 
+  const getArticleLocationContext = (place) => {
+    const placeName = typeof place?.place_name === 'string' ? place.place_name.trim() : '';
+    const locality = typeof place?.locality === 'string' ? place.locality.trim() : '';
+    const latitude = place?.latitude == null || String(place.latitude).trim() === ''
+      ? Number.NaN
+      : Number(place.latitude);
+    const longitude = place?.longitude == null || String(place.longitude).trim() === ''
+      ? Number.NaN
+      : Number(place.longitude);
+    const missing = [];
+    if (!placeName) missing.push('location name');
+    if (!locality) missing.push('locality/area');
+    if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90) missing.push('valid latitude');
+    if (!Number.isFinite(longitude) || longitude < -180 || longitude > 180) missing.push('valid longitude');
+
+    if (missing.length > 0) {
+      throw new Error(`Article location context is incomplete: add ${missing.join(', ')} to this location before generating or fact-checking its article.`);
+    }
+
+    return {
+      placeName,
+      category: typeof place?.category === 'string' ? place.category.trim() : '',
+      locality,
+      latitude,
+      longitude
+    };
+  };
+
   const generateTravelArticle = async (place, {
     articleOnly = false,
     quiet = false,
     researchAttempt = 0
   } = {}) => {
-    const contextPrompt = `Create a useful, location-specific travel guide for the ${place.category} "${place.place_name}" in ${place.locality || 'Sri Lanka'}.
+    let articleLocation;
+    try {
+      articleLocation = getArticleLocationContext(place);
+    } catch (error) {
+      if (!quiet) triggerToast(error.message);
+      throw error;
+    }
+    const contextPrompt = `Create a useful, location-specific travel guide for the ${articleLocation.category || 'location'} "${articleLocation.placeName}" in ${articleLocation.locality}, Sri Lanka.
+
+EXACT LOCATION IDENTITY — REQUIRED FOR EVERY FACT:
+- Location name: ${articleLocation.placeName}
+- Locality/area: ${articleLocation.locality}
+- Database coordinates: ${articleLocation.latitude}, ${articleLocation.longitude}
+Use all three identifiers together to select the place. The coordinates and locality disambiguate this location from similarly named places. Exclude facts, history, routes, measurements, and visitor details that belong to another place with a similar name or a different locality. If a source conflicts with this exact identity, do not use it.
 
 FACT-CHECK SCOPE — USE WEB-VERIFIED FACTS ONLY IN THESE ARTICLE SECTIONS:
 - Summary & Intro: 'seo_intro' and 'why_visit.summary'.
@@ -2133,11 +2174,7 @@ Return only JSON matching the provided schema. Keep the information concise and 
 
     try {
       const factCheck = {
-        placeName: place.place_name,
-        category: place.category,
-        locality: place.locality,
-        latitude: place.latitude,
-        longitude: place.longitude,
+        ...articleLocation,
         researchAttempt
       };
       const researchResponse = await fetch('/api/generate-article', {
@@ -2166,6 +2203,7 @@ Return only JSON matching the provided schema. Keep the information concise and 
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...requestBody,
+          articleLocation,
           factEvidence: researchData.factEvidence,
           factSources: researchData.factSources,
           factCheckedAt: researchData.factCheckedAt
@@ -2210,6 +2248,7 @@ Return only JSON matching the provided schema. Keep the information concise and 
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             contents: repairContents,
+            articleLocation,
             generationConfig: {
               ...requestBody.generationConfig,
               temperature: 0.1,
@@ -2592,11 +2631,11 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
       aiJson.fact_sources = Array.isArray(data.factSources) ? data.factSources : [];
       aiJson.fact_checked_at = typeof data.factCheckedAt === 'string' ? data.factCheckedAt : null;
       aiJson.fact_check_location = {
-        place_name: place.place_name,
-        category: place.category,
-        locality: place.locality,
-        latitude: place.latitude,
-        longitude: place.longitude
+        place_name: articleLocation.placeName,
+        category: articleLocation.category,
+        locality: articleLocation.locality,
+        latitude: articleLocation.latitude,
+        longitude: articleLocation.longitude
       };
       for (const key of [
         'metadata_fact_sources',
@@ -2745,8 +2784,11 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
             }
           } catch (error) {
             const errorMessage = error?.message || '';
-            retryCount += 1;
-            retryQueue.push(place);
+            const hasInvalidLocationContext = /Article location context is incomplete/i.test(errorMessage);
+            if (!hasInvalidLocationContext) {
+              retryCount += 1;
+              retryQueue.push(place);
+            }
             failedPlaces.add(place.id || place.place_name);
             updateBulkGenerationProgress({ completed: rebuilt, failed: failedPlaces.size });
             recordBulkGenerationError(
@@ -2754,9 +2796,11 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
               place.place_name,
               attemptNumber,
               error,
-              'Queued for automatic retry'
+              hasInvalidLocationContext
+                ? 'Add the location name, locality/area, and valid coordinates before retrying'
+                : 'Queued for automatic retry'
             );
-            if (/quota|429|rate.?limit|resource_exhausted/i.test(errorMessage)) {
+            if (!hasInvalidLocationContext && /quota|429|rate.?limit|resource_exhausted/i.test(errorMessage)) {
               quotaHit = true;
               retryQueue.push(...pendingPlaces.slice(index + 1));
               break;
@@ -2792,6 +2836,8 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
       if (rebuilt > 0) refreshAllData();
       if (remaining > 0) {
         triggerToast(`Fact-check stopped: ${rebuilt}/${targets.length} rebuilt successfully; ${remaining} still need processing. Choose only not-yet-fact-checked to resume.`);
+      } else if (failedPlaces.size > 0) {
+        triggerToast(`Fact-check finished with ${rebuilt} rebuilt. ${failedPlaces.size} location(s) need a name, locality/area, and valid coordinates before they can be processed.`);
       } else {
         triggerToast(`Fact-check complete: all ${rebuilt} selected articles rebuilt successfully${retryCount ? ` after ${retryCount} ${retryCount === 1 ? 'retry' : 'retries'}` : ''}. ${includeAlreadyFactChecked ? `${alreadyFactChecked} previously checked included` : `${skippedAlreadyChecked} already checked skipped`}.`);
       }

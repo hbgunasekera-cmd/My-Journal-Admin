@@ -47,18 +47,19 @@ const getFactContext = (value) => {
     && value.longitude !== null && value.longitude !== undefined && String(value.longitude).trim() !== '';
   const latitude = hasCoordinates ? Number(value.latitude) : Number.NaN;
   const longitude = hasCoordinates ? Number(value.longitude) : Number.NaN;
+  const placeName = cleanString(value.placeName);
+  const locality = cleanString(value.locality);
+  if (!placeName || !locality || !Number.isFinite(latitude) || latitude < -90 || latitude > 90
+    || !Number.isFinite(longitude) || longitude < -180 || longitude > 180) return null;
 
   return {
-    placeName: cleanString(value.placeName),
+    placeName,
     category: cleanString(value.category),
-    locality: cleanString(value.locality),
+    locality,
     researchAttempt: Number.isFinite(Number(value.researchAttempt))
       ? Math.max(0, Math.floor(Number(value.researchAttempt)))
       : 0,
-    coordinates: Number.isFinite(latitude) && latitude >= -90 && latitude <= 90
-      && Number.isFinite(longitude) && longitude >= -180 && longitude <= 180
-      ? { latitude, longitude }
-      : null
+    coordinates: { latitude, longitude }
   };
 };
 
@@ -88,8 +89,13 @@ Location supplied by the editor:
 Prioritize Sri Lankan government, protected-area authorities, official heritage or tourism organizations, universities, and established reference sources. Search in this order:
 1. Search the exact spot name together with the supplied locality and category.
 2. If locality-based results do not identify the exact spot and coordinates are supplied, use the database coordinate pair to search maps and reverse-geocode the named feature at that point. Search the coordinates with the spot name and category, and use the mapped feature to guide follow-up source searches. Do not treat a nearby road, settlement, or different feature as the exact spot.
-3. If the exact spot is still not identified, determine its nearest main city/town from the coordinates or supplied locality, then perform another Google Search for the spot name together with that city/town. Try plausible spelling/transliteration variants and local or alternate names in these searches as well. For waterfalls, search variants using 'Ella', 'Oya', 'Falls', and 'Waterfall'; for peaks, include 'Kanda' and 'Mountain' where appropriate. Perform the coordinate-based search when coordinates are supplied and the town-based search before returning UNCONFIRMED.
-Confirm this exact place when reliable sources identify the same spot through its name and coordinates, a clearly identified mapped feature, nearest city/town, or alternate name; do not require an exact spelling or locality-text match. Do not treat a same-name place in another area as a match. Start with exactly one line: ENTITY_MATCH: CONFIRMED or ENTITY_MATCH: UNCONFIRMED. If the searches still do not identify the same place, use UNCONFIRMED.
+3. If the exact spot is still not identified, determine its nearest main city/town from the coordinates or supplied locality, then perform another Google Search for the spot name together with that city/town. Try plausible spelling/transliteration variants and local or alternate names in these searches as well. For waterfalls, search variants using 'Ella', 'Oya', 'Falls', and 'Waterfall'; for peaks, include 'Kanda' and 'Mountain' where appropriate. Perform the coordinate-based search and the town-based search before returning UNCONFIRMED.
+
+STRICT IDENTITY CHECK: A CONFIRMED result requires reliable evidence that the named feature is in the supplied locality/area AND that the supplied coordinate pair maps to or is geographically consistent with that same feature. The coordinate check is mandatory. A same-name result elsewhere, a nearest-town match alone, or a plausible alternate spelling alone is not enough. If the coordinates point to another feature or the locality cannot be reconciled, reject the match. At the start return exactly these three lines, using only the listed values:
+ENTITY_MATCH: CONFIRMED or UNCONFIRMED
+LOCALITY_MATCH: CONSISTENT or INCONSISTENT
+COORDINATE_MATCH: CONSISTENT or INCONSISTENT
+Only use CONFIRMED when both LOCALITY_MATCH and COORDINATE_MATCH are CONSISTENT. If either check is uncertain or not supported, use UNCONFIRMED for that check and for ENTITY_MATCH.
 
 Required measurements:
 - For a waterfall, research the waterfall's vertical drop/height in metres; do not label it as site elevation.
@@ -190,12 +196,20 @@ export default async function handler(req, res) {
   try {
     const researchOnly = requestBody.researchOnly === true;
     const factContext = getFactContext(requestBody.factCheck);
+    const hasFactCheckContext = Object.prototype.hasOwnProperty.call(requestBody, 'factCheck');
+    const articleLocation = getFactContext(requestBody.articleLocation);
     let factSources = [];
     let factCheckedAt = null;
     let factEvidence = null;
 
-    if (researchOnly && !factContext?.placeName) {
-      return res.status(400).json({ error: 'Place details are required for fact-check research.' });
+    if ((researchOnly || hasFactCheckContext) && !factContext) {
+      return res.status(400).json({ error: 'Article fact-checking requires a location name, locality/area, and valid latitude and longitude.' });
+    }
+    if (requestBody.articleLocation && !articleLocation) {
+      return res.status(400).json({ error: 'Article generation requires a location name, locality/area, and valid latitude and longitude.' });
+    }
+    if (typeof requestBody.factEvidence === 'string' && requestBody.factEvidence.trim() && !articleLocation) {
+      return res.status(400).json({ error: 'Location-bound article evidence requires the exact location name, locality/area, and valid latitude and longitude.' });
     }
 
     if (factContext?.placeName) {
@@ -215,12 +229,17 @@ export default async function handler(req, res) {
       const researchText = readText(researchResult);
       const entityMatch = researchText.match(/(?:^|\n)\s*ENTITY_MATCH:\s*(CONFIRMED|UNCONFIRMED)\b/im)
         || researchText.match(/\bENTITY_MATCH:\s*(CONFIRMED|UNCONFIRMED)\b/i);
+      const localityMatch = researchText.match(/(?:^|\n)\s*LOCALITY_MATCH:\s*(CONSISTENT|INCONSISTENT)\b/im);
+      const coordinateMatch = researchText.match(/(?:^|\n)\s*COORDINATE_MATCH:\s*(CONSISTENT|INCONSISTENT)\b/im);
       factSources = getGroundedSources(researchResult);
 
-      if (entityMatch?.[1] !== 'CONFIRMED' || factSources.length === 0) {
+      if (entityMatch?.[1] !== 'CONFIRMED'
+        || localityMatch?.[1] !== 'CONSISTENT'
+        || coordinateMatch?.[1] !== 'CONSISTENT'
+        || factSources.length === 0) {
         return res.status(422).json({
           error: {
-            message: 'The exact location could not be confirmed from the supplied locality, saved coordinates, or nearest-town search, so the article was left unchanged. Check the place name and map pin, then try again.'
+            message: 'The exact location could not be matched to both its locality and saved coordinates, so the article was left unchanged. Check the place name, locality, and map pin, then try again.'
           }
         });
       }
@@ -249,7 +268,18 @@ export default async function handler(req, res) {
       if (!factCheckedAt || factSources.length === 0) {
         return res.status(422).json({ error: 'Verified article research is missing its source record.' });
       }
-      safeRequest.contents = [...safeRequest.contents, { role: 'user', parts: [{ text: factEvidence }] }];
+      const locationAnchor = [
+        'EXACT ARTICLE LOCATION — use this identity for every location-specific statement:',
+        `Name: ${articleLocation.placeName}`,
+        `Locality/area: ${articleLocation.locality}`,
+        `Database coordinates: ${articleLocation.coordinates.latitude}, ${articleLocation.coordinates.longitude}`,
+        'Use facts only when they refer to this location in this locality and are consistent with this coordinate pair. Exclude any similarly named place in another area.'
+      ].join('\n');
+      safeRequest.contents = [
+        ...safeRequest.contents,
+        { role: 'user', parts: [{ text: locationAnchor }] },
+        { role: 'user', parts: [{ text: factEvidence }] }
+      ];
     }
 
     const finalPromptLength = safeRequest.contents
