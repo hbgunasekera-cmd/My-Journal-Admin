@@ -122,7 +122,10 @@ const responseError = (body, statusCode) => {
 export function withApiErrorLogging(handler) {
   return async function apiErrorLoggingWrapper(req, res) {
     const apiPath = redact(req.url?.split('?')[0] || '/api/unknown', 1000);
-    const shouldLog = apiPath !== '/api/log-error';
+    const isErrorLogInsert = apiPath === '/api/error-logs'
+      && req.method === 'POST'
+      && req.body?.action !== 'clear';
+    const shouldLog = !isErrorLogInsert;
     let statusCode = 200;
     let pendingResponse = Promise.resolve();
     let errorResponseScheduled = false;

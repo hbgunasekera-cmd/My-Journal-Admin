@@ -8,6 +8,9 @@ const localApiNames = new Set(
     .filter((fileName) => fileName.endsWith(".js"))
     .map((fileName) => fileName.slice(0, -3)),
 );
+const localApiAliases = {
+  "share-twitter": { handlerName: "share-meta", query: { platform: "twitter" } },
+};
 
 const localApi = {
   name: "local-api-handlers",
@@ -17,7 +20,9 @@ const localApi = {
       const apiMatch = requestUrl.pathname.match(/^\/api\/([a-z0-9-]+)\/?$/);
       if (!apiMatch) return next();
 
-      const [, handlerName] = apiMatch;
+      const [, requestedHandlerName] = apiMatch;
+      const alias = localApiAliases[requestedHandlerName];
+      const handlerName = alias?.handlerName || requestedHandlerName;
       if (!localApiNames.has(handlerName)) {
         response.statusCode = 404;
         response.setHeader("Content-Type", "application/json; charset=utf-8");
@@ -26,7 +31,7 @@ const localApi = {
       }
 
       try {
-        request.query = Object.fromEntries(requestUrl.searchParams.entries());
+        request.query = { ...Object.fromEntries(requestUrl.searchParams.entries()), ...alias?.query };
         request.body = {};
 
         if (!['GET', 'HEAD'].includes(request.method || 'GET')) {

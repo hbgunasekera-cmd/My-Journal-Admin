@@ -1,4 +1,4 @@
-const ERROR_ENDPOINT = '/api/log-error';
+const ERROR_ENDPOINT = '/api/error-logs';
 const MAX_MESSAGE_LENGTH = 4000;
 const MAX_STACK_LENGTH = 8000;
 const reportedErrors = new Map();
