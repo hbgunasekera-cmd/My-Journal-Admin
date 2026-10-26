@@ -420,7 +420,6 @@ function App() {
   const [bulkGenerationProgress, setBulkGenerationProgress] = useState(null);
   const [bulkGenerationLogs, setBulkGenerationLogs] = useState([]);
   const [bulkGenerationLogDialogOpen, setBulkGenerationLogDialogOpen] = useState(false);
-  const [errorLogWindowOpen, setErrorLogWindowOpen] = useState(false);
   const [adminErrorLogs, setAdminErrorLogs] = useState([]);
   const [adminErrorLogsTotal, setAdminErrorLogsTotal] = useState(0);
   const [adminErrorLogsHasMore, setAdminErrorLogsHasMore] = useState(false);
@@ -4090,11 +4089,6 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
     }
   };
 
-  const openErrorLogWindow = () => {
-    setErrorLogWindowOpen(true);
-    void loadAdminErrorLogs(false);
-  };
-
   const toggleAdminErrorLogSelection = (id) => {
     setSelectedAdminErrorLogIds((current) => {
       if (current.includes(id)) return current.filter((selectedId) => selectedId !== id);
@@ -4437,11 +4431,15 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
             My Journal Admin
           </h1>
           <nav className="flex bg-slate-100 p-1 rounded-xl gap-1">
-            {['places', 'social', 'map', 'dashboard'].map(t => (
+            {['places', 'social', 'map', 'dashboard', 'error-logs'].map(t => (
               <button
                 key={t}
-                onClick={() => setActiveTab(t)}
-                className={`px-6 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all flex items-center gap-2 ${activeTab === t
+                onClick={() => {
+                  setActiveTab(t);
+                  if (t === 'error-logs') void loadAdminErrorLogs(false);
+                }}
+                aria-current={activeTab === t ? 'page' : undefined}
+                className={`px-3 sm:px-4 py-1.5 rounded-lg text-[9px] sm:text-[10px] font-black uppercase transition-all flex items-center gap-2 ${activeTab === t
                   ? 'bg-white text-indigo-600 shadow-sm'
                   : 'text-slate-400 hover:text-slate-600 hover:bg-slate-200/50'
                   }`}
@@ -4453,7 +4451,12 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                       }`}
                   />
                 )}
-                {t}
+                {t === 'error-logs' ? 'Error Logs' : t}
+                {t === 'error-logs' && adminErrorLogsTotal > 0 && (
+                  <span className={`rounded-full px-1.5 py-0.5 text-[8px] ${activeTab === t ? 'bg-rose-100 text-rose-700' : 'bg-slate-200 text-slate-500'}`}>
+                    {adminErrorLogsTotal}
+                  </span>
+                )}
               </button>
             ))}
           </nav>
@@ -5639,18 +5642,6 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                     <h1 className="text-2xl font-black text-slate-900 italic uppercase tracking-tighter">System Overview</h1>
                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Real-time journal analytics</p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={openErrorLogWindow}
-                    className="inline-flex items-center gap-2 rounded-xl border border-rose-200 bg-white px-4 py-2 text-[10px] font-black uppercase tracking-wide text-rose-700 shadow-sm transition-colors hover:bg-rose-50"
-                    title="Open captured browser and API errors"
-                  >
-                    <Icon name="alert-triangle" className="h-4 w-4" />
-                    Error Logs
-                    {adminErrorLogsTotal > 0 && (
-                      <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[9px] text-rose-800">{adminErrorLogsTotal}</span>
-                    )}
-                  </button>
                 </div>
 
                 {/* Quick Metric Pills */}
@@ -6352,6 +6343,168 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
           );
         })()}
 
+      {activeTab === 'error-logs' && (
+        <div className="h-full w-full overflow-hidden bg-slate-50 p-3 sm:p-6">
+          <section className="mx-auto flex h-full w-full max-w-7xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm" aria-labelledby="admin-error-logs-title">
+            <header className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-100 p-5 sm:p-6">
+              <div>
+                <h2 id="admin-error-logs-title" className="flex items-center gap-2 text-base font-black uppercase tracking-wide text-slate-900">
+                  <Icon name="alert-triangle" className="h-5 w-5 text-rose-600" />
+                  Error Log Report
+                </h2>
+                <p className="mt-1 text-xs text-slate-500">
+                  {adminErrorLogsTotal} record{adminErrorLogsTotal === 1 ? '' : 's'} · showing {adminErrorLogs.length}
+                </p>
+                <p className="mt-2 max-w-2xl text-[11px] leading-relaxed text-slate-500">
+                  Copy selected records for troubleshooting in this Codex workspace. After the issue is fixed, select those records and clear them as resolved.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => void loadAdminErrorLogs(false)}
+                  disabled={adminErrorLogsLoading || adminErrorLogsBusy}
+                  className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-[10px] font-black uppercase text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  <Icon name="refresh-cw" className={`h-3.5 w-3.5 ${adminErrorLogsLoading ? 'animate-spin' : ''}`} />
+                  Refresh
+                </button>
+                <button
+                  type="button"
+                  onClick={copyAdminErrorLogsForCodex}
+                  disabled={adminErrorLogsLoading || adminErrorLogs.length === 0}
+                  className="inline-flex items-center gap-2 rounded-xl border border-cyan-200 bg-cyan-50 px-3 py-2 text-[10px] font-black uppercase text-cyan-800 hover:bg-cyan-100 disabled:opacity-50"
+                  title={selectedAdminErrorLogIds.length ? 'Copy selected records for Codex' : 'Copy the visible records for Codex'}
+                >
+                  <Icon name="copy" className="h-3.5 w-3.5" />
+                  Copy for Codex{selectedAdminErrorLogIds.length ? ` (${selectedAdminErrorLogIds.length})` : ''}
+                </button>
+                <button
+                  type="button"
+                  onClick={clearSelectedAdminErrorLogs}
+                  disabled={selectedAdminErrorLogIds.length === 0 || adminErrorLogsBusy}
+                  className="inline-flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[10px] font-black uppercase text-rose-700 hover:bg-rose-100 disabled:opacity-50"
+                >
+                  <Icon name="trash-2" className="h-3.5 w-3.5" />
+                  {adminErrorLogsBusy ? 'Clearing…' : `Clear resolved (${selectedAdminErrorLogIds.length})`}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('dashboard')}
+                  className="rounded-xl p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                  aria-label="Return to Dashboard"
+                >
+                  <Icon name="x" className="h-4 w-4" />
+                </button>
+              </div>
+            </header>
+
+            {adminErrorLogsError && (
+              <div className="mx-5 mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs font-semibold text-rose-800 sm:mx-6">
+                {adminErrorLogsError}
+              </div>
+            )}
+
+            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto bg-slate-50 p-4 sm:p-6">
+              {adminErrorLogsLoading && adminErrorLogs.length === 0 && (
+                <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center text-sm font-semibold text-slate-500">
+                  Loading error logs…
+                </div>
+              )}
+              {!adminErrorLogsLoading && adminErrorLogs.length === 0 && !adminErrorLogsError && (
+                <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center">
+                  <Icon name="check-circle" className="mx-auto h-8 w-8 text-emerald-500" />
+                  <p className="mt-3 text-sm font-black text-slate-800">No error logs</p>
+                  <p className="mt-1 text-xs text-slate-500">New browser and API errors will appear here.</p>
+                </div>
+              )}
+              {adminErrorLogs.map((log) => (
+                <article key={log.id} className="rounded-2xl border border-rose-100 bg-white p-4 shadow-sm sm:p-5">
+                  <div className="flex items-start gap-3">
+                    <input
+                      type="checkbox"
+                      checked={selectedAdminErrorLogIds.includes(log.id)}
+                      onChange={() => toggleAdminErrorLogSelection(log.id)}
+                      aria-label={`Select ${log.error_type}: ${log.message}`}
+                      className="mt-1 h-4 w-4 shrink-0 accent-rose-600"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="rounded-full bg-rose-100 px-2.5 py-1 text-[9px] font-black uppercase tracking-wide text-rose-800">
+                          {log.error_type || 'Error'}
+                        </span>
+                        <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[9px] font-black uppercase tracking-wide text-slate-600">
+                          {log.error_name || 'Error'}
+                        </span>
+                        <span className={`rounded-full px-2.5 py-1 text-[9px] font-black uppercase tracking-wide ${log.reporter === 'Client' ? 'bg-cyan-100 text-cyan-800' : 'bg-indigo-100 text-indigo-800'}`}>
+                          {log.reporter || 'Admin'}
+                        </span>
+                        {log.error_code && (
+                          <span className="rounded-full bg-amber-50 px-2.5 py-1 text-[9px] font-black text-amber-800">
+                            Code {log.error_code}
+                          </span>
+                        )}
+                        <span className="ml-auto text-[10px] font-semibold text-slate-400">
+                          {log.created_at ? new Date(log.created_at).toLocaleString() : 'Unknown time'}
+                        </span>
+                      </div>
+                      <p className="mt-3 whitespace-pre-wrap break-words text-sm font-semibold leading-relaxed text-slate-900">
+                        {log.message}
+                      </p>
+                      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-slate-500">
+                        {log.source && <span><strong className="text-slate-700">Source:</strong> {log.source}</span>}
+                        {log.page_path && <span><strong className="text-slate-700">Page:</strong> {log.page_path}</span>}
+                        {(log.line_number || log.column_number) && (
+                          <span><strong className="text-slate-700">Position:</strong> {log.line_number || '–'}:{log.column_number || '–'}</span>
+                        )}
+                        <span><strong className="text-slate-700">Reporter:</strong> {log.reporter || 'Admin'}</span>
+                        {log.is_webdriver && <span className="font-bold text-violet-700">Automated browser</span>}
+                      </div>
+                      {(log.stack || log.component_stack || log.context) && (
+                        <details className="mt-3 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
+                          <summary className="cursor-pointer text-[10px] font-black uppercase tracking-wide text-slate-600">
+                            Technical details
+                          </summary>
+                          {log.stack && <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words text-[10px] leading-relaxed text-slate-700">{log.stack}</pre>}
+                          {log.component_stack && <pre className="mt-2 max-h-36 overflow-auto whitespace-pre-wrap break-words text-[10px] leading-relaxed text-slate-600">{log.component_stack}</pre>}
+                          {log.context && Object.keys(log.context).length > 0 && (
+                            <pre className="mt-2 max-h-36 overflow-auto whitespace-pre-wrap break-words text-[10px] leading-relaxed text-slate-600">{JSON.stringify(log.context, null, 2)}</pre>
+                          )}
+                          {log.user_agent && <p className="mt-2 break-all text-[9px] text-slate-400">{log.user_agent}</p>}
+                        </details>
+                      )}
+                    </div>
+                  </div>
+                </article>
+              ))}
+              {adminErrorLogsHasMore && (
+                <div className="flex justify-center py-2">
+                  <button
+                    type="button"
+                    onClick={() => void loadAdminErrorLogs(true)}
+                    disabled={adminErrorLogsLoadingMore}
+                    className="rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-[10px] font-black uppercase tracking-wide text-slate-600 hover:bg-slate-100 disabled:opacity-50"
+                  >
+                    {adminErrorLogsLoadingMore ? 'Loading…' : 'Load older logs'}
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 bg-white p-4 sm:px-6">
+              <p className="text-[10px] text-slate-500">Copy records for troubleshooting, then clear selected logs after they are resolved.</p>
+              <button
+                type="button"
+                onClick={() => setActiveTab('dashboard')}
+                className="rounded-xl bg-slate-900 px-4 py-2 text-[10px] font-black uppercase tracking-wide text-white hover:bg-slate-700"
+              >
+                Back to Dashboard
+              </button>
+            </footer>
+          </section>
+        </div>
+      )}
+
       </main>
 
       {bulkGenerationLogDialogOpen && (
@@ -6492,176 +6645,6 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
               </div>
             </div>
           </div>
-        </div>
-      )}
-
-      {errorLogWindowOpen && (
-        <div
-          className="fixed inset-0 z-[6600] flex items-center justify-center bg-slate-950/70 p-3 backdrop-blur-sm sm:p-6"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="admin-error-logs-title"
-          onClick={(event) => {
-            if (event.target === event.currentTarget) setErrorLogWindowOpen(false);
-          }}
-        >
-          <section className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl">
-            <header className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-100 p-5 sm:p-6">
-              <div>
-                <h2 id="admin-error-logs-title" className="flex items-center gap-2 text-base font-black uppercase tracking-wide text-slate-900">
-                  <Icon name="alert-triangle" className="h-5 w-5 text-rose-600" />
-                  Error Log Report
-                </h2>
-                <p className="mt-1 text-xs text-slate-500">
-                  {adminErrorLogsTotal} record{adminErrorLogsTotal === 1 ? '' : 's'} · showing {adminErrorLogs.length}
-                </p>
-                <p className="mt-2 max-w-2xl text-[11px] leading-relaxed text-slate-500">
-                  Copy selected records for troubleshooting in this Codex workspace. After the issue is fixed, select those records and clear them as resolved.
-                </p>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => void loadAdminErrorLogs(false)}
-                  disabled={adminErrorLogsLoading || adminErrorLogsBusy}
-                  className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-[10px] font-black uppercase text-slate-600 hover:bg-slate-50 disabled:opacity-50"
-                >
-                  <Icon name="refresh-cw" className={`h-3.5 w-3.5 ${adminErrorLogsLoading ? 'animate-spin' : ''}`} />
-                  Refresh
-                </button>
-                <button
-                  type="button"
-                  onClick={copyAdminErrorLogsForCodex}
-                  disabled={adminErrorLogsLoading || adminErrorLogs.length === 0}
-                  className="inline-flex items-center gap-2 rounded-xl border border-cyan-200 bg-cyan-50 px-3 py-2 text-[10px] font-black uppercase text-cyan-800 hover:bg-cyan-100 disabled:opacity-50"
-                  title={selectedAdminErrorLogIds.length ? 'Copy selected records for Codex' : 'Copy the visible records for Codex'}
-                >
-                  <Icon name="copy" className="h-3.5 w-3.5" />
-                  Copy for Codex{selectedAdminErrorLogIds.length ? ` (${selectedAdminErrorLogIds.length})` : ''}
-                </button>
-                <button
-                  type="button"
-                  onClick={clearSelectedAdminErrorLogs}
-                  disabled={selectedAdminErrorLogIds.length === 0 || adminErrorLogsBusy}
-                  className="inline-flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[10px] font-black uppercase text-rose-700 hover:bg-rose-100 disabled:opacity-50"
-                >
-                  <Icon name="trash-2" className="h-3.5 w-3.5" />
-                  {adminErrorLogsBusy ? 'Clearing…' : `Clear resolved (${selectedAdminErrorLogIds.length})`}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setErrorLogWindowOpen(false)}
-                  className="rounded-xl p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                  aria-label="Close admin error logs"
-                >
-                  <Icon name="x" className="h-4 w-4" />
-                </button>
-              </div>
-            </header>
-
-            {adminErrorLogsError && (
-              <div className="mx-5 mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs font-semibold text-rose-800 sm:mx-6">
-                {adminErrorLogsError}
-              </div>
-            )}
-
-            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto bg-slate-50 p-4 sm:p-6">
-              {adminErrorLogsLoading && adminErrorLogs.length === 0 && (
-                <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center text-sm font-semibold text-slate-500">
-                  Loading error logs…
-                </div>
-              )}
-              {!adminErrorLogsLoading && adminErrorLogs.length === 0 && !adminErrorLogsError && (
-                <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center">
-                  <Icon name="check-circle" className="mx-auto h-8 w-8 text-emerald-500" />
-                  <p className="mt-3 text-sm font-black text-slate-800">No error logs</p>
-                  <p className="mt-1 text-xs text-slate-500">New browser and API errors will appear here.</p>
-                </div>
-              )}
-              {adminErrorLogs.map((log) => (
-                <article key={log.id} className="rounded-2xl border border-rose-100 bg-white p-4 shadow-sm sm:p-5">
-                  <div className="flex items-start gap-3">
-                    <input
-                      type="checkbox"
-                      checked={selectedAdminErrorLogIds.includes(log.id)}
-                      onChange={() => toggleAdminErrorLogSelection(log.id)}
-                      aria-label={`Select ${log.error_type}: ${log.message}`}
-                      className="mt-1 h-4 w-4 shrink-0 accent-rose-600"
-                    />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="rounded-full bg-rose-100 px-2.5 py-1 text-[9px] font-black uppercase tracking-wide text-rose-800">
-                          {log.error_type || 'Error'}
-                        </span>
-                        <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[9px] font-black uppercase tracking-wide text-slate-600">
-                          {log.error_name || 'Error'}
-                        </span>
-                        <span className={`rounded-full px-2.5 py-1 text-[9px] font-black uppercase tracking-wide ${log.reporter === 'Client' ? 'bg-cyan-100 text-cyan-800' : 'bg-indigo-100 text-indigo-800'}`}>
-                          {log.reporter || 'Admin'}
-                        </span>
-                        {log.error_code && (
-                          <span className="rounded-full bg-amber-50 px-2.5 py-1 text-[9px] font-black text-amber-800">
-                            Code {log.error_code}
-                          </span>
-                        )}
-                        <span className="ml-auto text-[10px] font-semibold text-slate-400">
-                          {log.created_at ? new Date(log.created_at).toLocaleString() : 'Unknown time'}
-                        </span>
-                      </div>
-                      <p className="mt-3 whitespace-pre-wrap break-words text-sm font-semibold leading-relaxed text-slate-900">
-                        {log.message}
-                      </p>
-                      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-slate-500">
-                        {log.source && <span><strong className="text-slate-700">Source:</strong> {log.source}</span>}
-                        {log.page_path && <span><strong className="text-slate-700">Page:</strong> {log.page_path}</span>}
-                        {(log.line_number || log.column_number) && (
-                          <span><strong className="text-slate-700">Position:</strong> {log.line_number || '–'}:{log.column_number || '–'}</span>
-                        )}
-                        <span><strong className="text-slate-700">Reporter:</strong> {log.reporter || 'Admin'}</span>
-                        {log.is_webdriver && <span className="font-bold text-violet-700">Automated browser</span>}
-                      </div>
-                      {(log.stack || log.component_stack || log.context) && (
-                        <details className="mt-3 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
-                          <summary className="cursor-pointer text-[10px] font-black uppercase tracking-wide text-slate-600">
-                            Technical details
-                          </summary>
-                          {log.stack && <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words text-[10px] leading-relaxed text-slate-700">{log.stack}</pre>}
-                          {log.component_stack && <pre className="mt-2 max-h-36 overflow-auto whitespace-pre-wrap break-words text-[10px] leading-relaxed text-slate-600">{log.component_stack}</pre>}
-                          {log.context && Object.keys(log.context).length > 0 && (
-                            <pre className="mt-2 max-h-36 overflow-auto whitespace-pre-wrap break-words text-[10px] leading-relaxed text-slate-600">{JSON.stringify(log.context, null, 2)}</pre>
-                          )}
-                          {log.user_agent && <p className="mt-2 break-all text-[9px] text-slate-400">{log.user_agent}</p>}
-                        </details>
-                      )}
-                    </div>
-                  </div>
-                </article>
-              ))}
-              {adminErrorLogsHasMore && (
-                <div className="flex justify-center py-2">
-                  <button
-                    type="button"
-                    onClick={() => void loadAdminErrorLogs(true)}
-                    disabled={adminErrorLogsLoadingMore}
-                    className="rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-[10px] font-black uppercase tracking-wide text-slate-600 hover:bg-slate-100 disabled:opacity-50"
-                  >
-                    {adminErrorLogsLoadingMore ? 'Loading…' : 'Load older logs'}
-                  </button>
-                </div>
-              )}
-            </div>
-
-            <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 bg-white p-4 sm:px-6">
-              <p className="text-[10px] text-slate-500">Copy first, troubleshoot in Codex, then clear only the selected records you have resolved.</p>
-              <button
-                type="button"
-                onClick={() => setErrorLogWindowOpen(false)}
-                className="rounded-xl bg-slate-900 px-4 py-2 text-[10px] font-black uppercase tracking-wide text-white hover:bg-slate-700"
-              >
-                Close
-              </button>
-            </footer>
-          </section>
         </div>
       )}
 
