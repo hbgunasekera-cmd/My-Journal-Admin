@@ -1,4 +1,4 @@
-import { requireTrustedMutation } from '../server/api-security.js';
+import { requireTrustedMutation, requireTrustedRead } from '../server/api-security.js';
 import {
   deleteErrorLogs,
   listErrorLogs,
@@ -16,9 +16,9 @@ const optionalInteger = (value) => Number.isInteger(value) && value >= 0 ? value
 
 async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
-  if (!requireTrustedMutation(req, res)) return;
 
   if (req.method === 'GET') {
+    if (!requireTrustedRead(req, res)) return;
     const requestedOffset = Number.parseInt(req.query?.offset ?? '0', 10);
     const offset = Number.isFinite(requestedOffset) ? Math.max(0, requestedOffset) : 0;
     const result = await listErrorLogs(offset, PAGE_SIZE);
@@ -26,6 +26,7 @@ async function handler(req, res) {
   }
 
   if (req.method === 'POST') {
+    if (!requireTrustedMutation(req, res)) return;
     const body = req.body;
     if (!body || typeof body !== 'object' || Array.isArray(body)) {
       return res.status(400).json({ error: 'An error log object is required.' });

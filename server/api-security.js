@@ -68,6 +68,32 @@ export function requireTrustedMutation(req, res) {
   return false;
 }
 
+export function isTrustedRead(req) {
+  const headers = req.headers || {};
+  const origin = headers.origin;
+  if (typeof origin === 'string' && origin.trim()) return isTrustedMutation(req);
+
+  // Same-origin browser fetches often omit Origin on GET, but Fetch Metadata is
+  // supplied by the browser and identifies that request reliably.
+  if (headers['sec-fetch-site'] === 'same-origin') return true;
+
+  const referer = headers.referer || headers.referrer;
+  if (typeof referer !== 'string' || !referer) return false;
+  try {
+    const refererOrigin = new URL(referer).origin;
+    return isTrustedMutation({ ...req, headers: { ...headers, origin: refererOrigin } });
+  } catch {
+    return false;
+  }
+}
+
+export function requireTrustedRead(req, res) {
+  if (isTrustedRead(req)) return true;
+  res.setHeader('Cache-Control', 'no-store');
+  res.status(403).json({ error: 'Request origin is not allowed.' });
+  return false;
+}
+
 export function validateImageUrl(value) {
   if (typeof value !== 'string' || value.length > 2048) {
     throw new Error('Image URL must be a valid URL under 2048 characters.');
