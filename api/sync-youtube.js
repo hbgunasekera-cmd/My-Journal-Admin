@@ -1,6 +1,7 @@
 import { requireTrustedMutation } from '../server/api-security.js';
+import { withApiErrorLogging } from '../server/error-logger.js';
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   // Only allow POST requests
   if (req.method !== "POST") {
     res.setHeader('Allow', 'POST');
@@ -223,3 +224,5 @@ export default async function handler(req, res) {
     });
   }
 }
+
+export default withApiErrorLogging(handler);

@@ -18,3 +18,7 @@ Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_KEY` in `.env.local` or the deploymen
 Keep `ARTICLE_KEY` server-side. The local Vite API handler and deployed `/api/generate-article` endpoint use it for article and metadata generation; do not expose it through a `VITE_` variable.
 
 Other API integrations are configured with the server-side environment variables read by files under `api/`.
+
+## Error logging
+
+Browser runtime errors, unhandled promise rejections, React render errors, and failed API responses are written to `public.error_logs` with `reporter = 'Admin'`; the separate client app can continue writing `reporter = 'Client'`. The Dashboard Error Log Report displays both reporter types and allows selected resolved rows to be cleared. Apply the migrations in `supabase/migrations/` in the Supabase SQL editor, then configure the server-only `SUPABASE_SERVICE_ROLE_KEY` in `.env.local` for local development and in Vercel (Production, Preview, and Development as needed). The existing `VITE_SUPABASE_URL` is used for the database URL; `SUPABASE_URL` can be set instead. Do not use a `VITE_` prefix for the service role key.

@@ -81,8 +81,16 @@ const localApi = {
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
   const localArticleEnv = loadEnv(mode, process.cwd(), "ARTICLE_KEY");
+  const localSupabaseUrlEnv = loadEnv(mode, process.cwd(), "VITE_SUPABASE_URL");
+  const localErrorLogEnv = loadEnv(mode, process.cwd(), "SUPABASE_");
   if (!process.env.ARTICLE_KEY && localArticleEnv.ARTICLE_KEY) {
     process.env.ARTICLE_KEY = localArticleEnv.ARTICLE_KEY;
+  }
+  if (!process.env.VITE_SUPABASE_URL && localSupabaseUrlEnv.VITE_SUPABASE_URL) {
+    process.env.VITE_SUPABASE_URL = localSupabaseUrlEnv.VITE_SUPABASE_URL;
+  }
+  for (const key of ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_SERVICE_KEY"]) {
+    if (!process.env[key] && localErrorLogEnv[key]) process.env[key] = localErrorLogEnv[key];
   }
 
   return {

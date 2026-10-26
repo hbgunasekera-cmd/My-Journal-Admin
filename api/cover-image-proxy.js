@@ -1,7 +1,8 @@
 import { fetchTrustedImage, validateImageUrl } from '../server/api-security.js';
+import { withApiErrorLogging } from '../server/error-logger.js';
 import sharp from 'sharp';
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     res.setHeader('Allow', 'GET, HEAD');
     return res.status(405).json({ error: 'Method not allowed.' });
@@ -45,3 +46,5 @@ export default async function handler(req, res) {
     return res.status(status).json({ error: 'Unable to fetch this image from an approved image host.' });
   }
 }
+
+export default withApiErrorLogging(handler);

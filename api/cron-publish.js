@@ -1,5 +1,6 @@
 // api/cron-publish.js
 import { createClient } from '@supabase/supabase-js';
+import { withApiErrorLogging } from '../server/error-logger.js';
 
 const PLATFORM_COLUMNS = {
   instagram: 'published_instagram_at',
@@ -8,7 +9,7 @@ const PLATFORM_COLUMNS = {
   bluesky: 'published_bsky_at'
 };
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   // 0. CRITICAL: Force Vercel to never cache this GET request. 
   // This guarantees your function runs and writes logs on every single trigger.
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
@@ -204,3 +205,5 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: error.message });
   }
 }
+
+export default withApiErrorLogging(handler);
