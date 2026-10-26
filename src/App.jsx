@@ -426,6 +426,7 @@ function App() {
   const [adminErrorLogsLoading, setAdminErrorLogsLoading] = useState(false);
   const [adminErrorLogsLoadingMore, setAdminErrorLogsLoadingMore] = useState(false);
   const [adminErrorLogsBusy, setAdminErrorLogsBusy] = useState(false);
+  const [adminErrorLogsClearingAll, setAdminErrorLogsClearingAll] = useState(false);
   const [adminErrorLogsError, setAdminErrorLogsError] = useState('');
   const [selectedAdminErrorLogIds, setSelectedAdminErrorLogIds] = useState([]);
   const triggerToast = React.useCallback((msg) => {
@@ -4177,6 +4178,35 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
     }
   };
 
+  const clearAllAdminErrorLogs = async () => {
+    if (adminErrorLogsBusy || adminErrorLogsTotal === 0) return;
+    if (!window.confirm('Permanently delete every Admin and Client error log from the database? This cannot be undone.')) return;
+
+    setAdminErrorLogsBusy(true);
+    setAdminErrorLogsClearingAll(true);
+    setAdminErrorLogsError('');
+    try {
+      const { count, error } = await supabaseClient
+        .from('error_logs')
+        .delete({ count: 'exact' })
+        .not('id', 'is', null);
+      if (error) throw error;
+
+      const deletedCount = Number(count) || 0;
+      setAdminErrorLogs([]);
+      setAdminErrorLogsTotal(0);
+      setAdminErrorLogsHasMore(false);
+      setSelectedAdminErrorLogIds([]);
+      triggerToast(`Deleted ${deletedCount} error log${deletedCount === 1 ? '' : 's'}.`);
+    } catch (error) {
+      setAdminErrorLogsError(error.message || 'Could not delete all error logs.');
+      console.error('Deleting all error logs failed:', error);
+    } finally {
+      setAdminErrorLogsClearingAll(false);
+      setAdminErrorLogsBusy(false);
+    }
+  };
+
   // State to track revealed email IDs
   const [revealedEmails, setRevealedEmails] = useState({});
 
@@ -6389,7 +6419,17 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                   className="inline-flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[10px] font-black uppercase text-rose-700 hover:bg-rose-100 disabled:opacity-50"
                 >
                   <Icon name="trash-2" className="h-3.5 w-3.5" />
-                  {adminErrorLogsBusy ? 'Clearing…' : `Clear resolved (${selectedAdminErrorLogIds.length})`}
+                  {adminErrorLogsBusy && !adminErrorLogsClearingAll ? 'Clearing…' : `Clear resolved (${selectedAdminErrorLogIds.length})`}
+                </button>
+                <button
+                  type="button"
+                  onClick={clearAllAdminErrorLogs}
+                  disabled={adminErrorLogsTotal === 0 || adminErrorLogsBusy}
+                  className="inline-flex items-center gap-2 rounded-xl border border-rose-300 bg-rose-600 px-3 py-2 text-[10px] font-black uppercase text-white hover:bg-rose-700 disabled:opacity-50"
+                  title="Permanently delete every Admin and Client error log"
+                >
+                  <Icon name="trash-2" className="h-3.5 w-3.5" />
+                  {adminErrorLogsClearingAll ? 'Clearing all…' : 'Clear all'}
                 </button>
                 <button
                   type="button"
