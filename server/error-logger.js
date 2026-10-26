@@ -79,30 +79,6 @@ export async function writeAdminErrorLog(error, metadata = {}) {
   }
 }
 
-export async function listErrorLogs(offset = 0, limit = 100) {
-  const supabase = getSupabaseAdmin();
-  if (!supabase) throw new Error('Error log database access is not configured.');
-  const { data, count, error } = await supabase
-    .from('error_logs')
-    .select('*', { count: 'exact' })
-    .order('created_at', { ascending: false })
-    .range(offset, offset + limit - 1);
-  if (error) throw error;
-  return { logs: data || [], total: count || 0 };
-}
-
-export async function deleteErrorLogs(ids) {
-  const supabase = getSupabaseAdmin();
-  if (!supabase) throw new Error('Error log database access is not configured.');
-  const { data, error } = await supabase
-    .from('error_logs')
-    .delete()
-    .in('id', ids)
-    .select('id');
-  if (error) throw error;
-  return (data || []).map((row) => row.id);
-}
-
 const responseError = (body, statusCode) => {
   let message = '';
   if (typeof body === 'string') message = body;
@@ -122,10 +98,6 @@ const responseError = (body, statusCode) => {
 export function withApiErrorLogging(handler) {
   return async function apiErrorLoggingWrapper(req, res) {
     const apiPath = redact(req.url?.split('?')[0] || '/api/unknown', 1000);
-    const isErrorLogInsert = apiPath === '/api/error-logs'
-      && req.method === 'POST'
-      && req.body?.action !== 'clear';
-    const shouldLog = !isErrorLogInsert;
     let statusCode = 200;
     let pendingResponse = Promise.resolve();
     let errorResponseScheduled = false;
@@ -142,7 +114,7 @@ export function withApiErrorLogging(handler) {
     }
 
     const scheduleResponse = (original, payload, args) => {
-      if (statusCode < 400 || !shouldLog || errorResponseScheduled) return original(...args);
+      if (statusCode < 400 || errorResponseScheduled) return original(...args);
       errorResponseScheduled = true;
       pendingResponse = writeAdminErrorLog(responseError(payload, statusCode), {
         errorType: 'API response error',
@@ -156,7 +128,7 @@ export function withApiErrorLogging(handler) {
     if (originalSend) res.send = (payload) => scheduleResponse(originalSend, payload, [payload]);
     if (originalEnd) {
       res.end = (...args) => {
-        if (statusCode >= 400 && shouldLog && !errorResponseScheduled) {
+        if (statusCode >= 400 && !errorResponseScheduled) {
           errorResponseScheduled = true;
           pendingResponse = writeAdminErrorLog(responseError(null, statusCode), {
             errorType: 'API response error',
@@ -174,13 +146,11 @@ export function withApiErrorLogging(handler) {
       await pendingResponse;
       return result;
     } catch (error) {
-      if (shouldLog) {
-        await writeAdminErrorLog(error, {
-          errorType: 'API exception',
-          source: apiPath,
-          context: { method: req.method || 'UNKNOWN', status: statusCode >= 400 ? statusCode : 500 }
-        });
-      }
+      await writeAdminErrorLog(error, {
+        errorType: 'API exception',
+        source: apiPath,
+        context: { method: req.method || 'UNKNOWN', status: statusCode >= 400 ? statusCode : 500 }
+      });
       throw error;
     }
   };

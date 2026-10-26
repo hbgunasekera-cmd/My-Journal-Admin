@@ -1,4 +1,6 @@
-const ERROR_ENDPOINT = '/api/error-logs';
+const SUPABASE_URL = String(import.meta.env.VITE_SUPABASE_URL || '').replace(/\/+$/, '');
+const SUPABASE_PUBLIC_KEY = import.meta.env.VITE_SUPABASE_KEY || '';
+const ERROR_ENDPOINT = SUPABASE_URL ? `${SUPABASE_URL}/rest/v1/error_logs` : '';
 const MAX_MESSAGE_LENGTH = 4000;
 const MAX_STACK_LENGTH = 8000;
 const reportedErrors = new Map();
@@ -64,7 +66,7 @@ const cleanContext = (context) => {
 };
 
 export function reportClientError(error, options = {}) {
-  if (typeof window === 'undefined' || typeof fetch !== 'function') return;
+  if (typeof window === 'undefined' || typeof fetch !== 'function' || !ERROR_ENDPOINT || !SUPABASE_PUBLIC_KEY) return;
   const details = describeError(error);
   const errorType = redact(options.errorType || 'Client runtime', 80);
   const source = redact(options.source || '', 1000) || null;
@@ -81,6 +83,7 @@ export function reportClientError(error, options = {}) {
   }
 
   const payload = {
+    reporter: 'Admin',
     session_id: getSessionId(),
     error_type: errorType,
     ...details,
@@ -97,7 +100,12 @@ export function reportClientError(error, options = {}) {
   try {
     void fetch(ERROR_ENDPOINT, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        apikey: SUPABASE_PUBLIC_KEY,
+        Authorization: `Bearer ${SUPABASE_PUBLIC_KEY}`,
+        'Content-Type': 'application/json',
+        Prefer: 'return=minimal'
+      },
       body: JSON.stringify(payload),
       keepalive: true
     }).catch(() => {});

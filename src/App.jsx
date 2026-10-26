@@ -4072,13 +4072,17 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
     setAdminErrorLogsError('');
 
     try {
-      const response = await fetch(`/api/error-logs?offset=${offset}`, { cache: 'no-store' });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(result.error || `Error log request failed (${response.status}).`);
-      const logs = Array.isArray(result.logs) ? result.logs : [];
+      const { data, count, error } = await supabaseClient
+        .from('error_logs')
+        .select('*', { count: 'exact' })
+        .order('created_at', { ascending: false })
+        .range(offset, offset + 99);
+      if (error) throw error;
+      const logs = Array.isArray(data) ? data : [];
+      const total = Number(count) || 0;
       setAdminErrorLogs((current) => append ? [...current, ...logs] : logs);
-      setAdminErrorLogsTotal(Number(result.total) || 0);
-      setAdminErrorLogsHasMore(offset + logs.length < (Number(result.total) || 0));
+      setAdminErrorLogsTotal(total);
+      setAdminErrorLogsHasMore(offset + logs.length < total);
       if (!append) setSelectedAdminErrorLogIds([]);
     } catch (error) {
       setAdminErrorLogsError(error.message || 'Could not load error logs.');
@@ -4152,15 +4156,14 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
     setAdminErrorLogsBusy(true);
     setAdminErrorLogsError('');
     try {
-      const response = await fetch('/api/error-logs', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'clear', ids: selectedAdminErrorLogIds })
-      });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(result.error || `Could not clear logs (${response.status}).`);
+      const { data, error } = await supabaseClient
+        .from('error_logs')
+        .delete()
+        .in('id', selectedAdminErrorLogIds)
+        .select('id');
+      if (error) throw error;
 
-      const deletedIds = Array.isArray(result.deletedIds) ? result.deletedIds : [];
+      const deletedIds = Array.isArray(data) ? data.map((row) => row.id) : [];
       setAdminErrorLogs((current) => current.filter((log) => !deletedIds.includes(log.id)));
       setAdminErrorLogsTotal((current) => Math.max(0, current - deletedIds.length));
       setSelectedAdminErrorLogIds([]);
