@@ -36,6 +36,7 @@ import {
   Navigation2,
   PlusCircle,
   RefreshCw,
+  Search,
   Share2,
   Shield,
   ShieldAlert,
@@ -171,6 +172,7 @@ const Icon = React.memo(({ name, className = "w-4 h-4" }) => {
     'navigation-2': Navigation2,
     'plus-circle': PlusCircle,
     'refresh-cw': RefreshCw,
+    'search': Search,
     'share-2': Share2,
     'shield': Shield,
     'shield-alert': ShieldAlert,
@@ -429,6 +431,15 @@ function App() {
   const [adminErrorLogsClearingAll, setAdminErrorLogsClearingAll] = useState(false);
   const [adminErrorLogsError, setAdminErrorLogsError] = useState('');
   const [selectedAdminErrorLogIds, setSelectedAdminErrorLogIds] = useState([]);
+  const [adminErrorLogFilters, setAdminErrorLogFilters] = useState({
+    reporter: 'All',
+    errorType: '',
+    search: '',
+    from: '',
+    to: ''
+  });
+  const hasAdminErrorLogFilters = adminErrorLogFilters.reporter !== 'All'
+    || Boolean(adminErrorLogFilters.errorType || adminErrorLogFilters.search || adminErrorLogFilters.from || adminErrorLogFilters.to);
   const triggerToast = React.useCallback((msg) => {
     setToast({ show: true, msg });
     setTimeout(() => setToast({ show: false, msg: '' }), 2500);
@@ -4066,18 +4077,43 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
     }
   };
 
-  const loadAdminErrorLogs = async (append = false) => {
+  const loadAdminErrorLogs = async (append = false, filters = adminErrorLogFilters) => {
     const offset = append ? adminErrorLogs.length : 0;
+    if (filters.from && filters.to && filters.from > filters.to) {
+      setAdminErrorLogsError('The start date must be on or before the end date.');
+      return;
+    }
     if (append) setAdminErrorLogsLoadingMore(true);
     else setAdminErrorLogsLoading(true);
     setAdminErrorLogsError('');
 
     try {
-      const { data, count, error } = await supabaseClient
+      let query = supabaseClient
         .from('error_logs')
         .select('*', { count: 'exact' })
-        .order('created_at', { ascending: false })
-        .range(offset, offset + 99);
+        .order('created_at', { ascending: false });
+      if (filters.reporter && filters.reporter !== 'All') query = query.eq('reporter', filters.reporter);
+      if (filters.errorType.trim()) query = query.ilike('error_type', `%${filters.errorType.trim()}%`);
+      if (filters.search.trim()) {
+        const escapedSearch = filters.search.trim().replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+        const pattern = `"%${escapedSearch}%"`;
+        query = query.or([
+          `message.ilike.${pattern}`,
+          `error_name.ilike.${pattern}`,
+          `error_type.ilike.${pattern}`,
+          `error_code.ilike.${pattern}`,
+          `source.ilike.${pattern}`,
+          `page_path.ilike.${pattern}`,
+          `reporter.ilike.${pattern}`
+        ].join(','));
+      }
+      if (filters.from) query = query.gte('created_at', new Date(`${filters.from}T00:00:00`).toISOString());
+      if (filters.to) {
+        const endExclusive = new Date(`${filters.to}T00:00:00`);
+        endExclusive.setDate(endExclusive.getDate() + 1);
+        query = query.lt('created_at', endExclusive.toISOString());
+      }
+      const { data, count, error } = await query.range(offset, offset + 99);
       if (error) throw error;
       const logs = Array.isArray(data) ? data : [];
       const total = Number(count) || 0;
@@ -4092,6 +4128,13 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
       setAdminErrorLogsLoading(false);
       setAdminErrorLogsLoadingMore(false);
     }
+  };
+
+  const clearAdminErrorLogFilters = () => {
+    const clearedFilters = { reporter: 'All', errorType: '', search: '', from: '', to: '' };
+    setAdminErrorLogFilters(clearedFilters);
+    setSelectedAdminErrorLogIds([]);
+    void loadAdminErrorLogs(false, clearedFilters);
   };
 
   const toggleAdminErrorLogSelection = (id) => {
@@ -6442,6 +6485,89 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
               </div>
             </header>
 
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                void loadAdminErrorLogs(false);
+              }}
+              className="border-b border-slate-100 bg-white px-5 py-4 sm:px-6"
+            >
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-6">
+                <label className="block text-[9px] font-black uppercase tracking-wide text-slate-500">
+                  Reporter
+                  <select
+                    value={adminErrorLogFilters.reporter}
+                    onChange={(event) => setAdminErrorLogFilters((current) => ({ ...current, reporter: event.target.value }))}
+                    className="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-semibold normal-case tracking-normal text-slate-800 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+                  >
+                    <option value="All">All reporters</option>
+                    <option value="Admin">Admin</option>
+                    <option value="Client">Client</option>
+                  </select>
+                </label>
+                <label className="block text-[9px] font-black uppercase tracking-wide text-slate-500">
+                  Error type
+                  <input
+                    type="text"
+                    value={adminErrorLogFilters.errorType}
+                    onChange={(event) => setAdminErrorLogFilters((current) => ({ ...current, errorType: event.target.value }))}
+                    placeholder="e.g. API error"
+                    className="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-semibold normal-case tracking-normal text-slate-800 outline-none placeholder:text-slate-400 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+                  />
+                </label>
+                <label className="block text-[9px] font-black uppercase tracking-wide text-slate-500 lg:col-span-2">
+                  Search logs
+                  <input
+                    type="search"
+                    value={adminErrorLogFilters.search}
+                    onChange={(event) => setAdminErrorLogFilters((current) => ({ ...current, search: event.target.value }))}
+                    placeholder="Message, error name, code, source, or page"
+                    className="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-semibold normal-case tracking-normal text-slate-800 outline-none placeholder:text-slate-400 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+                  />
+                </label>
+                <label className="block text-[9px] font-black uppercase tracking-wide text-slate-500">
+                  From date
+                  <input
+                    type="date"
+                    value={adminErrorLogFilters.from}
+                    max={adminErrorLogFilters.to || undefined}
+                    onChange={(event) => setAdminErrorLogFilters((current) => ({ ...current, from: event.target.value }))}
+                    className="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-semibold normal-case tracking-normal text-slate-800 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+                  />
+                </label>
+                <label className="block text-[9px] font-black uppercase tracking-wide text-slate-500">
+                  To date
+                  <input
+                    type="date"
+                    value={adminErrorLogFilters.to}
+                    min={adminErrorLogFilters.from || undefined}
+                    onChange={(event) => setAdminErrorLogFilters((current) => ({ ...current, to: event.target.value }))}
+                    className="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-semibold normal-case tracking-normal text-slate-800 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+                  />
+                </label>
+              </div>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <button
+                  type="submit"
+                  disabled={adminErrorLogsLoading || adminErrorLogsBusy}
+                  className="rounded-xl bg-indigo-600 px-4 py-2.5 text-[10px] font-black uppercase tracking-wide text-white hover:bg-indigo-700 disabled:opacity-50"
+                >
+                  Apply filters
+                </button>
+                {hasAdminErrorLogFilters && (
+                  <button
+                    type="button"
+                    onClick={clearAdminErrorLogFilters}
+                    disabled={adminErrorLogsLoading || adminErrorLogsBusy}
+                    className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-[10px] font-black uppercase tracking-wide text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    Clear filters
+                  </button>
+                )}
+                <span className="text-[10px] font-semibold text-slate-400">Filters apply across all stored records.</span>
+              </div>
+            </form>
+
             {adminErrorLogsError && (
               <div className="mx-5 mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs font-semibold text-rose-800 sm:mx-6">
                 {adminErrorLogsError}
@@ -6456,9 +6582,11 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
               )}
               {!adminErrorLogsLoading && adminErrorLogs.length === 0 && !adminErrorLogsError && (
                 <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center">
-                  <Icon name="check-circle" className="mx-auto h-8 w-8 text-emerald-500" />
-                  <p className="mt-3 text-sm font-black text-slate-800">No error logs</p>
-                  <p className="mt-1 text-xs text-slate-500">New browser and API errors will appear here.</p>
+                  <Icon name={hasAdminErrorLogFilters ? 'search' : 'check-circle'} className={`mx-auto h-8 w-8 ${hasAdminErrorLogFilters ? 'text-slate-400' : 'text-emerald-500'}`} />
+                  <p className="mt-3 text-sm font-black text-slate-800">{hasAdminErrorLogFilters ? 'No matching error logs' : 'No error logs'}</p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {hasAdminErrorLogFilters ? 'Change or clear the filters to see other records.' : 'New browser and API errors will appear here.'}
+                  </p>
                 </div>
               )}
               {adminErrorLogs.map((log) => (
