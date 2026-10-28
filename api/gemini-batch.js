@@ -95,7 +95,7 @@ const getSeasonGuidePrompt = (route) => {
   ].join(' | ')).join('\n');
 
   return [
-    'Use Google Search to recommend the best months or season to visit this saved Sri Lankan route.',
+    'Before choosing a season, perform at least one Google Search for the supplied main area and its Sri Lankan monsoon/rainfall seasonality. Do not answer from memory alone.',
     'Research only the supplied main area as a whole, not each stop separately. Use the nearby stops, categories and coordinates to understand the route mix. Prefer Sri Lanka Department of Meteorology, government, tourism, conservation and reliable local climate sources. If only nearby-area climate evidence is available, set location_match to AREA_CLIMATE_ONLY. Do not invent or name sources.',
     'Route: ' + route.routeName,
     'Main area: ' + route.mainArea,
@@ -109,7 +109,9 @@ const getSeasonGuidePrompt = (route) => {
 const getSeasonGuideCandidates = (response) => [
     response?.candidates?.[0],
     response?.response?.candidates?.[0],
-    response?.output?.candidates?.[0]
+    response?.output?.candidates?.[0],
+    response?.generateContentResponse?.candidates?.[0],
+    response?.response?.generateContentResponse?.candidates?.[0]
   ].filter(Boolean);
 
 const getSeasonGuideText = (response) => {
@@ -218,22 +220,45 @@ const parseSeasonGuideJson = (value) => {
   }
 };
 
+const getSeasonGuideGroundingMetadata = (response) => [
+  ...getSeasonGuideCandidates(response).flatMap((candidate) => [
+    candidate?.groundingMetadata,
+    candidate?.grounding_metadata
+  ]),
+  response?.groundingMetadata,
+  response?.grounding_metadata,
+  response?.response?.groundingMetadata,
+  response?.response?.grounding_metadata,
+  response?.output?.groundingMetadata,
+  response?.output?.grounding_metadata
+].filter((metadata) => metadata && typeof metadata === 'object');
+
+const getSeasonGuideSearchQueries = (response) => [...new Set(
+  getSeasonGuideGroundingMetadata(response)
+    .flatMap((metadata) => metadata.webSearchQueries || metadata.web_search_queries || [])
+    .filter((query) => typeof query === 'string' && query.trim())
+    .map((query) => cleanText(query, 240))
+)].slice(0, 5);
+
 const getSeasonGuideGroundedSources = (response) => {
-  const candidate = response?.candidates?.[0] || response?.response?.candidates?.[0];
-  const groundingMetadata = candidate?.groundingMetadata
-    || candidate?.grounding_metadata
-    || response?.groundingMetadata
-    || response?.grounding_metadata
-    || response?.response?.groundingMetadata
-    || response?.response?.grounding_metadata;
-  const chunks = groundingMetadata?.groundingChunks || groundingMetadata?.grounding_chunks || [];
+  const chunks = getSeasonGuideGroundingMetadata(response)
+    .flatMap((metadata) => metadata.groundingChunks || metadata.grounding_chunks || []);
   const fallbackSources = chunks.flatMap((chunk) => {
     const web = chunk?.web || chunk?.webSearch || chunk?.web_search;
     const url = web?.uri || web?.url;
     return typeof url === 'string' ? [{ title: web?.title, url }] : [];
   });
+  const citationSources = getSeasonGuideCandidates(response).flatMap((candidate) => {
+    const citations = candidate?.citationMetadata?.citationSources
+      || candidate?.citation_metadata?.citation_sources
+      || [];
+    return citations.map((citation) => ({
+      title: citation?.title || citation?.publicationDate || '',
+      url: citation?.uri || citation?.url
+    }));
+  });
   const unique = new Map();
-  [...getGroundedSources(response), ...fallbackSources].forEach((source) => {
+  [...getGroundedSources(response), ...fallbackSources, ...citationSources].forEach((source) => {
     try {
       const url = new URL(source?.url);
       if (url.protocol === 'https:' || url.protocol === 'http:') {
@@ -259,6 +284,7 @@ const normalizeSeasonGuideResults = (batch, offset, limit) => {
     if (!response) return { key, success: false, error: getResultError(inline) };
 
     const sources = getSeasonGuideGroundedSources(response);
+    const searchQueries = getSeasonGuideSearchQueries(response);
     try {
       const parsedResponse = parseSeasonGuideJson(getSeasonGuideText(response));
       const parsed = parsedResponse?.season_guide || parsedResponse?.seasonGuide || parsedResponse?.guide || parsedResponse;
@@ -277,14 +303,21 @@ const normalizeSeasonGuideResults = (batch, offset, limit) => {
         rationale: cleanText(readValue('rationale', 'reason'), 400),
         confidence: cleanText(readValue('confidence'), 20).toLowerCase()
       };
+      const sourceStatus = sources.length > 0
+        ? 'grounded'
+        : searchQueries.length > 0
+          ? 'search_used_no_citations'
+          : 'ai_estimate';
       if (!guide.locationMatch) guide.locationMatch = 'AREA_CLIMATE_ONLY';
+      if (sourceStatus !== 'grounded') {
+        // A usable period should not be discarded solely because the Batch API
+        // omitted source metadata. Surface it transparently as an area estimate.
+        guide.locationMatch = 'AREA_CLIMATE_ONLY';
+      }
       if (!['CONFIRMED', 'AREA_CLIMATE_ONLY'].includes(guide.locationMatch)) {
         return { key, success: false, error: 'The saved route main area could not be matched to a reliable local climate source.' };
       }
-      const missing = [
-        !guide.primaryWindow && 'the best-season period',
-        sources.length === 0 && 'grounded web sources'
-      ].filter(Boolean);
+      const missing = [!guide.primaryWindow && 'the best-season period'].filter(Boolean);
       if (missing.length) {
         return {
           key,
@@ -294,7 +327,7 @@ const normalizeSeasonGuideResults = (batch, offset, limit) => {
             : 'The season research omitted ' + missing.join(' and ') + '. Retry this guide.'
         };
       }
-      return { key, success: true, guide, sources, researchedAt: finishedAt };
+      return { key, success: true, guide, sources, searchQueries, sourceStatus, researchedAt: finishedAt };
     } catch (error) {
       const candidate = getSeasonGuideCandidates(response)[0];
       const finishReason = candidate?.finishReason || candidate?.finish_reason;

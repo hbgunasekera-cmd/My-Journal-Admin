@@ -329,6 +329,8 @@ const executeGeminiSeasonGuideBatch = async (routes, publish, persistGuides, isC
         ...result.guide,
         mainArea: route.request?.mainArea || result.guide?.mainArea || '',
         sources: result.sources || [],
+        sourceSearchQueries: result.searchQueries || [],
+        sourceStatus: result.sourceStatus || (result.sources?.length ? 'grounded' : 'ai_estimate'),
         researchedAt: result.researchedAt || new Date().toISOString(),
         ...(Array.isArray(route.savedGuide?.legacyStopGuides) ? { legacyStopGuides: route.savedGuide.legacyStopGuides } : {})
       }
@@ -6310,8 +6312,18 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                                                   })}
                                                 </p>
                                               )}
+                                              {(!Array.isArray(seasonGuide.sources) || seasonGuide.sources.length === 0)
+                                                && seasonGuide.sourceStatus !== 'grounded' && (
+                                                  <p className="border-t border-slate-100 pt-1 text-[8px] leading-3 text-slate-500">
+                                                    {seasonGuide.sourceStatus === 'search_used_no_citations'
+                                                      ? 'Google Search ran, but citation links were not returned.'
+                                                      : 'Citation links were unavailable; use this as an AI seasonal estimate.'}
+                                                  </p>
+                                                )}
                                               <p className="border-t border-slate-100 pt-1 text-[8px] text-slate-400">
-                                                {seasonGuide.locationMatch === 'AREA_CLIMATE_ONLY' ? 'Nearby-area climate estimate.' : 'Route area matched to sources.'} This is seasonal guidance, not a forecast or drone clearance.
+                                                {seasonGuide.sources?.length > 0
+                                                  ? (seasonGuide.locationMatch === 'AREA_CLIMATE_ONLY' ? 'Nearby-area climate estimate.' : 'Route area matched to sources.')
+                                                  : 'Area-level seasonal estimate.'} This is not a forecast or drone clearance.
                                               </p>
                                             </>
                                           ) : seasonGuide?.status === 'error' ? (
