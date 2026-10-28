@@ -2,12 +2,6 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import { generateCleanSlug } from './utils.js';
 import { logClientError } from './errorLogger.js';
-import {
-  clearLegacySeasonGuideBrowserStorage,
-  getSeasonGuideCacheKey
-} from './seasonGuide.js';
-
-clearLegacySeasonGuideBrowserStorage();
 
 // --- Leaflet & Routing ---
 import L from 'leaflet';
@@ -81,6 +75,15 @@ const supabaseClient = createClient(SUPABASE_URL, SUPABASE_KEY, {
     detectSessionInUrl: false,
   },
 });
+
+if (typeof window !== 'undefined') {
+  try {
+    window.localStorage.removeItem('my-journal-admin-season-guides-v1');
+    window.localStorage.removeItem('my-journal-admin-season-guide-batches-v1');
+  } catch {
+    // Seasonal route guides are stored only in saved_travel_routes.
+  }
+}
 
 
 
@@ -235,50 +238,33 @@ const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (character
   "'": '&#39;'
 })[character]);
 
-const seasonGuideBatchRuns = new Map();
+
 const reportedSeasonGuideFailures = new Set();
 
-const logSeasonGuideFailure = (error, place = null, context = {}) => {
+const logSeasonGuideFailure = (error, route = null, context = {}) => {
   const message = error instanceof Error ? error.message : String(error || 'Unknown season-guide failure.');
-  const locationLabel = place
-    ? `${place.place_name || 'Unnamed location'} (${place.id || 'unknown id'}): `
-    : '';
-  const errorKey = `${place?.id || context.request_signature || context.operation_name || 'batch'}|${message}`;
+  const routeLabel = route ? (route.route_name || route.routeName || 'Saved route') + ' (' + route.id + '): ' : '';
+  const errorKey = String(route?.id || context.operation_name || 'route-batch') + '|' + message;
   if (reportedSeasonGuideFailures.has(errorKey)) return;
   reportedSeasonGuideFailures.add(errorKey);
   if (reportedSeasonGuideFailures.size > 1000) reportedSeasonGuideFailures.clear();
-
-  const reportedError = error instanceof Error && !locationLabel
-    ? error
-    : new Error(`${locationLabel}${message}`);
-  const readCoordinate = (value) => value !== null && value !== undefined && String(value).trim() !== ''
-    && Number.isFinite(Number(value))
-    ? Number(value)
-    : null;
-  logClientError(reportedError, {
+  logClientError(new Error(routeLabel + message), {
     errorType: 'Season Guide',
-    source: context.action === 'validate-location' ? 'Map Tab' : '/api/gemini-batch',
+    source: ['database-update', 'retry-save'].includes(context.action) ? 'saved_travel_routes' : '/api/gemini-batch',
     context: {
       task: 'season-guide',
-      ...(place ? {
-        location_id: String(place.id || ''),
-        place_name: String(place.place_name || ''),
-        category: String(place.category || 'Location'),
-        locality: String(place.locality || ''),
-        latitude: readCoordinate(place.latitude),
-        longitude: readCoordinate(place.longitude)
+      action: context.action || 'request',
+      ...(route ? {
+        route_id: String(route.id || ''),
+        route_name: String(route.route_name || route.routeName || ''),
+        main_area: String(route.mainArea || route.seasonal_guide?.mainArea || '')
       } : {}),
       ...context
     }
   });
 };
 
-const getSeasonGuideSignature = (places, forceIds = []) => JSON.stringify([
-  [...new Set(places.map((place) => getSeasonGuideCacheKey(place)))].sort(),
-  [...forceIds].map(String).sort()
-]);
-
-const executeGeminiSeasonGuideBatch = async (places, publish, forceIds = []) => {
+const executeGeminiSeasonGuideBatch = async (routes, publish, persistGuides, isCancelled) => {
   const post = async (body) => {
     const response = await fetch('/api/gemini-batch', {
       method: 'POST',
@@ -288,221 +274,232 @@ const executeGeminiSeasonGuideBatch = async (places, publish, forceIds = []) => 
     const result = await response.json().catch(() => ({}));
     if (!response.ok || result.error) {
       const message = typeof result.error === 'string' ? result.error : result.error?.message;
-      const details = typeof result.error?.details === 'string'
-        ? result.error.details
-        : result.error?.details ? JSON.stringify(result.error.details) : '';
-      const diagnostic = details && /bad request/i.test(String(message || '')) ? ` ${details.slice(0, 800)}` : '';
-      const error = new Error(`${message || `Season research request failed (${response.status}).`}${diagnostic}`);
+      const details = typeof result.error?.details === 'string' ? result.error.details : '';
+      const error = new Error((message || 'Season research request failed (' + response.status + ').')
+        + (details && /bad request/i.test(String(message || '')) ? ' ' + details.slice(0, 800) : ''));
       error.status = response.status;
       throw error;
     }
     return result;
   };
-
   const terminal = (state) => /(?:SUCCEEDED|FAILED|CANCELLED|EXPIRED)$/.test(String(state || ''));
   const pause = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+  const targets = new Map(routes.map((route) => [String(route.id), route]));
   const results = new Map();
-  let completedBase = 0;
-  let failedBase = 0;
-  const progressByOperation = new Map();
-  const publishAggregateProgress = (state) => {
-    const running = [...progressByOperation.values()].reduce((total, progress) => ({
+  let completed = 0;
+  let failed = 0;
+  const batchProgress = new Map();
+  const reportProgress = (state) => {
+    const inFlight = [...batchProgress.values()].reduce((total, progress) => ({
       completed: total.completed + progress.completed,
-      failed: total.failed + progress.failed
-    }), { completed: 0, failed: 0 });
+      failed: total.failed + progress.failed,
+      processed: total.processed + progress.processed
+    }), { completed: 0, failed: 0, processed: 0 });
     publish({
       type: 'progress',
-      completed: Math.min(places.length, completedBase + running.completed),
-      failed: Math.min(places.length, failedBase + running.failed),
-      state: progressByOperation.size > 0 ? 'RUNNING' : state
+      completed: Math.min(routes.length, completed + inFlight.completed),
+      failed: Math.min(routes.length, failed + inFlight.failed),
+      processed: Math.min(routes.length, completed + failed + inFlight.processed),
+      total: routes.length,
+      running: !terminal(state),
+      state
     });
   };
-  const updateProgress = (operation, status) => {
-    const stats = status.batchStats || {};
+  const updateBatchProgress = (operationName, status, targetTotal) => {
+    const stats = status?.batchStats || {};
     const succeeded = Number(stats.successfulRequestCount ?? stats.succeededRequestCount ?? stats.successful_request_count ?? 0);
-    const failed = Number(stats.failedRequestCount ?? stats.failed_request_count ?? 0);
-    const keyCount = Object.keys(operation.keyMap || {}).length;
-    const requestTotal = Number(stats.totalRequestCount ?? stats.total_request_count ?? 0) || keyCount || operation.targetIds?.length || 0;
-    const targetTotal = operation.targetIds?.length || requestTotal;
-    const requestCompleted = Math.min(requestTotal, succeeded + failed);
-    const completed = requestTotal > 0 ? Math.round(targetTotal * requestCompleted / requestTotal) : 0;
-    const mappedFailures = requestTotal > 0 ? Math.round(targetTotal * Math.min(requestTotal, failed) / requestTotal) : 0;
-    progressByOperation.set(operation.operationName, {
-      completed: terminal(status.state) && requestCompleted === 0 ? targetTotal : completed,
-      failed: mappedFailures
+    const failedRequests = Number(stats.failedRequestCount ?? stats.failed_request_count ?? 0);
+    const requestTotal = Number(stats.totalRequestCount ?? stats.total_request_count ?? 0) || targetTotal;
+    const processedRequests = Math.min(requestTotal, succeeded + failedRequests);
+    const completedForTargets = requestTotal > 0 ? Math.round(targetTotal * succeeded / requestTotal) : 0;
+    const failedForTargets = requestTotal > 0 ? Math.round(targetTotal * failedRequests / requestTotal) : 0;
+    const processedForTargets = requestTotal > 0 ? Math.round(targetTotal * processedRequests / requestTotal) : 0;
+    batchProgress.set(operationName, {
+      completed: Math.min(targetTotal, completedForTargets),
+      failed: Math.min(targetTotal, failedForTargets),
+      processed: Math.min(targetTotal, processedForTargets)
     });
-    publishAggregateProgress(status.state);
+    reportProgress(status?.state || 'RUNNING');
   };
-  const rememberGuide = (key, guide) => {
-    if (!key) return;
-    results.set(String(key), guide);
-    publish({ type: 'guide', key: String(key), guide });
+  const persistResult = async (route, result, operationName = '') => {
+    if (isCancelled()) return;
+    let guide = result?.success
+      ? {
+        status: 'ready',
+        ...result.guide,
+        sources: result.sources || [],
+        researchedAt: result.researchedAt || new Date().toISOString(),
+        ...(Array.isArray(route.savedGuide?.legacyStopGuides) ? { legacyStopGuides: route.savedGuide.legacyStopGuides } : {})
+      }
+      : {
+        status: 'error',
+        error: result?.error || 'Season research did not return a usable result.',
+        ...(operationName ? { lastOperationName: operationName } : {}),
+        ...(Array.isArray(route.savedGuide?.legacyStopGuides) ? { legacyStopGuides: route.savedGuide.legacyStopGuides } : {})
+      };
+    results.set(String(route.id), guide);
+    if (guide.status === 'error') logSeasonGuideFailure(guide.error, route, { action: 'status', operation_name: operationName });
+    const saved = await persistGuides([{ routeId: String(route.id), guide }]);
+    const saveFailure = saved?.find((item) => String(item.routeId) === String(route.id) && item.error);
+    if (saveFailure) {
+      guide = { status: 'error', error: saveFailure.guide?.error || 'Could not save the route season guide.' };
+      results.set(String(route.id), guide);
+    }
+    if (guide.status === 'ready') completed += 1;
+    else failed += 1;
+    reportProgress('RUNNING');
   };
-  // Keep inline Gemini jobs small. A large location list can exceed per-job
-  // request limits, and a failed job would otherwise strand every guide.
-  const created = { results: [], operations: [] };
-  const createGroup = async (group, groupIndex) => {
+
+  const existingOperations = new Map();
+  const newRoutes = [];
+  routes.forEach((route) => {
+    const savedGuide = route.savedGuide || {};
+    const operationName = savedGuide.status === 'researching' && /^batches\/[A-Za-z0-9_-]+$/.test(String(savedGuide.operationName || ''))
+      ? savedGuide.operationName
+      : '';
+    if (operationName) {
+      const operation = existingOperations.get(operationName) || { operationName, targetIds: [], keyMap: {} };
+      operation.targetIds.push(String(route.id));
+      operation.keyMap[String(route.id)] = [String(route.id)];
+      existingOperations.set(operationName, operation);
+    } else {
+      newRoutes.push(route);
+    }
+  });
+
+  const createdOperations = new Map(existingOperations);
+  const groupSize = 20;
+  reportProgress('SUBMITTING');
+  for (let offset = 0; offset < newRoutes.length; offset += groupSize) {
+    if (isCancelled()) return results;
+    const group = newRoutes.slice(offset, offset + groupSize);
     try {
-      const part = await post({
+      const response = await post({
         action: 'create',
         task: 'season-guide',
-        displayName: `my-journal-admin-season-guide-${Date.now()}-${groupIndex + 1}`,
-        forceIds,
-        locations: group.map((place) => ({
-          id: String(place.id),
-          placeName: place.place_name,
-          category: place.category || 'Location',
-          locality: place.locality,
-          latitude: place.latitude,
-          longitude: place.longitude
-        }))
+        displayName: 'my-journal-admin-route-season-' + Date.now() + '-' + (Math.floor(offset / groupSize) + 1),
+        routes: group.map((route) => route.request)
       });
-      created.results.push(...(part.results || []));
-      created.operations.push(...(part.operations || (part.operationName ? [{
-        operationName: part.operationName,
-        targetIds: group.map((place) => String(place.id))
-      }] : [])));
-    } catch (error) {
-      group.forEach((place) => created.results.push({
-        key: String(place.id),
-        success: false,
-        error: error.message || 'Season research request failed.'
-      }));
-    }
-  };
-  const createGroupSize = 20;
-  publish({ type: 'progress', completed: 0, failed: 0, state: 'SUBMITTING' });
-  for (let offset = 0; offset < places.length; offset += createGroupSize) {
-    await createGroup(places.slice(offset, offset + createGroupSize), Math.floor(offset / createGroupSize));
-    const cachedCompleted = created.results.length;
-    const cachedFailed = created.results.filter((result) => !result.success).length;
-    publish({ type: 'progress', completed: cachedCompleted, failed: cachedFailed, state: 'SUBMITTING' });
-  }
-
-  for (const item of created.results || []) {
-    const guide = item.success
-      ? { ...item.guide, sources: item.sources || item.guide?.sources || [], researchedAt: item.researchedAt || item.guide?.researchedAt }
-      : { error: item.error || item.guide?.error || 'Season research did not return a usable result.' };
-    if (guide.error) {
-      const place = places.find((candidate) => String(candidate.id) === String(item.key));
-      logSeasonGuideFailure(guide.error, place, { action: 'create', cached_result: Boolean(item.cached) });
-    }
-    rememberGuide(item.key, guide);
-  }
-
-  const operations = Array.isArray(created.operations) ? created.operations : (
-    created.operationName ? [{ operationName: created.operationName, targetIds: places.map((place) => String(place.id)) }] : []
-  );
-  completedBase = results.size;
-  failedBase = [...results.values()].filter((guide) => guide.error).length;
-  publishAggregateProgress(operations.length ? 'RUNNING' : 'CACHED');
-
-  await Promise.all(operations.map(async (operation) => {
-    const operationName = operation.operationName;
-    if (!operationName) return;
-    const keyMap = operation.keyMap || {};
-    const mapKeys = (key) => {
-      const mapped = keyMap[String(key)];
-      if (Array.isArray(mapped)) return mapped.map(String);
-      return mapped ? [String(mapped)] : [String(key)];
-    };
-    const targetIds = operation.targetIds || [];
-    let operationCompleted = 0;
-    let operationFailed = 0;
-    try {
-      let status = await post({ action: 'status', task: 'season-guide', operationName, offset: 0, limit: 25 });
-      updateProgress(operation, status);
-      while (!terminal(status.state)) {
-        await pause(5_000);
-        status = await post({ action: 'status', task: 'season-guide', operationName, offset: 0, limit: 25 });
-        updateProgress(operation, status);
+      const operationName = response.operationName;
+      if (!/^batches\/[A-Za-z0-9_-]+$/.test(String(operationName || ''))) {
+        throw new Error('Gemini accepted route research without returning a valid operation name.');
       }
+      const operation = {
+        operationName,
+        targetIds: group.map((route) => String(route.id)),
+        keyMap: Object.fromEntries(group.map((route) => [String(route.id), [String(route.id)]]))
+      };
+      const saved = await persistGuides(group.map((route) => ({
+        routeId: String(route.id),
+        guide: {
+          status: 'researching',
+          operationName,
+          requestKey: String(route.id),
+          mainArea: route.request.mainArea,
+          startedAt: new Date().toISOString(),
+          ...(Array.isArray(route.savedGuide?.legacyStopGuides) ? { legacyStopGuides: route.savedGuide.legacyStopGuides } : {})
+        }
+      })));
+      if (saved?.some((item) => item.error)) throw new Error('Could not save the route research status to Supabase.');
+      createdOperations.set(operationName, operation);
+      batchProgress.set(operationName, { completed: 0, failed: 0, processed: 0 });
+    } catch (error) {
+      logSeasonGuideFailure(error, null, {
+        action: 'create',
+        route_count: group.length,
+        route_names: group.map((route) => route.request.routeName).filter(Boolean).join(', ')
+      });
+      for (const route of group) {
+        if (isCancelled()) return results;
+        await persistResult(route, { success: false, error: error.message || 'Season guide batch creation failed.' });
+      }
+    }
+    reportProgress('SUBMITTING');
+  }
 
+  for (const operation of createdOperations.values()) {
+    if (isCancelled()) return results;
+    const targetRoutes = operation.targetIds.map((id) => targets.get(String(id))).filter(Boolean);
+    try {
+      let status = await post({
+        action: 'status',
+        task: 'season-guide',
+        operationName: operation.operationName,
+        offset: 0,
+        limit: 25
+      });
+      updateBatchProgress(operation.operationName, status, targetRoutes.length);
+      while (!terminal(status.state)) {
+        if (isCancelled()) return results;
+        reportProgress(status.state);
+        await pause(5_000);
+        status = await post({
+          action: 'status',
+          task: 'season-guide',
+          operationName: operation.operationName,
+          offset: 0,
+          limit: 25
+        });
+        updateBatchProgress(operation.operationName, status, targetRoutes.length);
+      }
+      batchProgress.delete(operation.operationName);
+      reportProgress(status.state);
       if (!String(status.state).endsWith('SUCCEEDED')) {
         const detail = status.error?.message || status.error?.status || status.state;
-        const errorGuide = { error: `Gemini season research ${String(status.state).toLowerCase().replace(/_/g, ' ')}${detail ? `: ${detail}` : ''}.` };
-        const targetPlaces = places.filter((place) => targetIds.map(String).includes(String(place.id)));
-        logSeasonGuideFailure(errorGuide.error, null, {
+        const failure = 'Season research batch ' + String(status.state).toLowerCase().replace(/_/g, ' ')
+          + (detail ? ': ' + detail : '') + '.';
+        logSeasonGuideFailure(failure, null, {
           action: 'status',
-          operation_name: operationName,
-          location_count: targetPlaces.length,
-          location_names: targetPlaces.map((place) => place.place_name).filter(Boolean).slice(0, 20).join(', ')
+          operation_name: operation.operationName,
+          route_count: targetRoutes.length,
+          route_names: targetRoutes.map((route) => route.request.routeName).join(', ')
         });
-        targetIds.forEach((id) => rememberGuide(id, errorGuide));
-        operationCompleted = targetIds.length;
-        operationFailed = targetIds.length;
-      } else {
-        const totalResults = Number(status.totalResults) || targetIds.length || 0;
-        let offset = 0;
-        let page = status;
-        while (offset < totalResults) {
-          for (const result of page.results || []) {
-            if (!result.key) continue;
-            const guide = result.success
-              ? { ...result.guide, sources: result.sources || [], researchedAt: result.researchedAt }
-              : { error: result.error || 'Season research did not return a usable result.' };
-            const mappedKeys = mapKeys(result.key);
-            if (guide.error) {
-              mappedKeys.forEach((mappedKey) => {
-                const place = places.find((candidate) => String(candidate.id) === String(mappedKey));
-                logSeasonGuideFailure(guide.error, place, { action: 'status', operation_name: operationName });
-              });
-            }
-            mappedKeys.forEach((mappedKey) => rememberGuide(mappedKey, guide));
-            operationCompleted += mappedKeys.length;
-            if (guide.error) operationFailed += mappedKeys.length;
-          }
-          offset += (page.results || []).length;
-          if (offset >= totalResults || !page.hasMore || page.results?.length === 0) break;
-          page = await post({ action: 'status', task: 'season-guide', operationName, offset, limit: 25 });
+        for (const route of targetRoutes) {
+          await persistResult(route, { success: false, error: failure }, operation.operationName);
         }
+        continue;
+      }
+
+      const resultByKey = new Map();
+      let offset = 0;
+      let page = status;
+      const total = Number(status.totalResults) || targetRoutes.length;
+      while (true) {
+        for (const result of page.results || []) {
+          if (result?.key) resultByKey.set(String(result.key), result);
+        }
+        offset += (page.results || []).length;
+        if (offset >= total || !page.hasMore || !(page.results || []).length) break;
+        if (isCancelled()) return results;
+        page = await post({
+          action: 'status',
+          task: 'season-guide',
+          operationName: operation.operationName,
+          offset,
+          limit: 25
+        });
+      }
+      for (const route of targetRoutes) {
+        const result = resultByKey.get(String(route.id));
+        await persistResult(route, result || {
+          success: false,
+          error: 'Gemini completed the batch without returning a guide for this saved route. Retry this guide.'
+        }, operation.operationName);
       }
     } catch (error) {
-      const errorGuide = { error: error.message || 'Season research status request failed.' };
-      logSeasonGuideFailure(errorGuide.error, null, {
+      logSeasonGuideFailure(error, null, {
         action: 'status',
-        operation_name: operationName,
-        location_count: targetIds.length,
-        location_names: places.filter((place) => targetIds.map(String).includes(String(place.id)))
-          .map((place) => place.place_name).filter(Boolean).slice(0, 20).join(', ')
+        operation_name: operation.operationName,
+        route_count: targetRoutes.length,
+        route_names: targetRoutes.map((route) => route.request.routeName).join(', ')
       });
-      targetIds.forEach((id) => rememberGuide(id, errorGuide));
-      operationCompleted = targetIds.length;
-      operationFailed = targetIds.length;
-    } finally {
-      completedBase += operationCompleted;
-      failedBase += operationFailed;
-      progressByOperation.delete(operationName);
-      publishAggregateProgress('RUNNING');
+      for (const route of targetRoutes) {
+        await persistResult(route, { success: false, error: error.message || 'Season guide status request failed.' }, operation.operationName);
+      }
     }
-  }));
-
-  for (const place of places) {
-    if (results.has(String(place.id))) continue;
-    const guide = { error: 'No saved or completed season guide was returned for this location.' };
-    logSeasonGuideFailure(guide.error, place, { action: 'complete' });
-    rememberGuide(place.id, guide);
   }
-  publish({ type: 'progress', completed: places.length, failed: [...results.values()].filter((guide) => guide.error).length, state: 'COMPLETE' });
+  reportProgress('COMPLETE');
   return results;
-};
-
-const subscribeToGeminiSeasonGuideBatch = (places, listener, forceIds = []) => {
-  const signature = getSeasonGuideSignature(places, forceIds);
-  let run = seasonGuideBatchRuns.get(signature);
-  if (!run) {
-    const listeners = new Set();
-    const publish = (event) => listeners.forEach((subscriber) => subscriber(event));
-    const promise = executeGeminiSeasonGuideBatch(places, publish, forceIds)
-      .finally(() => seasonGuideBatchRuns.delete(signature));
-    run = { listeners, promise };
-    seasonGuideBatchRuns.set(signature, run);
-  }
-  run.listeners.add(listener);
-  return {
-    promise: run.promise,
-    unsubscribe: () => run.listeners.delete(listener)
-  };
 };
 
 const getCoordinates = (point) => {
@@ -545,6 +542,52 @@ const getPlaceForRouteWaypoint = (waypoint, placeList) => {
       && Math.abs(placeCoordinates.lat - coordinates.lat) <= 0.0001
       && Math.abs(placeCoordinates.lng - coordinates.lng) <= 0.0001;
   }) || null;
+};
+
+const getRouteSeasonGuideContext = (route, placeList) => {
+  const stops = getRouteWaypoints(route).map((waypoint) => {
+    const place = getPlaceForRouteWaypoint(waypoint, placeList);
+    const source = place || waypoint;
+    const coordinates = getCoordinates(source) || getCoordinates(waypoint);
+    if (!coordinates) return null;
+    return {
+      id: String(place?.id || waypoint?.id || ''),
+      name: String(place?.place_name || waypoint?.place_name || waypoint?.n || '').trim(),
+      category: String(place?.category || waypoint?.category || 'Location').trim(),
+      locality: String(place?.locality || waypoint?.locality || '').trim(),
+      latitude: coordinates.lat,
+      longitude: coordinates.lng
+    };
+  }).filter((stop) => stop?.name);
+  if (stops.length === 0) return null;
+
+  const localityCounts = new Map();
+  stops.forEach((stop) => {
+    if (!stop.locality) return;
+    const key = stop.locality.toLocaleLowerCase('en');
+    const item = localityCounts.get(key) || { name: stop.locality, count: 0, firstIndex: stops.indexOf(stop) };
+    item.count += 1;
+    localityCounts.set(key, item);
+  });
+  const mainArea = [...localityCounts.values()].sort((a, b) => b.count - a.count || a.firstIndex - b.firstIndex)[0]?.name
+    || String(route.route_name || 'Saved route area').trim();
+  const areaStops = stops.filter((stop) => !stop.locality || stop.locality.toLocaleLowerCase('en') === mainArea.toLocaleLowerCase('en'));
+  const centerStops = areaStops.length ? areaStops : stops;
+  const center = {
+    latitude: centerStops.reduce((sum, stop) => sum + stop.latitude, 0) / centerStops.length,
+    longitude: centerStops.reduce((sum, stop) => sum + stop.longitude, 0) / centerStops.length
+  };
+  return {
+    id: String(route.id),
+    savedGuide: route.seasonal_guide && typeof route.seasonal_guide === 'object' ? route.seasonal_guide : null,
+    request: {
+      id: String(route.id),
+      routeName: String(route.route_name || 'Saved route'),
+      mainArea,
+      center,
+      stops
+    }
+  };
 };
 
 let googleMapsLoadPromise;
@@ -680,6 +723,7 @@ function App() {
 
   // --- Core Data States ---
   const [places, setPlaces] = useState([]);
+  const [mapDataLoaded, setMapDataLoaded] = useState(false);
 
   // --- Core Data States ---
   const [savedRoutes, setSavedRoutes] = useState([]);
@@ -690,8 +734,7 @@ function App() {
   const [sharesData, setSharesData] = useState([]);
   const [videoLikesData, setVideoLikesData] = useState([]);
   const [videoSharesData, setVideoSharesData] = useState([]);
-  const [seasonGuides, setSeasonGuides] = useState({});
-  const [seasonGuideProgress, setSeasonGuideProgress] = useState({ completed: 0, failed: 0, total: 0, running: false });
+  const [seasonGuideProgress, setSeasonGuideProgress] = useState({ completed: 0, failed: 0, processed: 0, total: 0, running: false });
   const [seasonGuideRetryToken, setSeasonGuideRetryToken] = useState(0);
   const [subscribersData, setSubscribersData] = useState([]);
   const [expandedLikeLoc, setExpandedLikeLoc] = useState(null);
@@ -784,17 +827,29 @@ function App() {
     )));
   };
 
-  const retryFailedSeasonGuides = (placeId = null) => {
-    const failedPlaces = seasonGuideResearchPlaces.filter((place) => (
-      seasonGuides[place.id]?.error && (!placeId || String(place.id) === String(placeId))
+  const retryFailedSeasonGuides = async (routeId = null) => {
+    const failedRoutes = savedRoutes.filter((route) => (
+      route.seasonal_guide?.status === 'error'
+      && (!routeId || String(route.id) === String(routeId))
     ));
-    if (failedPlaces.length === 0) return;
-    seasonGuideRetryIdsRef.current = failedPlaces.map((place) => String(place.id));
-    setSeasonGuides((current) => {
-      const next = { ...current };
-      failedPlaces.forEach((place) => delete next[place.id]);
-      return next;
-    });
+    if (failedRoutes.length === 0) return;
+    seasonGuideRetryIdsRef.current = failedRoutes.map((route) => String(route.id));
+    const updatedRoutes = failedRoutes.map((route) => ({ ...route, seasonal_guide: { status: 'pending' } }));
+    const results = await Promise.all(updatedRoutes.map((route) => supabaseClient
+      .from('saved_travel_routes')
+      .update({ seasonal_guide: route.seasonal_guide })
+      .eq('id', route.id)
+      .select('id')
+      .maybeSingle()));
+    const failedUpdate = results.find((result) => result.error || !result.data);
+    if (failedUpdate) {
+      const error = failedUpdate.error || new Error('No saved route row was updated. Check saved_travel_routes update permissions.');
+      seasonGuideRetryIdsRef.current = [];
+      logSeasonGuideFailure(error, null, { action: 'retry-save', route_ids: failedRoutes.map((route) => route.id).join(',') });
+      triggerToast('Could not reset the saved route guide. Apply the route seasonal guide database update and retry.');
+      return;
+    }
+    setSavedRoutes((current) => current.map((route) => updatedRoutes.find((updated) => updated.id === route.id) || route));
     setSeasonGuideRetryToken((current) => current + 1);
   };
 
@@ -828,132 +883,96 @@ function App() {
   const REFRESH_INTERVAL_SECONDS = 600;
   const [timeLeft, setTimeLeft] = useState(REFRESH_INTERVAL_SECONDS);
 
-  const pendingSeasonGuidePlaces = places.filter((place) => place?.status === 'pending');
-  const savedRouteSeasonGuidePlaces = savedRoutes
-    .flatMap((route) => getRouteWaypoints(route)
-      .map((waypoint) => getPlaceForRouteWaypoint(waypoint, places)))
+  const routeSeasonGuideContexts = savedRoutes
+    .map((route) => getRouteSeasonGuideContext(route, places))
     .filter(Boolean);
-  const seasonGuideResearchPlaces = [...new Map(
-    [...pendingSeasonGuidePlaces, ...savedRouteSeasonGuidePlaces]
-      .map((place) => [String(place.id), place])
-  ).values()];
-  const seasonGuideResearchSignature = seasonGuideResearchPlaces
-    .map((place) => [place.id, place.latitude, place.longitude, place.category, place.locality, place.place_name].join(':'))
-    .sort()
-    .join('|');
+  const seasonGuideResearchSignature = JSON.stringify(routeSeasonGuideContexts.map((context) => ({
+    id: context.id,
+    request: context.request
+  })).sort((a, b) => a.id.localeCompare(b.id)));
 
-  // Research each distinct pending pin or saved-route stop once, cache the result, and reuse it.
+  // Generate one consolidated guide for each saved route's main area.
   useEffect(() => {
-    if (!isLoggedIn || seasonGuideResearchPlaces.length === 0) {
-      setSeasonGuideProgress({ completed: 0, failed: 0, total: 0, running: false });
+    if (!isLoggedIn || !mapDataLoaded || routeSeasonGuideContexts.length === 0) {
+      setSeasonGuideProgress({ completed: 0, failed: 0, processed: 0, total: 0, running: false });
       return undefined;
     }
 
     let cancelled = false;
-    const researchPlaces = [...seasonGuideResearchPlaces];
-    const immediate = {};
-    const targets = [];
-    const targetByIdentity = new Map();
-    let completed = 0;
-    let failed = 0;
-
-    researchPlaces.forEach((place) => {
-      const hasCoordinateValues = place.latitude !== null && place.latitude !== undefined
-        && String(place.latitude).trim() !== '' && place.longitude !== null && place.longitude !== undefined
-        && String(place.longitude).trim() !== '';
-      const latitude = hasCoordinateValues ? Number(place.latitude) : Number.NaN;
-      const longitude = hasCoordinateValues ? Number(place.longitude) : Number.NaN;
-      const hasCoords = Number.isFinite(latitude) && latitude >= -90 && latitude <= 90
-        && Number.isFinite(longitude) && longitude >= -180 && longitude <= 180;
-      if (!place.place_name || !place.locality || !hasCoords) {
-        const error = {
-          error: 'Add this location’s name, locality, and saved map coordinates to research its season.',
-          location: [place.place_name, place.locality, 'Sri Lanka'].filter(Boolean).join(' · ')
-        };
-        logSeasonGuideFailure(error.error, place, { action: 'validate-location' });
-        immediate[place.id] = error;
-        completed += 1;
-        failed += 1;
-        return;
-      }
-      const identity = getSeasonGuideCacheKey(place);
-      if (!targetByIdentity.has(identity)) {
-        targetByIdentity.set(identity, place);
-        targets.push(place);
-      }
+    const forceIds = new Set(seasonGuideRetryIdsRef.current.map(String));
+    const candidates = routeSeasonGuideContexts.filter((context) => {
+      const guide = context.savedGuide;
+      if (forceIds.has(context.id)) return true;
+      if (guide?.status === 'ready' || guide?.status === 'error') return false;
+      return true;
     });
+    if (candidates.length === 0) {
+      setSeasonGuideProgress({ completed: 0, failed: 0, processed: 0, total: 0, running: false });
+      return undefined;
+    }
 
-    if (Object.keys(immediate).length > 0) setSeasonGuides((current) => ({ ...current, ...immediate }));
-    setSeasonGuideProgress({ completed, failed, total: researchPlaces.length, running: targets.length > 0 });
-    if (targets.length === 0) return undefined;
-
-    const forceIds = [...seasonGuideRetryIdsRef.current];
-    const subscription = subscribeToGeminiSeasonGuideBatch(targets, (event) => {
+    setSeasonGuideProgress({ completed: 0, failed: 0, processed: 0, total: candidates.length, running: true });
+    const persistGuides = async (updates) => {
+      const saved = await Promise.all(updates.map(async ({ routeId, guide }) => {
+        const result = await supabaseClient.from('saved_travel_routes')
+          .update({ seasonal_guide: guide })
+          .eq('id', routeId)
+          .select('id')
+          .maybeSingle();
+        return { routeId, guide, error: result.error || (!result.data ? new Error('No saved route row was updated. Check saved_travel_routes update permissions.') : null) };
+      }));
       if (cancelled) return;
-      if (event.type === 'progress') {
-        const reportedCompleted = Number(event.completed) || 0;
-        const reportedFailed = Number(event.failed) || 0;
-        setSeasonGuideProgress((current) => ({
-          ...current,
-          completed: Math.min(current.total, Math.max(current.completed, completed + reportedCompleted)),
-          failed: Math.min(current.total, Math.max(current.failed, failed + reportedFailed)),
-          running: true,
-          state: event.state
-        }));
-      } else if (event.type === 'guide') {
-        const place = targets.find((candidate) => String(candidate.id) === String(event.key));
-        if (!place) return;
-        const matchingPlaces = researchPlaces.filter((candidate) => getSeasonGuideCacheKey(candidate) === getSeasonGuideCacheKey(place));
-        setSeasonGuides((current) => ({
-          ...current,
-          ...Object.fromEntries(matchingPlaces.map((candidate) => [candidate.id, event.guide]))
-        }));
-      }
-    }, forceIds);
-
-    void subscription.promise.then((results) => {
-      if (JSON.stringify(seasonGuideRetryIdsRef.current) === JSON.stringify(forceIds)) seasonGuideRetryIdsRef.current = [];
-      if (cancelled) return;
-      let batchFailed = 0;
-      targets.forEach((place) => {
-        const result = results.get(String(place.id));
-        const guide = result || { error: 'The batch completed without a season guide for this pin.' };
-        const matchingPlaces = researchPlaces.filter((candidate) => getSeasonGuideCacheKey(candidate) === getSeasonGuideCacheKey(place));
-        if (guide.error) batchFailed += matchingPlaces.length;
-        setSeasonGuides((current) => ({
-          ...current,
-          ...Object.fromEntries(matchingPlaces.map((candidate) => [candidate.id, guide]))
-        }));
+      const normalized = saved.map((item) => {
+        if (!item.error) return item;
+        logSeasonGuideFailure(item.error, savedRoutes.find((route) => String(route.id) === item.routeId) || null, {
+          action: 'database-update',
+          route_id: item.routeId
+        });
+        return { ...item, guide: { status: 'error', error: item.error.message || 'Could not save the route season guide.' } };
       });
-      setSeasonGuideProgress({ completed: researchPlaces.length, failed: failed + batchFailed, total: researchPlaces.length, running: false });
+      setSavedRoutes((current) => current.map((route) => {
+        const update = normalized.find((item) => String(item.routeId) === String(route.id));
+        return update ? { ...route, seasonal_guide: update.guide } : route;
+      }));
+      return normalized;
+    };
+
+    void executeGeminiSeasonGuideBatch(candidates, (event) => {
+      if (cancelled || event.type !== 'progress') return;
+      setSeasonGuideProgress({
+        completed: Number(event.completed) || 0,
+        failed: Number(event.failed) || 0,
+        processed: Number(event.processed) || 0,
+        total: Number(event.total) || candidates.length,
+        running: event.running !== false,
+        state: event.state
+      });
+    }, persistGuides, () => cancelled).then(() => {
+      if (cancelled) return;
+      if (JSON.stringify(seasonGuideRetryIdsRef.current) === JSON.stringify([...forceIds])) seasonGuideRetryIdsRef.current = [];
+      setSeasonGuideProgress((current) => ({ ...current, processed: current.total, running: false, state: 'COMPLETE' }));
     }).catch((error) => {
-      if (JSON.stringify(seasonGuideRetryIdsRef.current) === JSON.stringify(forceIds)) seasonGuideRetryIdsRef.current = [];
       if (cancelled) return;
       logSeasonGuideFailure(error, null, {
         action: 'request',
         request_signature: seasonGuideResearchSignature.slice(0, 450),
-        location_count: targets.length,
-        location_names: targets.map((place) => place.place_name).filter(Boolean).slice(0, 20).join(', ')
+        route_count: candidates.length,
+        route_names: candidates.map((route) => route.request.routeName).filter(Boolean).slice(0, 20).join(', ')
       });
-      let batchFailed = 0;
-      targets.forEach((place) => {
-        const guide = { error: String(error?.message || 'The season research batch failed.') };
-        const matchingPlaces = researchPlaces.filter((candidate) => getSeasonGuideCacheKey(candidate) === getSeasonGuideCacheKey(place));
-        batchFailed += matchingPlaces.length;
-        setSeasonGuides((current) => ({
-          ...current,
-          ...Object.fromEntries(matchingPlaces.map((candidate) => [candidate.id, guide]))
-        }));
-      });
-      setSeasonGuideProgress({ completed: researchPlaces.length, failed: failed + batchFailed, total: researchPlaces.length, running: false });
+      setSeasonGuideProgress((current) => ({
+        ...current,
+        failed: Math.max(current.failed, current.total - current.completed),
+        processed: current.total,
+        running: false,
+        state: 'ERROR'
+      }));
     });
 
     return () => {
       cancelled = true;
-      subscription.unsubscribe();
     };
-    // seasonGuideResearchSignature captures every field used by the requests.
-  }, [isLoggedIn, seasonGuideResearchSignature, seasonGuideRetryToken]);
+    // The signature tracks saved route stops, not guide status updates.
+  }, [isLoggedIn, mapDataLoaded, seasonGuideResearchSignature, seasonGuideRetryToken]);
 
   // --- 1. GPS & DATA INITIALIZATION ---
 
@@ -2111,6 +2130,7 @@ function App() {
 
       setPlaces(placesData || []);
       setSavedRoutes(sr.data || []);
+      setMapDataLoaded(true);
       setAnalyticsData(v.data || []);
       setPendingApprovals(a.data || []);
       setAllComments(c.data || []);
@@ -4090,6 +4110,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
           latitude: coordinates.lat,
           longitude: coordinates.lng,
           category: point.category || 'Location',
+          locality: point.locality || '',
           // Legacy compatibility keys
           lt: coordinates.lat,
           ln: coordinates.lng,
@@ -4101,7 +4122,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
         .from('saved_travel_routes')
         .insert([{
           route_name: routeName.trim(),
-          waypoints: JSON.stringify(waypointsPayload)
+          waypoints: waypointsPayload
         }]);
 
       if (error) throw error;
@@ -5907,31 +5928,34 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
           <section className="w-full flex-[0.4] md:flex-1 relative bg-slate-100 order-1 md:order-2 min-h-[300px]">
             <div id="map-container" className="w-full h-full"></div>
             {seasonGuideProgress.total > 0 && (
-              <div className="absolute left-3 top-3 z-[1000] w-[min(340px,calc(100%-24px))] rounded-xl border border-indigo-100 bg-white/95 p-3 shadow-lg backdrop-blur-sm">
-                <div className="flex items-center justify-between gap-3">
-                  <p className="text-[10px] font-black uppercase tracking-wide text-indigo-900">Season Guide Research</p>
+          <div className="absolute left-3 top-3 z-[1000] w-[min(340px,calc(100%-24px))] rounded-xl border border-indigo-100 bg-white/95 p-3 shadow-lg backdrop-blur-sm">
+              <div className="flex items-center justify-between gap-3">
+                  <p className="text-[10px] font-black uppercase tracking-wide text-indigo-900">Saved Route Season Guides</p>
                   <span className="shrink-0 text-[10px] font-bold text-slate-600">
-                    {seasonGuideProgress.completed}/{seasonGuideProgress.total} · {seasonGuideProgress.total > 0 ? Math.min(100, Math.round((seasonGuideProgress.completed / seasonGuideProgress.total) * 100)) : 0}%
+                    {seasonGuideProgress.processed}/{seasonGuideProgress.total} · {seasonGuideProgress.total > 0 ? Math.min(100, Math.round((seasonGuideProgress.processed / seasonGuideProgress.total) * 100)) : 0}%
                   </span>
                 </div>
-                <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100">
+                <div className="mt-2 flex h-2 overflow-hidden rounded-full bg-slate-100">
                   <div
-                    className="h-full rounded-full bg-indigo-500 transition-all"
+                    className="h-full bg-emerald-500 transition-all"
                     style={{ width: `${seasonGuideProgress.total > 0 ? Math.min(100, Math.round((seasonGuideProgress.completed / seasonGuideProgress.total) * 100)) : 0}%` }}
                   />
+                  {seasonGuideProgress.failed > 0 && (
+                    <div className="h-full bg-rose-500 transition-all" style={{ width: `${seasonGuideProgress.total > 0 ? Math.min(100, Math.round((seasonGuideProgress.failed / seasonGuideProgress.total) * 100)) : 0}%` }} />
+                  )}
                 </div>
                 <div className="mt-2 flex items-center justify-between gap-2">
                   <p className="text-[9px] leading-4 text-slate-500">
                     {seasonGuideProgress.running
-                    ? `AI climate research for pending places and saved-route stops is running${seasonGuideProgress.state ? ` (${String(seasonGuideProgress.state).replace(/^JOB_STATE_|^BATCH_STATE_/, '').toLowerCase().replace(/_/g, ' ')})` : ''}. Results are saved in Supabase.`
+                    ? `Researching one consolidated guide per saved route${seasonGuideProgress.state ? ` (${String(seasonGuideProgress.state).replace(/^JOB_STATE_|^BATCH_STATE_/, '').toLowerCase().replace(/_/g, ' ')})` : ''}.`
                       : seasonGuideProgress.failed > 0
-                        ? `${seasonGuideProgress.failed} guide${seasonGuideProgress.failed === 1 ? '' : 's'} need a retry or location details.`
-                        : 'Guides are ready. Saved guides are reused for one year unless you retry them.'}
+                        ? `${seasonGuideProgress.completed} ready · ${seasonGuideProgress.failed} failed`
+                        : `${seasonGuideProgress.completed} saved route guide${seasonGuideProgress.completed === 1 ? '' : 's'} completed.`}
                   </p>
                   {seasonGuideProgress.failed > 0 && !seasonGuideProgress.running && (
                     <button
                       type="button"
-                      onClick={retryFailedSeasonGuides}
+                      onClick={() => retryFailedSeasonGuides()}
                       className="shrink-0 rounded-lg bg-rose-50 px-2 py-1 text-[8px] font-black uppercase text-rose-700 hover:bg-rose-100"
                     >
                       Retry failed
@@ -6158,24 +6182,24 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                         ) : (
                           savedRoutes.map((route, index) => {
                             const wpArray = getRouteWaypoints(route);
-                            const routeGuideStops = wpArray.map((waypoint, waypointIndex) => {
-                              const place = getPlaceForRouteWaypoint(waypoint, places);
-                              return {
-                                id: String(place?.id || waypoint.id || `${route.id}-${waypointIndex}`),
-                                waypoint,
-                                place,
-                                guide: place ? seasonGuides[place.id] : null
-                              };
-                            });
-                            const readyRouteGuides = routeGuideStops.filter((stop) => stop.guide && !stop.guide.error);
-                            const routeSeasonWindows = [...new Set(
-                              readyRouteGuides.map((stop) => stop.guide.primaryWindow).filter(Boolean)
-                            )];
-                            const sharedRouteWindow = readyRouteGuides.length === routeGuideStops.length
-                              && readyRouteGuides.length > 0
-                              && routeSeasonWindows.length === 1
-                              ? readyRouteGuides[0].guide.primaryWindow
-                              : '';
+                            const seasonGuide = route.seasonal_guide && typeof route.seasonal_guide === 'object'
+                              ? route.seasonal_guide
+                              : null;
+                            const routeContext = getRouteSeasonGuideContext(route, places);
+                            const mainArea = seasonGuide?.mainArea || routeContext?.request.mainArea || '';
+                            const guideDetails = seasonGuide?.status === 'ready'
+                              ? [
+                                ['Alternative period', seasonGuide.secondaryWindow],
+                                ['Waterfall flow', seasonGuide.waterfallFlowWindow],
+                                ['Photography window', seasonGuide.photoWindow],
+                                ['Rain and monsoon', seasonGuide.rainAndMonsoon],
+                                ['Sky and light', seasonGuide.skyAndLight],
+                                ['Wind / drone note', seasonGuide.windAndDrone],
+                                ['Best time of day', seasonGuide.bestTimeOfDay],
+                                ['Why this period', seasonGuide.rationale],
+                                ['Route overview', seasonGuide.routeSummary]
+                              ].filter(([, value]) => value)
+                              : [];
                             return (
                               <Draggable
                                 key={route.id}
@@ -6235,98 +6259,69 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                                       </button>
                                     </div>
 
-                                    {routeGuideStops.length > 0 && (
+                                    {wpArray.length > 0 && (
                                       <details className="mt-2 rounded-lg border border-sky-100 bg-sky-50/70 open:bg-white">
                                         <summary className="flex cursor-pointer flex-wrap items-baseline gap-x-1.5 gap-y-0.5 px-2 py-1.5 text-[9px]">
                                           <span className="font-black uppercase tracking-wide text-sky-700">Trip season guide</span>
-                                          <span className="font-bold text-slate-600">{readyRouteGuides.length}/{routeGuideStops.length} stops ready</span>
-                                          {sharedRouteWindow && <span className="w-full pl-3 font-black text-slate-800">Overall window: {sharedRouteWindow}</span>}
-                                          {!sharedRouteWindow && routeSeasonWindows.length > 0 && (
-                                            <span className="w-full pl-3 font-black text-slate-800">
-                                              Suggested windows: {routeSeasonWindows.join(' · ')}
-                                            </span>
+                                          {seasonGuide?.status === 'ready' ? (
+                                            <span className="font-black text-slate-800">{seasonGuide.primaryWindow}</span>
+                                          ) : seasonGuide?.status === 'error' ? (
+                                            <span className="font-bold text-rose-700">Research needs retry</span>
+                                          ) : (
+                                            <span className="font-bold text-slate-600">{!routeContext ? 'Route coordinates needed' : mainArea ? 'For ' + mainArea : 'Researching main route area…'}</span>
                                           )}
                                         </summary>
                                         <div className="space-y-1.5 border-t border-sky-100 px-2 py-2">
-                                          {readyRouteGuides.length > 0 && !sharedRouteWindow && (
-                                            <p className="px-1 text-[9px] leading-4 text-slate-500">Best timing varies by stop; each location’s recommended window is listed below.</p>
+                                          {seasonGuide?.status === 'ready' ? (
+                                            <>
+                                              <p className="text-[9px] leading-4 text-slate-600">
+                                                <b className="text-slate-700">Main area:</b> {seasonGuide.mainArea || mainArea || 'Route area'}
+                                                {seasonGuide.confidence ? ' · ' + seasonGuide.confidence + ' confidence' : ''}
+                                              </p>
+                                              {seasonGuide.routeSummary && <p className="text-[9px] leading-4 text-slate-600">{seasonGuide.routeSummary}</p>}
+                                              {guideDetails.map(([label, value]) => <p key={label} className="text-[9px] leading-4 text-slate-600"><b className="text-slate-700">{label}:</b> {value}</p>)}
+                                              {Array.isArray(seasonGuide.sources) && seasonGuide.sources.length > 0 && (
+                                                <p className="flex flex-wrap gap-x-2 border-t border-slate-100 pt-1 text-[9px]">
+                                                  <b className="text-slate-700">Sources:</b>
+                                                  {seasonGuide.sources.slice(0, 3).map((source, sourceIndex) => {
+                                                    let safeUrl = null;
+                                                    try {
+                                                      const parsedUrl = new URL(source?.url);
+                                                      if (['http:', 'https:'].includes(parsedUrl.protocol)) safeUrl = parsedUrl.href;
+                                                    } catch {
+                                                      safeUrl = null;
+                                                    }
+                                                    return safeUrl ? (
+                                                      <a key={safeUrl + '-' + sourceIndex} href={safeUrl} target="_blank" rel="noopener noreferrer" className="font-bold text-indigo-600 underline">
+                                                        {source.title || 'Source ' + (sourceIndex + 1)}
+                                                      </a>
+                                                    ) : null;
+                                                  })}
+                                                </p>
+                                              )}
+                                              <p className="border-t border-slate-100 pt-1 text-[8px] text-slate-400">
+                                                {seasonGuide.locationMatch === 'AREA_CLIMATE_ONLY' ? 'Nearby-area climate estimate.' : 'Route area matched to sources.'} This is seasonal guidance, not a forecast or drone clearance.
+                                              </p>
+                                            </>
+                                          ) : seasonGuide?.status === 'error' ? (
+                                            <div className="flex items-start justify-between gap-2 rounded-md bg-rose-50 px-2 py-1.5 text-[9px] leading-4 text-rose-700">
+                                              <span className="min-w-0">{seasonGuide.error || 'Season guide research failed.'}</span>
+                                              <button
+                                                type="button"
+                                                onClick={() => retryFailedSeasonGuides(route.id)}
+                                                disabled={seasonGuideProgress.running}
+                                                className="shrink-0 font-black uppercase hover:text-rose-900 disabled:opacity-50"
+                                              >Retry</button>
+                                            </div>
+                                          ) : (
+                                            <p className="rounded-md bg-white/80 px-2 py-1.5 text-[9px] leading-4 text-slate-500">
+                                              {!routeContext
+                                                ? 'Add valid coordinates to a saved route stop to research its main area.'
+                                                : seasonGuide?.status === 'researching'
+                                                  ? 'Finding one seasonal window for the route’s main area…'
+                                                  : 'A consolidated seasonal guide will be generated for this saved route.'}
+                                            </p>
                                           )}
-                                          {routeGuideStops.map((stop) => {
-                                            const stopName = stop.place?.place_name || stop.waypoint?.place_name || stop.waypoint?.n || 'Saved stop';
-                                            const stopLocality = stop.place?.locality || stop.waypoint?.locality || '';
-                                            const guide = stop.guide;
-                                            const guideDetails = guide && !guide.error
-                                              ? [
-                                                ['Photo / drone balance', guide.photoWindow],
-                                                ['Fuller waterfall flow', guide.waterfallFlowWindow],
-                                                ['Rain and monsoon', guide.rainAndMonsoon],
-                                                ['Sky and light', guide.skyAndLight],
-                                                ['Wind / drone note', guide.windAndDrone],
-                                                ['Best time of day', guide.bestTimeOfDay],
-                                                ['Why this season', guide.rationale]
-                                              ].filter(([, value]) => value)
-                                              : [];
-
-                                            if (!guide) {
-                                              return (
-                                                <div key={stop.id} className="rounded-md bg-white/80 px-2 py-1.5 text-[9px] text-slate-500">
-                                                  <b className="text-slate-700">{stopName}</b>{stopLocality ? ` · ${stopLocality}` : ''}: {stop.place ? 'Season guide is being researched…' : 'Location details are not linked to a Places record.'}
-                                                </div>
-                                              );
-                                            }
-
-                                            if (guide.error) {
-                                              return (
-                                                <div key={stop.id} className="flex items-start justify-between gap-2 rounded-md bg-rose-50 px-2 py-1.5 text-[9px] leading-4 text-rose-700">
-                                                  <span className="min-w-0"><b>{stopName}</b>{stopLocality ? ` · ${stopLocality}` : ''}: {guide.error}</span>
-                                                  {stop.place && (
-                                                    <button
-                                                      type="button"
-                                                      onClick={() => retryFailedSeasonGuides(stop.place.id)}
-                                                      disabled={seasonGuideProgress.running}
-                                                      className="shrink-0 font-black uppercase hover:text-rose-900 disabled:opacity-50"
-                                                    >Retry</button>
-                                                  )}
-                                                </div>
-                                              );
-                                            }
-
-                                            return (
-                                              <details key={stop.id} className="rounded-md border border-slate-100 bg-white">
-                                                <summary className="flex cursor-pointer flex-wrap items-baseline gap-x-1.5 px-2 py-1.5 text-[9px]">
-                                                  <span className="font-black text-slate-700">{stopName}</span>
-                                                  <span className="text-slate-400">{stopLocality}</span>
-                                                  <span className="ml-auto font-bold text-indigo-700">{guide.primaryWindow}</span>
-                                                </summary>
-                                                <div className="space-y-1 border-t border-slate-100 px-2 py-1.5 text-[9px] leading-4 text-slate-600">
-                                                  {guide.secondaryWindow && <p><b className="text-slate-700">Alternative:</b> {guide.secondaryWindow}</p>}
-                                                  {guideDetails.map(([label, value]) => <p key={label}><b className="text-slate-700">{label}:</b> {value}</p>)}
-                                                  {Array.isArray(guide.sources) && guide.sources.length > 0 && (
-                                                    <p className="flex flex-wrap gap-x-2 border-t border-slate-100 pt-1">
-                                                      <b className="text-slate-700">Sources:</b>
-                                                      {guide.sources.slice(0, 2).map((source, sourceIndex) => {
-                                                        let safeUrl;
-                                                        try {
-                                                          const parsedUrl = new URL(source?.url);
-                                                          if (['http:', 'https:'].includes(parsedUrl.protocol)) safeUrl = parsedUrl.href;
-                                                        } catch {
-                                                          safeUrl = null;
-                                                        }
-                                                        return safeUrl ? (
-                                                          <a key={`${safeUrl}-${sourceIndex}`} href={safeUrl} target="_blank" rel="noopener noreferrer" className="font-bold text-indigo-600 underline">
-                                                            {source.title || `Source ${sourceIndex + 1}`}
-                                                          </a>
-                                                        ) : null;
-                                                      })}
-                                                    </p>
-                                                  )}
-                                                  <p className="border-t border-slate-100 pt-1 text-slate-400">
-                                                    {guide.locationMatch === 'AREA_CLIMATE_ONLY' ? 'Area-level climate estimate.' : 'Location and area matched.'} Seasonal guidance is not a forecast or drone clearance.
-                                                  </p>
-                                                </div>
-                                              </details>
-                                            );
-                                          })}
                                         </div>
                                       </details>
                                     )}
@@ -6371,20 +6366,6 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                       : null;
                     const km = d === null ? '—' : (d / 1000).toFixed(1);
                     const isDone = p.status === 'done';
-                    const hasSeasonGuide = p.status === 'pending';
-                    const seasonGuide = hasSeasonGuide ? seasonGuides[p.id] : null;
-                    const guideDetails = seasonGuide && !seasonGuide.error
-                      ? [
-                        ['Photo / drone balance', seasonGuide.photoWindow],
-                        ['Fuller waterfall flow', seasonGuide.waterfallFlowWindow],
-                        ['Rain and monsoon', seasonGuide.rainAndMonsoon],
-                        ['Sky and light', seasonGuide.skyAndLight],
-                        ['Wind / drone note', seasonGuide.windAndDrone],
-                        ['Best time of day', seasonGuide.bestTimeOfDay],
-                        ['Why this season', seasonGuide.rationale]
-                      ].filter(([, value]) => value)
-                      : [];
-
                     // Check if location is part of any saved route plan
                     const matchingRoute = savedRoutes.find(route =>
                       getRouteWaypoints(route).some(wp =>
@@ -6457,67 +6438,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                           </button>
                         </div>
 
-                        {hasSeasonGuide && (
-                          <div className="mt-2">
-                            {!seasonGuide && (
-                              <div className="rounded-lg border border-indigo-100 bg-indigo-50/70 px-2.5 py-1.5 text-[9px] font-semibold text-indigo-700">
-                                Seasonal guide is being researched…
-                              </div>
-                            )}
-                            {seasonGuide?.error && (
-                              <div className="flex items-start justify-between gap-2 rounded-lg border border-rose-100 bg-rose-50 px-2.5 py-1.5">
-                                <p className="min-w-0 text-[9px] leading-4 text-rose-700">Season guide unavailable: {seasonGuide.error}</p>
-                                <button
-                                  type="button"
-                                  onClick={() => retryFailedSeasonGuides(p.id)}
-                                  disabled={seasonGuideProgress.running}
-                                  className="shrink-0 text-[8px] font-black uppercase text-rose-700 hover:text-rose-900 disabled:opacity-50"
-                                >
-                                  Retry
-                                </button>
-                              </div>
-                            )}
-                            {seasonGuide && !seasonGuide.error && (
-                              <details className="rounded-lg border border-indigo-100 bg-indigo-50/70 open:bg-white">
-                                <summary className="flex cursor-pointer flex-wrap items-baseline gap-x-1.5 gap-y-0.5 px-2.5 py-1.5 text-[9px]">
-                                  <span className="font-black uppercase tracking-wide text-indigo-700">Best season</span>
-                                  <span className="font-bold text-slate-800">{seasonGuide.primaryWindow}</span>
-                                  {seasonGuide.confidence && (
-                                    <span className="ml-auto text-[8px] font-bold uppercase text-slate-400">{seasonGuide.confidence} confidence</span>
-                                  )}
-                                </summary>
-                                <div className="space-y-1 border-t border-indigo-100 px-2.5 py-2 text-[9px] leading-4 text-slate-600">
-                                  {seasonGuide.secondaryWindow && <p><b className="text-slate-700">Alternative:</b> {seasonGuide.secondaryWindow}</p>}
-                                  {guideDetails.map(([label, value]) => (
-                                    <p key={label}><b className="text-slate-700">{label}:</b> {value}</p>
-                                  ))}
-                                  {Array.isArray(seasonGuide.sources) && seasonGuide.sources.length > 0 && (
-                                    <p className="flex flex-wrap gap-x-2 gap-y-1 border-t border-slate-100 pt-1.5">
-                                      <b className="text-slate-700">Sources:</b>
-                                      {seasonGuide.sources.slice(0, 3).map((source, index) => {
-                                        let safeUrl;
-                                        try {
-                                          const parsedUrl = new URL(source?.url);
-                                          if (['http:', 'https:'].includes(parsedUrl.protocol)) safeUrl = parsedUrl.href;
-                                        } catch {
-                                          safeUrl = null;
-                                        }
-                                        return safeUrl ? (
-                                          <a key={`${safeUrl}-${index}`} href={safeUrl} target="_blank" rel="noopener noreferrer" className="font-bold text-indigo-600 underline">
-                                            {source.title || `Source ${index + 1}`}
-                                          </a>
-                                        ) : null;
-                                      })}
-                                    </p>
-                                  )}
-                                  <p className="border-t border-slate-100 pt-1.5 text-[8px] text-slate-400">
-                                    {seasonGuide.locationMatch === 'AREA_CLIMATE_ONLY' ? 'Area-level climate estimate.' : 'Location and area matched.'} Seasonal guidance is not a forecast or drone clearance; check current weather and local rules.
-                                  </p>
-                                </div>
-                              </details>
-                            )}
-                          </div>
-                        )}
+
                       </div>
                     );
                   })}

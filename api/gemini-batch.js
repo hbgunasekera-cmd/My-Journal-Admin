@@ -1,6 +1,5 @@
 import { requireTrustedMutation } from '../server/api-security.js';
 import { withApiErrorLogging } from '../server/error-logger.js';
-import { getSeasonGuideClient, getSeasonGuideCacheKey, getSeasonGuideStorageError } from '../server/season-guide-store.js';
 import { getFactContext, getGroundedSources, getResearchPrompt, readText } from './generate-article.js';
 
 const GEMINI_BATCH_MODEL = process.env.GEMINI_BATCH_MODEL || 'gemini-2.5-flash';
@@ -86,16 +85,31 @@ const getResultError = (response) => {
   return error?.message || error?.status || (typeof error === 'string' ? error : 'The research request failed in the batch.');
 };
 
-const getSeasonGuidePrompt = (place) => `Use Google Search to prepare a concise, source-backed seasonal visit guide for this exact Sri Lankan pin. You must perform a web search and use at least one relevant result; search the place name with its category, locality, and coordinates, and use the coordinates to identify the correct area and reject similar-name places elsewhere. Prefer Sri Lanka Department of Meteorology, government/tourism or conservation sources, and reliable local climate sources. If the exact feature has no coverage, use a sourced climate reference for the nearest matching area and set location_match to AREA_CLIMATE_ONLY. Do not invent or name sources.
-Use the local side of the island, highland/rain-shadow effects, monsoon and inter-monsoon rainfall, cloud/light, sunshine, and wind; do not copy one island-wide month range to every place.
-Name: ${place.placeName}; category: ${place.category || 'Location'}; locality: ${place.locality}; coordinates: ${place.coordinates.latitude},${place.coordinates.longitude}.
-For waterfalls, give a likely higher-flow rainfall window and separately choose the best photography compromise: strong flow with a better chance of dry, calmer, clearer periods for phone/drone images. Rainfall is only a flow clue, not measured discharge; never promise flyable weather or drone permission. For every other category, favor the category's appealing soft/charming light while avoiding persistently wet or windy periods. Prefer sunrise to about 08:00 and late afternoon from about 16:30 to sunset for softer light; avoid harsh midday light, adjusting these guide times to the local weather and terrain. Recommend month ranges, not unsupported exact dates. Say if a window is an area-level estimate rather than verified for the exact feature. Keep each value to a brief phrase (8 words maximum); omit optional details instead of adding explanation. Do not write an article. Return one compact JSON object, with these properties in this exact order: location_match, primary_window, photo_window, resolved_area, secondary_window, waterfall_flow_window, rationale, rain_and_monsoon, sky_and_light, wind_and_drone, best_time_of_day, confidence. If the pin conflicts with the supplied locality, use UNCONFIRMED. Do not invent measurements, exact flow, weather forecasts, safety, or access rules.`;
+
+const getSeasonGuidePrompt = (route) => {
+  const stopSummary = route.stops.map((stop, index) => [
+    String(index + 1) + '. ' + stop.name,
+    stop.category || 'Location',
+    stop.locality || route.mainArea,
+    Number(stop.latitude).toFixed(5) + ',' + Number(stop.longitude).toFixed(5)
+  ].join(' | ')).join('\n');
+
+  return [
+    'Use Google Search to recommend the best season/month period for this saved Sri Lankan trip route.',
+    'Research the route main area as a whole, not separate stop-by-stop guides. The locations are nearby route stops; use their names, categories and coordinates to understand the route mix and confirm the correct area. Search the dominant locality and nearby climate context. Prefer Sri Lanka Department of Meteorology, government, tourism, conservation and reliable local climate sources. If exact feature-level climate data is unavailable, use a sourced nearby-area estimate and set location_match to AREA_CLIMATE_ONLY. Do not invent or name sources.',
+    'Route: ' + route.routeName,
+    'Main area: ' + route.mainArea,
+    'Route centre: ' + Number(route.center.latitude).toFixed(5) + ',' + Number(route.center.longitude).toFixed(5),
+    'Stops (' + route.stops.length + '):\n' + stopSummary,
+    'Consider the correct regional monsoon/inter-monsoon pattern, rain, sunshine, cloud, wind and terrain. Choose one overall best window for the trip and one alternative. For waterfall routes, separately mention likely fuller-flow months and the best photography compromise with a better chance of clear, calmer skies for phone/drone photography. Rainfall is only a flow clue, not measured discharge; never promise flyable weather or drone permission. For other categories, favor soft/charming light and avoid persistently wet or windy periods. Prefer sunrise to about 08:00 and late afternoon from about 16:30 to sunset for softer light, adjusted to local conditions.',
+    'Return month ranges, not exact dates. Keep each value concise. Do not write an article or return separate recommendations for each stop. Return one compact JSON object with these properties in this order: location_match, main_area, primary_window, secondary_window, route_summary, waterfall_flow_window, photo_window, rationale, rain_and_monsoon, sky_and_light, wind_and_drone, best_time_of_day, confidence. Use location_match CONFIRMED when the route area is supported or AREA_CLIMATE_ONLY for a nearby-area estimate; use UNCONFIRMED only if route coordinates and locality conflict. Do not invent exact flow, forecasts, safety or access rules.'
+  ].join('\n');
+};
 
 const extractJsonObject = (value) => {
   const text = String(value || '');
   const start = text.indexOf('{');
   if (start < 0) return null;
-
   let depth = 0;
   let inString = false;
   let escaped = false;
@@ -131,12 +145,11 @@ const extractCompleteJsonFields = (value) => {
     const fieldText = text.slice(fieldStart, end).trim().replace(/,$/, '').trim();
     if (!fieldText) return;
     try {
-      Object.assign(fields, JSON.parse(`{${fieldText}}`));
+      Object.assign(fields, JSON.parse('{' + fieldText + '}'));
     } catch {
-      // A truncated final property is ignored; already complete values remain usable.
+      // Ignore a truncated final field while keeping complete earlier fields.
     }
   };
-
   for (let index = start; index < text.length; index += 1) {
     const character = text[index];
     if (inString) {
@@ -159,28 +172,33 @@ const extractCompleteJsonFields = (value) => {
     }
   }
   if (objectDepth > 0) saveField(text.length);
-  return Object.keys(fields).length > 0 ? fields : null;
+  return Object.keys(fields).length ? fields : null;
 };
 
-const parseSeasonGuideJson = (text) => {
-  const cleaned = String(text || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+const parseSeasonGuideJson = (value) => {
+  let cleaned = String(value || '').trim();
+  const fence = String.fromCharCode(96).repeat(3);
+  if (cleaned.startsWith(fence)) {
+    cleaned = cleaned.slice(fence.length).replace(/^json\b/i, '').trim();
+    if (cleaned.endsWith(fence)) cleaned = cleaned.slice(0, -fence.length).trim();
+  }
   try {
     return JSON.parse(cleaned);
   } catch (initialError) {
     const objectText = extractJsonObject(cleaned);
-    if (objectText && objectText !== cleaned) {
+    if (objectText) {
       try {
         return JSON.parse(objectText);
       } catch {
-        // Keep one stable, user-facing error rather than exposing parser internals.
+        // Fall through to salvage complete fields from truncated output.
       }
     }
     const partial = extractCompleteJsonFields(cleaned);
     if (partial) return { ...partial, _partialResponse: true };
-    const parseError = new Error('The Gemini response was not valid season-guide JSON.');
-    parseError.cause = initialError;
-    if (!objectText) parseError.incomplete = true;
-    throw parseError;
+    const error = new Error('The Gemini response was not valid route season-guide JSON.');
+    error.cause = initialError;
+    error.incomplete = !objectText;
+    throw error;
   }
 };
 
@@ -192,42 +210,35 @@ const getSeasonGuideGroundedSources = (response) => {
     || response?.grounding_metadata
     || response?.response?.groundingMetadata
     || response?.response?.grounding_metadata;
-  const groundingChunks = groundingMetadata?.groundingChunks
-    || groundingMetadata?.grounding_chunks
-    || [];
-  const fallbackSources = groundingChunks.flatMap((chunk) => {
+  const chunks = groundingMetadata?.groundingChunks || groundingMetadata?.grounding_chunks || [];
+  const fallbackSources = chunks.flatMap((chunk) => {
     const web = chunk?.web || chunk?.webSearch || chunk?.web_search;
     const url = web?.uri || web?.url;
     return typeof url === 'string' ? [{ title: web?.title, url }] : [];
   });
-  const deduplicatedSources = new Map();
+  const unique = new Map();
   [...getGroundedSources(response), ...fallbackSources].forEach((source) => {
     try {
       const url = new URL(source?.url);
-      if (['http:', 'https:'].includes(url.protocol)) {
-        deduplicatedSources.set(url.href, { title: source?.title || url.hostname, url: url.href });
+      if (url.protocol === 'https:' || url.protocol === 'http:') {
+        unique.set(url.href, { title: source?.title || url.hostname, url: url.href });
       }
     } catch {
-      // Ignore malformed or non-web grounding chunks.
+      // Ignore malformed grounding links.
     }
   });
-  return [...deduplicatedSources.values()].slice(0, 5);
+  return [...unique.values()].slice(0, 5);
 };
 
 const normalizeSeasonGuideResults = (batch, offset, limit) => {
   const inlineResponses = getInlineResponses(batch);
   const requestKeys = getInlineRequestKeys(batch);
   const total = inlineResponses.length;
+  const finishedAt = batch?.endTime || batch?.end_time || batch?.updateTime || batch?.update_time || new Date().toISOString();
   const results = inlineResponses.slice(offset, offset + limit).map((inline, pageIndex) => {
     const index = offset + pageIndex;
-    const key = cleanText(
-      inline?.metadata?.key
-        || inline?.metadata?.id
-        || inline?.output?.metadata?.key
-        || inline?.output?.metadata?.id
-        || requestKeys[index],
-      120
-    ) || String(index);
+    const key = cleanText(inline?.metadata?.key || inline?.metadata?.id
+      || inline?.output?.metadata?.key || inline?.output?.metadata?.id || requestKeys[index], 120) || String(index);
     const response = inline?.response || inline?.output?.response;
     if (!response) return { key, success: false, error: getResultError(inline) };
 
@@ -235,58 +246,46 @@ const normalizeSeasonGuideResults = (batch, offset, limit) => {
     try {
       const parsedResponse = parseSeasonGuideJson(readText(response));
       const parsed = parsedResponse?.season_guide || parsedResponse?.seasonGuide || parsedResponse?.guide || parsedResponse;
-      const readGuideValue = (...keys) => {
-        for (const keyName of keys) {
-          const value = parsed?.[keyName];
+      const readValue = (...keys) => {
+        for (const field of keys) {
+          const value = parsed?.[field];
           if (typeof value === 'string' && value.trim()) return value;
         }
         return '';
       };
       const guide = {
-        locationMatch: cleanText(readGuideValue('location_match', 'locationMatch'), 40).toUpperCase().replace(/[\s-]+/g, '_'),
-        resolvedArea: cleanText(readGuideValue('resolved_area', 'resolvedArea'), 180),
-        primaryWindow: cleanText(readGuideValue('primary_window', 'primaryWindow', 'best_season', 'bestSeason'), 100),
-        secondaryWindow: cleanText(readGuideValue('secondary_window', 'secondaryWindow', 'alternative_window', 'alternativeWindow'), 100),
-        waterfallFlowWindow: cleanText(readGuideValue('waterfall_flow_window', 'waterfallFlowWindow', 'flow_window', 'flowWindow'), 100),
-        photoWindow: cleanText(readGuideValue('photo_window', 'photoWindow', 'photography_window', 'photographyWindow'), 100),
-        rationale: cleanText(readGuideValue('rationale', 'reason'), 500),
-        rainAndMonsoon: cleanText(readGuideValue('rain_and_monsoon', 'rainAndMonsoon', 'rainfall'), 500),
-        skyAndLight: cleanText(readGuideValue('sky_and_light', 'skyAndLight', 'light'), 500),
-        windAndDrone: cleanText(readGuideValue('wind_and_drone', 'windAndDrone', 'wind'), 500),
-        bestTimeOfDay: cleanText(readGuideValue('best_time_of_day', 'bestTimeOfDay'), 240),
-        confidence: cleanText(readGuideValue('confidence'), 20).toLowerCase()
+        locationMatch: cleanText(readValue('location_match', 'locationMatch'), 40).toUpperCase().replace(/[\s-]+/g, '_'),
+        mainArea: cleanText(readValue('main_area', 'mainArea', 'resolved_area', 'resolvedArea'), 180),
+        primaryWindow: cleanText(readValue('primary_window', 'primaryWindow', 'best_season', 'bestSeason'), 100),
+        secondaryWindow: cleanText(readValue('secondary_window', 'secondaryWindow', 'alternative_window', 'alternativeWindow'), 100),
+        routeSummary: cleanText(readValue('route_summary', 'routeSummary'), 400),
+        waterfallFlowWindow: cleanText(readValue('waterfall_flow_window', 'waterfallFlowWindow', 'flow_window', 'flowWindow'), 140),
+        photoWindow: cleanText(readValue('photo_window', 'photoWindow', 'photography_window', 'photographyWindow'), 140),
+        rationale: cleanText(readValue('rationale', 'reason'), 400),
+        rainAndMonsoon: cleanText(readValue('rain_and_monsoon', 'rainAndMonsoon', 'rainfall'), 400),
+        skyAndLight: cleanText(readValue('sky_and_light', 'skyAndLight', 'light'), 400),
+        windAndDrone: cleanText(readValue('wind_and_drone', 'windAndDrone', 'wind'), 400),
+        bestTimeOfDay: cleanText(readValue('best_time_of_day', 'bestTimeOfDay'), 180),
+        confidence: cleanText(readValue('confidence'), 20).toLowerCase()
       };
-
-      // The primary season is the concise recommendation and can also serve as
-      // the photography window when the model omits a redundant separate value.
       if (!guide.photoWindow) guide.photoWindow = guide.primaryWindow;
-
       if (!['CONFIRMED', 'AREA_CLIMATE_ONLY'].includes(guide.locationMatch)) {
-        if (parsedResponse?._partialResponse && !guide.locationMatch) {
-          return { key, success: false, error: 'Gemini output was cut off before location matching completed. Retry this guide.' };
-        }
-        return { key, success: false, error: 'The pin and supplied locality could not be reconciled to a reliable local climate source.' };
+        return { key, success: false, error: 'The saved route main area could not be matched to a reliable local climate source.' };
       }
-      const missingParts = [
-        !guide.primaryWindow && 'best season',
+      const missing = [
+        !guide.primaryWindow && 'the best-season period',
         sources.length === 0 && 'grounded web sources'
       ].filter(Boolean);
-      if (missingParts.length > 0) {
+      if (missing.length) {
         return {
           key,
           success: false,
           error: parsedResponse?._partialResponse && !guide.primaryWindow
-            ? 'Gemini output was cut off before the best-season recommendation. Retry this guide.'
-            : `The season research omitted ${missingParts.join(', ')}. Retry this guide.`
+            ? 'Gemini output ended before the route season recommendation was complete. Retry this guide.'
+            : 'The season research omitted ' + missing.join(' and ') + '. Retry this guide.'
         };
       }
-      return {
-        key,
-        success: true,
-        guide,
-        sources,
-        researchedAt: batch?.endTime || batch?.end_time || batch?.updateTime || batch?.update_time || new Date().toISOString()
-      };
+      return { key, success: true, guide, sources, researchedAt: finishedAt };
     } catch (error) {
       const finishReason = response?.candidates?.[0]?.finishReason
         || response?.candidates?.[0]?.finish_reason
@@ -296,264 +295,92 @@ const normalizeSeasonGuideResults = (batch, offset, limit) => {
       return {
         key,
         success: false,
-        error: truncated
-          ? 'Gemini ended before the season guide JSON was complete. Retry this guide.'
-          : error?.message || 'The season research response could not be read.'
+        error: truncated ? 'Gemini ended before the route season guide was complete. Retry this guide.' : error?.message || 'The route season research response could not be read.'
       };
     }
   });
   return { results, total };
 };
 
-const seasonGuideDbResult = (row, ids) => {
-  const guide = row?.guide && typeof row.guide === 'object' ? row.guide : {};
-  const success = row?.status === 'ready' && !guide.error;
-  return ids.map((id) => success
-    ? { key: String(id), success: true, guide, sources: guide.sources || [], researchedAt: row.researched_at || guide.researchedAt }
-    : { key: String(id), success: false, error: row?.error || guide.error || 'Season research failed. Retry this guide.' });
-};
-
-const createSeasonGuideBatch = async (apiKey, body) => {
-  const store = getSeasonGuideClient();
-  const forceIds = new Set(Array.isArray(body?.forceIds) ? body.forceIds.map((id) => String(id)) : []);
-  const uniqueLocations = new Map();
-  for (const location of body.locations) {
-    const id = cleanText(location?.id, 120);
-    const factContext = getFactContext(location);
-    if (!id || !factContext) {
-      const error = new Error('Each batch location requires an id, name, locality, and valid latitude/longitude.');
+const createSeasonGuideBatch = async (apiKey, routes, displayName) => {
+  if (!apiKey) {
+    const error = new Error('Season guide research is not configured on the server.');
+    error.status = 503;
+    throw error;
+  }
+  const uniqueRoutes = new Map();
+  for (const route of routes) {
+    const id = cleanText(route?.id, 120);
+    const routeName = cleanText(route?.routeName || route?.route_name, 180);
+    const mainArea = cleanText(route?.mainArea || route?.main_area, 180);
+    const stops = Array.isArray(route?.stops) ? route.stops : [];
+    const center = route?.center || {};
+    const latitude = Number(center.latitude);
+    const longitude = Number(center.longitude);
+    const validStops = stops.map((stop) => ({
+      name: cleanText(stop?.name, 180),
+      category: cleanText(stop?.category || 'Location', 80),
+      locality: cleanText(stop?.locality, 120),
+      latitude: Number(stop?.latitude),
+      longitude: Number(stop?.longitude)
+    })).filter((stop) => stop.name && Number.isFinite(stop.latitude) && Number.isFinite(stop.longitude)
+      && stop.latitude >= -90 && stop.latitude <= 90 && stop.longitude >= -180 && stop.longitude <= 180);
+    if (!id || !routeName || !mainArea || !Number.isFinite(latitude) || !Number.isFinite(longitude)
+      || latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180 || validStops.length === 0) {
+      const error = new Error('Each saved route requires an id, route name, main area and at least one geocoded stop.');
       error.status = 400;
       throw error;
     }
-    const cacheKey = getSeasonGuideCacheKey(factContext);
-    const legacyFactContext = { ...factContext };
-    delete legacyFactContext.coordinates;
-    const legacyCacheKey = getSeasonGuideCacheKey(legacyFactContext);
-    const target = uniqueLocations.get(cacheKey) || { cacheKey, legacyCacheKey, factContext, ids: [] };
-    if (!target.ids.includes(id)) target.ids.push(id);
-    uniqueLocations.set(cacheKey, target);
+    uniqueRoutes.set(id, { id, routeName, mainArea, center: { latitude, longitude }, stops: validStops });
   }
 
-  const targets = [...uniqueLocations.values()];
-  const lookupKeys = [...new Set(targets.flatMap((target) => [target.cacheKey, target.legacyCacheKey]))];
-  const { data: existingRows, error: readError } = await store
-    .from('location_season_guides')
-    .select('*')
-    .in('cache_key', lookupKeys);
-  if (readError) throw new Error(getSeasonGuideStorageError(readError));
-  const rowsByKey = new Map((existingRows || []).map((row) => [row.cache_key, row]));
-  const cachedResults = [];
-  const newTargets = [];
-  const operationsByName = new Map();
-  const now = Date.now();
-  const isFresh = (row) => !row?.expires_at || Date.parse(row.expires_at) > now;
-
-  targets.forEach((target) => {
-    let row = rowsByKey.get(target.cacheKey);
-    if (!row && target.legacyCacheKey !== target.cacheKey) {
-      const legacyRow = rowsByKey.get(target.legacyCacheKey);
-      const coordinatesMatch = legacyRow
-        && Math.abs(Number(legacyRow.latitude) - target.factContext.coordinates.latitude) <= 0.000001
-        && Math.abs(Number(legacyRow.longitude) - target.factContext.coordinates.longitude) <= 0.000001;
-      if (coordinatesMatch) {
-        row = legacyRow;
-        target.persistCacheKey = legacyRow.cache_key;
+  const targets = [...uniqueRoutes.values()];
+  const requests = targets.map((route) => ({
+    request: {
+      contents: [{ role: 'user', parts: [{ text: getSeasonGuidePrompt(route) }] }],
+      tools: [{ google_search: {} }],
+      generation_config: {
+        temperature: 0.1,
+        max_output_tokens: 1_600,
+        thinking_config: { thinking_budget: 0 }
       }
-    }
-    const forced = target.ids.some((id) => forceIds.has(id));
-    if (!forced && row && ['ready', 'error'].includes(row.status) && isFresh(row)) {
-      cachedResults.push(...seasonGuideDbResult(row, target.ids));
-      return;
-    }
-
-    const activeBatch = row?.status === 'researching' && row.batch_operation_name
-      && Date.now() - Date.parse(row.updated_at || 0) < 48 * 60 * 60 * 1000;
-    if (!forced && activeBatch) {
-      const operation = operationsByName.get(row.batch_operation_name) || {
-        operationName: row.batch_operation_name,
-        targetIds: [],
-        keyMap: {}
-      };
-      operation.targetIds.push(...target.ids.filter((id) => !operation.targetIds.includes(id)));
-      const requestKey = String(row.batch_request_key || target.ids[0]);
-      const existingIds = Array.isArray(operation.keyMap[requestKey])
-        ? operation.keyMap[requestKey]
-        : operation.keyMap[requestKey] ? [String(operation.keyMap[requestKey])] : [];
-      operation.keyMap[requestKey] = [...new Set([...existingIds, ...target.ids.map(String)])];
-      operationsByName.set(row.batch_operation_name, operation);
-      return;
-    }
-    newTargets.push(target);
-  });
-
-  if (newTargets.length > 0) {
-    if (!apiKey) throw new Error('Article generation is not configured on the server.');
-    const requests = newTargets.map((target, requestIndex) => {
-      const requestKey = String(requestIndex);
-      target.requestKey = requestKey;
-      return {
-        request: {
-          contents: [{ role: 'user', parts: [{ text: getSeasonGuidePrompt(target.factContext) }] }],
-          tools: [{ google_search: {} }],
-          generation_config: {
-            temperature: 0.1,
-            max_output_tokens: 2_048,
-            thinking_config: { thinking_budget: 0 }
-          }
-        },
-        metadata: { key: requestKey }
-      };
-    });
-    const requestBody = {
-      batch: {
-        display_name: cleanText(body?.displayName || `my-journal-admin-season-guide-${Date.now()}`, 128),
-        input_config: { requests: { requests } }
-      }
-    };
-    if (Buffer.byteLength(JSON.stringify(requestBody), 'utf8') > MAX_BATCH_BYTES) {
-      const error = new Error('The Gemini inline batch is too large. Split the season guide operation into smaller groups.');
-      error.status = 413;
-      throw error;
-    }
-    const result = await callGeminiBatch(apiKey, `models/${GEMINI_BATCH_MODEL}:batchGenerateContent`, {
-      method: 'POST',
-      body: JSON.stringify(requestBody)
-    });
-    const batch = unwrapBatch(result);
-    const operationName = cleanText(batch?.name || result?.name || result?.response?.name, 200);
-    if (!/^batches\/[A-Za-z0-9_-]+$/.test(operationName)) {
-      throw new Error('Gemini accepted the batch request but returned an invalid operation name.');
-    }
-
-    const timestamp = new Date().toISOString();
-    const rowsToSave = newTargets.map((target) => ({
-      cache_key: target.persistCacheKey || target.cacheKey,
-      place_name: target.factContext.placeName,
-      category: target.factContext.category || 'Location',
-      locality: target.factContext.locality,
-      latitude: target.factContext.coordinates.latitude,
-      longitude: target.factContext.coordinates.longitude,
-      status: 'researching',
-      guide: null,
-      error: null,
-      batch_operation_name: operationName,
-      batch_request_key: target.requestKey,
-      researched_at: null,
-      expires_at: null,
-      updated_at: timestamp
-    }));
-    const { error: saveError } = await store.from('location_season_guides').upsert(rowsToSave, { onConflict: 'cache_key' });
-    if (saveError) throw new Error(getSeasonGuideStorageError(saveError));
-
-    operationsByName.set(operationName, {
-      operationName,
-      targetIds: newTargets.flatMap((target) => target.ids),
-      keyMap: Object.fromEntries(newTargets.map((target) => [
-        target.requestKey,
-        target.ids.map(String)
-      ]))
-    });
-  }
-
-  return {
-    status: operationsByName.size > 0 ? 202 : 200,
-    body: {
-      task: 'season-guide',
-      state: operationsByName.size > 0 ? 'JOB_STATE_PENDING' : 'JOB_STATE_SUCCEEDED',
-      requestCount: targets.length,
-      cachedResults,
-      results: cachedResults,
-      operations: [...operationsByName.values()]
+    },
+    metadata: { key: route.id }
+  }));
+  const requestBody = {
+    batch: {
+      display_name: cleanText(displayName || 'my-journal-admin-route-season-' + Date.now(), 128),
+      input_config: { requests: { requests } }
     }
   };
-};
-
-const persistSeasonGuideResults = async (store, operationName, results) => {
-  if (!results.length) return;
-  const { data: rows, error: readError } = await store
-    .from('location_season_guides')
-    .select('*')
-    .eq('batch_operation_name', operationName)
-    .in('batch_request_key', results.map((result) => String(result.key)));
-  if (readError) throw new Error(getSeasonGuideStorageError(readError));
-  const rowsByRequestKey = new Map((rows || []).map((row) => [String(row.batch_request_key), row]));
-  const now = Date.now();
-  const savedAt = new Date(now).toISOString();
-  const records = results.flatMap((result) => {
-    const row = rowsByRequestKey.get(String(result.key));
-    if (!row) return [];
-    const success = result.success === true;
-    const guide = success
-      ? { ...result.guide, sources: result.sources || [], researchedAt: result.researchedAt }
-      : { error: result.error || 'Season research did not return a usable result.' };
-    return [{
-      ...row,
-      status: success ? 'ready' : 'error',
-      guide,
-      error: success ? null : guide.error,
-      batch_operation_name: null,
-      batch_request_key: null,
-      researched_at: success ? result.researchedAt || savedAt : null,
-      expires_at: new Date(now + (success ? 365 : 1) * 24 * 60 * 60 * 1000).toISOString(),
-      updated_at: savedAt
-    }];
+  if (Buffer.byteLength(JSON.stringify(requestBody), 'utf8') > MAX_BATCH_BYTES) {
+    const error = new Error('The saved route batch is too large. Split it into smaller groups.');
+    error.status = 413;
+    throw error;
+  }
+  const result = await callGeminiBatch(apiKey, 'models/' + GEMINI_BATCH_MODEL + ':batchGenerateContent', {
+    method: 'POST',
+    body: JSON.stringify(requestBody)
   });
-  if (records.length === 0) return;
-  const { error: saveError } = await store.from('location_season_guides').upsert(records, { onConflict: 'cache_key' });
-  if (saveError) throw new Error(getSeasonGuideStorageError(saveError));
-};
-
-const persistSeasonGuideBatchFailure = async (store, operationName, reason) => {
-  const { data: rows, error: readError } = await store
-    .from('location_season_guides')
-    .select('*')
-    .eq('batch_operation_name', operationName);
-  if (readError) throw new Error(getSeasonGuideStorageError(readError));
-  if (!rows?.length) return;
-  const now = new Date().toISOString();
-  const errorMessage = cleanText(reason || 'Season research batch failed.', 1000);
-  const records = rows.map((row) => ({
-    ...row,
-    status: 'error',
-    guide: { error: errorMessage },
-    error: errorMessage,
-    batch_operation_name: null,
-    batch_request_key: null,
-    expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-    updated_at: now
-  }));
-  const { error: saveError } = await store.from('location_season_guides').upsert(records, { onConflict: 'cache_key' });
-  if (saveError) throw new Error(getSeasonGuideStorageError(saveError));
-};
-
-const persistUnreturnedSeasonGuideResults = async (store, operationName) => {
-  const { data: rows, error: readError } = await store
-    .from('location_season_guides')
-    .select('*')
-    .eq('batch_operation_name', operationName);
-  if (readError) throw new Error(getSeasonGuideStorageError(readError));
-  if (!rows?.length) return [];
-
-  const now = Date.now();
-  const updatedAt = new Date(now).toISOString();
-  const errorMessage = 'Gemini finished the batch without returning a response for this location. Retry this guide.';
-  const records = rows.map((row) => ({
-    ...row,
-    status: 'error',
-    guide: { error: errorMessage },
-    error: errorMessage,
-    batch_operation_name: null,
-    batch_request_key: null,
-    expires_at: new Date(now + 24 * 60 * 60 * 1000).toISOString(),
-    updated_at: updatedAt
-  }));
-  const { error: saveError } = await store.from('location_season_guides').upsert(records, { onConflict: 'cache_key' });
-  if (saveError) throw new Error(getSeasonGuideStorageError(saveError));
-  return rows.map((row) => ({
-    key: String(row.batch_request_key || row.id),
-    success: false,
-    error: errorMessage
-  }));
+  const batch = unwrapBatch(result);
+  const operationName = cleanText(batch?.name || result?.name || result?.response?.name, 200);
+  if (!/^batches\/[A-Za-z0-9_-]+$/.test(operationName)) {
+    const error = new Error('Gemini accepted the route research but returned an invalid operation name.');
+    error.status = 502;
+    throw error;
+  }
+  return {
+    status: 202,
+    body: {
+      task: 'season-guide',
+      state: getBatchState(result, batch),
+      requestCount: requests.length,
+      operationName,
+      targetIds: targets.map((route) => route.id),
+      keyMap: Object.fromEntries(targets.map((route) => [route.id, [route.id]])),
+      displayName: batch?.displayName || batch?.display_name || requestBody.batch.display_name
+    }
+  };
 };
 
 const normalizeResearchResults = (batch, offset, limit) => {
@@ -608,14 +435,18 @@ async function handler(req, res) {
   const action = req.body?.action;
   try {
     if (action === 'create') {
+      const task = req.body?.task === 'season-guide' ? 'season-guide' : 'article-research';
+      if (task === 'season-guide') {
+        const routes = req.body?.routes;
+        if (!Array.isArray(routes) || routes.length === 0 || routes.length > MAX_BATCH_REQUESTS) {
+          return res.status(400).json({ error: `Provide between 1 and ${MAX_BATCH_REQUESTS} saved routes for season research.` });
+        }
+        const result = await createSeasonGuideBatch(apiKey, routes, req.body?.displayName);
+        return res.status(result.status).json(result.body);
+      }
       const locations = req.body?.locations;
       if (!Array.isArray(locations) || locations.length === 0 || locations.length > MAX_BATCH_REQUESTS) {
         return res.status(400).json({ error: `Provide between 1 and ${MAX_BATCH_REQUESTS} locations for batch research.` });
-      }
-      const task = req.body?.task === 'season-guide' ? 'season-guide' : 'article-research';
-      if (task === 'season-guide') {
-        const result = await createSeasonGuideBatch(apiKey, { ...req.body, locations });
-        return res.status(result.status).json(result.body);
       }
       if (!apiKey) return res.status(503).json({ error: 'Article generation is not configured on the server.' });
 
@@ -689,31 +520,15 @@ async function handler(req, res) {
         error: batch?.error || result?.error || null,
         batchStats
       };
-      if (req.body?.task === 'season-guide' && /(?:FAILED|CANCELLED|EXPIRED)$/.test(state)) {
-        const store = getSeasonGuideClient();
-        const detail = batch?.error?.message || result?.error?.message || state;
-        await persistSeasonGuideBatchFailure(store, operationName, detail);
-      }
       if (state.endsWith('SUCCEEDED')) {
         const isSeasonGuide = req.body?.task === 'season-guide';
         const { results, total } = isSeasonGuide
           ? normalizeSeasonGuideResults(batch, offset, limit)
           : normalizeResearchResults(batch, offset, limit);
-        let completeResults = results;
-        let completeTotal = total;
-        if (isSeasonGuide) {
-          const store = getSeasonGuideClient();
-          await persistSeasonGuideResults(store, operationName, results);
-          if (offset + results.length >= total) {
-            const unreturnedResults = await persistUnreturnedSeasonGuideResults(store, operationName);
-            completeResults = [...results, ...unreturnedResults];
-            completeTotal += unreturnedResults.length;
-          }
-        }
-        response.results = completeResults;
-        response.totalResults = completeTotal;
+        response.results = results;
+        response.totalResults = total;
         response.offset = offset;
-        response.hasMore = offset + completeResults.length < completeTotal;
+        response.hasMore = offset + results.length < total;
       }
       return res.status(200).json(response);
     }
@@ -725,7 +540,7 @@ async function handler(req, res) {
       : 502;
     return res.status(status).json({
       error: {
-        message: getSeasonGuideStorageError(error) || error.message || 'Gemini Batch API request failed.',
+        message: error.message || 'Gemini Batch API request failed.',
         details: error?.details || null
       }
     });
