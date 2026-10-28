@@ -1,7 +1,3 @@
-const CACHE_KEY = 'my-journal-admin-season-guides-v1';
-const CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 365;
-const ERROR_CACHE_TTL_MS = 1000 * 60 * 60 * 24;
-
 const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (character) => ({
   '&': '&amp;',
   '<': '&lt;',
@@ -10,45 +6,27 @@ const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (character
   "'": '&#39;'
 })[character]);
 
-export const getSeasonGuideCacheKey = (place) => [
-  place?.place_name,
-  place?.category,
-  place?.locality,
-  place?.latitude,
-  place?.longitude
-].map((value) => String(value ?? '').trim()).join('|');
+const normalizePart = (value) => String(value ?? '').trim().replace(/\s+/g, ' ').toLocaleLowerCase('en');
 
-export const readSeasonGuideCache = (place) => {
-  try {
-    const cache = JSON.parse(window.localStorage.getItem(CACHE_KEY) || '{}');
-    const entry = cache[getSeasonGuideCacheKey(place)];
-    const ttl = entry?.guide?.error ? ERROR_CACHE_TTL_MS : CACHE_TTL_MS;
-    return entry?.savedAt && Date.now() - entry.savedAt < ttl ? entry.guide : null;
-  } catch {
-    return null;
-  }
+export const getSeasonGuideCacheKey = (place) => {
+  const latitude = Number(place?.latitude);
+  const longitude = Number(place?.longitude);
+  return JSON.stringify([
+    normalizePart(place?.place_name ?? place?.placeName),
+    normalizePart(place?.category || 'Location'),
+    normalizePart(place?.locality),
+    Number.isFinite(latitude) ? latitude.toFixed(6) : '',
+    Number.isFinite(longitude) ? longitude.toFixed(6) : ''
+  ]);
 };
 
-export const clearSeasonGuideCache = (place) => {
+export const clearLegacySeasonGuideBrowserStorage = () => {
+  if (typeof window === 'undefined') return;
   try {
-    const cache = JSON.parse(window.localStorage.getItem(CACHE_KEY) || '{}');
-    delete cache[getSeasonGuideCacheKey(place)];
-    window.localStorage.setItem(CACHE_KEY, JSON.stringify(cache));
+    window.localStorage.removeItem('my-journal-admin-season-guides-v1');
+    window.localStorage.removeItem('my-journal-admin-season-guide-batches-v1');
   } catch {
-    // The user can still retry in memory if storage is disabled.
-  }
-};
-
-export const writeSeasonGuideCache = (place, guide) => {
-  try {
-    const cache = JSON.parse(window.localStorage.getItem(CACHE_KEY) || '{}');
-    cache[getSeasonGuideCacheKey(place)] = { savedAt: Date.now(), guide };
-    const entries = Object.entries(cache)
-      .sort(([, left], [, right]) => Number(right?.savedAt || 0) - Number(left?.savedAt || 0))
-      .slice(0, 500);
-    window.localStorage.setItem(CACHE_KEY, JSON.stringify(Object.fromEntries(entries)));
-  } catch {
-    // Keep the in-memory guide when local browser storage is full or disabled.
+    // The current implementation reads and writes season guides only through the database API.
   }
 };
 

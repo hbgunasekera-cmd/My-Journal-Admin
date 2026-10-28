@@ -1,5 +1,6 @@
 import { requireTrustedMutation } from '../server/api-security.js';
 import { withApiErrorLogging } from '../server/error-logger.js';
+import { getSeasonGuideAdmin, getSeasonGuideCacheKey, getSeasonGuideStorageError } from '../server/season-guide-store.js';
 import { getFactContext, getGroundedSources, getResearchPrompt, readText } from './generate-article.js';
 
 const GEMINI_BATCH_MODEL = process.env.GEMINI_BATCH_MODEL || 'gemini-2.5-flash';
@@ -122,6 +123,205 @@ const normalizeSeasonGuideResults = (batch, offset, limit) => {
   return { results, total };
 };
 
+const seasonGuideDbResult = (row, ids) => {
+  const guide = row?.guide && typeof row.guide === 'object' ? row.guide : {};
+  const success = row?.status === 'ready' && !guide.error;
+  return ids.map((id) => success
+    ? { key: String(id), success: true, guide, sources: guide.sources || [], researchedAt: row.researched_at || guide.researchedAt }
+    : { key: String(id), success: false, error: row?.error || guide.error || 'Season research failed. Retry this guide.' });
+};
+
+const createSeasonGuideBatch = async (apiKey, body) => {
+  const store = getSeasonGuideAdmin();
+  const forceIds = new Set(Array.isArray(body?.forceIds) ? body.forceIds.map((id) => String(id)) : []);
+  const uniqueLocations = new Map();
+  for (const location of body.locations) {
+    const id = cleanText(location?.id, 120);
+    const factContext = getFactContext(location);
+    if (!id || !factContext) {
+      const error = new Error('Each batch location requires an id, name, locality, and valid latitude/longitude.');
+      error.status = 400;
+      throw error;
+    }
+    const cacheKey = getSeasonGuideCacheKey(factContext);
+    const target = uniqueLocations.get(cacheKey) || { cacheKey, factContext, ids: [] };
+    if (!target.ids.includes(id)) target.ids.push(id);
+    uniqueLocations.set(cacheKey, target);
+  }
+
+  const targets = [...uniqueLocations.values()];
+  const { data: existingRows, error: readError } = await store
+    .from('location_season_guides')
+    .select('*')
+    .in('cache_key', targets.map((target) => target.cacheKey));
+  if (readError) throw new Error(getSeasonGuideStorageError(readError));
+  const rowsByKey = new Map((existingRows || []).map((row) => [row.cache_key, row]));
+  const cachedResults = [];
+  const newTargets = [];
+  const operationsByName = new Map();
+  const now = Date.now();
+  const isFresh = (row) => !row?.expires_at || Date.parse(row.expires_at) > now;
+
+  targets.forEach((target) => {
+    const row = rowsByKey.get(target.cacheKey);
+    const forced = target.ids.some((id) => forceIds.has(id));
+    if (!forced && row && ['ready', 'error'].includes(row.status) && isFresh(row)) {
+      cachedResults.push(...seasonGuideDbResult(row, target.ids));
+      return;
+    }
+
+    const activeBatch = row?.status === 'researching' && row.batch_operation_name
+      && Date.now() - Date.parse(row.updated_at || 0) < 48 * 60 * 60 * 1000;
+    if (!forced && activeBatch) {
+      const operation = operationsByName.get(row.batch_operation_name) || {
+        operationName: row.batch_operation_name,
+        targetIds: [],
+        keyMap: {}
+      };
+      operation.targetIds.push(...target.ids.filter((id) => !operation.targetIds.includes(id)));
+      target.ids.forEach((id) => { operation.keyMap[String(row.batch_request_key || id)] = id; });
+      operationsByName.set(row.batch_operation_name, operation);
+      return;
+    }
+    newTargets.push(target);
+  });
+
+  if (newTargets.length > 0) {
+    if (!apiKey) throw new Error('Article generation is not configured on the server.');
+    const requests = newTargets.map((target) => {
+      const requestKey = target.ids[0];
+      return {
+        request: {
+          contents: [{ role: 'user', parts: [{ text: getSeasonGuidePrompt(target.factContext) }] }],
+          tools: [{ google_search: {} }],
+          generation_config: {
+            temperature: 0.1,
+            max_output_tokens: 400,
+            thinking_config: { thinking_budget: 0 }
+          }
+        },
+        metadata: { key: requestKey }
+      };
+    });
+    const requestBody = {
+      batch: {
+        display_name: cleanText(body?.displayName || `my-journal-admin-season-guide-${Date.now()}`, 128),
+        input_config: { requests: { requests } }
+      }
+    };
+    if (Buffer.byteLength(JSON.stringify(requestBody), 'utf8') > MAX_BATCH_BYTES) {
+      const error = new Error('The Gemini inline batch is too large. Split the season guide operation into smaller groups.');
+      error.status = 413;
+      throw error;
+    }
+    const result = await callGeminiBatch(apiKey, `models/${GEMINI_BATCH_MODEL}:batchGenerateContent`, {
+      method: 'POST',
+      body: JSON.stringify(requestBody)
+    });
+    const batch = unwrapBatch(result);
+    const operationName = cleanText(batch?.name || result?.name || result?.response?.name, 200);
+    if (!/^batches\/[A-Za-z0-9_-]+$/.test(operationName)) {
+      throw new Error('Gemini accepted the batch request but returned an invalid operation name.');
+    }
+
+    const timestamp = new Date().toISOString();
+    const rowsToSave = newTargets.map((target) => ({
+      cache_key: target.cacheKey,
+      place_name: target.factContext.placeName,
+      category: target.factContext.category || 'Location',
+      locality: target.factContext.locality,
+      latitude: target.factContext.coordinates.latitude,
+      longitude: target.factContext.coordinates.longitude,
+      status: 'researching',
+      guide: null,
+      error: null,
+      batch_operation_name: operationName,
+      batch_request_key: target.ids[0],
+      researched_at: null,
+      expires_at: null,
+      updated_at: timestamp
+    }));
+    const { error: saveError } = await store.from('location_season_guides').upsert(rowsToSave, { onConflict: 'cache_key' });
+    if (saveError) throw new Error(getSeasonGuideStorageError(saveError));
+
+    operationsByName.set(operationName, {
+      operationName,
+      targetIds: newTargets.flatMap((target) => target.ids),
+      keyMap: Object.fromEntries(newTargets.flatMap((target) => target.ids.map((id) => [String(id), id])))
+    });
+  }
+
+  return {
+    status: operationsByName.size > 0 ? 202 : 200,
+    body: {
+      task: 'season-guide',
+      state: operationsByName.size > 0 ? 'JOB_STATE_PENDING' : 'JOB_STATE_SUCCEEDED',
+      requestCount: targets.length,
+      cachedResults,
+      results: cachedResults,
+      operations: [...operationsByName.values()]
+    }
+  };
+};
+
+const persistSeasonGuideResults = async (store, operationName, results) => {
+  if (!results.length) return;
+  const { data: rows, error: readError } = await store
+    .from('location_season_guides')
+    .select('*')
+    .eq('batch_operation_name', operationName)
+    .in('batch_request_key', results.map((result) => String(result.key)));
+  if (readError) throw new Error(getSeasonGuideStorageError(readError));
+  const rowsByRequestKey = new Map((rows || []).map((row) => [String(row.batch_request_key), row]));
+  const now = Date.now();
+  const savedAt = new Date(now).toISOString();
+  const records = results.flatMap((result) => {
+    const row = rowsByRequestKey.get(String(result.key));
+    if (!row) return [];
+    const success = result.success === true;
+    const guide = success
+      ? { ...result.guide, sources: result.sources || [], researchedAt: result.researchedAt }
+      : { error: result.error || 'Season research did not return a usable result.' };
+    return [{
+      ...row,
+      status: success ? 'ready' : 'error',
+      guide,
+      error: success ? null : guide.error,
+      batch_operation_name: null,
+      batch_request_key: null,
+      researched_at: success ? result.researchedAt || savedAt : null,
+      expires_at: new Date(now + (success ? 365 : 1) * 24 * 60 * 60 * 1000).toISOString(),
+      updated_at: savedAt
+    }];
+  });
+  if (records.length === 0) return;
+  const { error: saveError } = await store.from('location_season_guides').upsert(records, { onConflict: 'cache_key' });
+  if (saveError) throw new Error(getSeasonGuideStorageError(saveError));
+};
+
+const persistSeasonGuideBatchFailure = async (store, operationName, reason) => {
+  const { data: rows, error: readError } = await store
+    .from('location_season_guides')
+    .select('*')
+    .eq('batch_operation_name', operationName);
+  if (readError) throw new Error(getSeasonGuideStorageError(readError));
+  if (!rows?.length) return;
+  const now = new Date().toISOString();
+  const errorMessage = cleanText(reason || 'Season research batch failed.', 1000);
+  const records = rows.map((row) => ({
+    ...row,
+    status: 'error',
+    guide: { error: errorMessage },
+    error: errorMessage,
+    batch_operation_name: null,
+    batch_request_key: null,
+    expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+    updated_at: now
+  }));
+  const { error: saveError } = await store.from('location_season_guides').upsert(records, { onConflict: 'cache_key' });
+  if (saveError) throw new Error(getSeasonGuideStorageError(saveError));
+};
+
 const normalizeResearchResults = (batch, offset, limit) => {
   const inlineResponses = getInlineResponses(batch);
   const total = inlineResponses.length;
@@ -171,8 +371,6 @@ async function handler(req, res) {
   if (!requireTrustedMutation(req, res)) return;
 
   const apiKey = getApiKey();
-  if (!apiKey) return res.status(503).json({ error: 'Article generation is not configured on the server.' });
-
   const action = req.body?.action;
   try {
     if (action === 'create') {
@@ -181,6 +379,12 @@ async function handler(req, res) {
         return res.status(400).json({ error: `Provide between 1 and ${MAX_BATCH_REQUESTS} locations for batch research.` });
       }
       const task = req.body?.task === 'season-guide' ? 'season-guide' : 'article-research';
+      if (task === 'season-guide') {
+        const result = await createSeasonGuideBatch(apiKey, { ...req.body, locations });
+        return res.status(result.status).json(result.body);
+      }
+      if (!apiKey) return res.status(503).json({ error: 'Article generation is not configured on the server.' });
+
       const requests = [];
       for (const location of locations) {
         const id = cleanText(location?.id, 120);
@@ -190,12 +394,12 @@ async function handler(req, res) {
         }
         requests.push({
           request: {
-            contents: [{ role: 'user', parts: [{ text: task === 'season-guide' ? getSeasonGuidePrompt(factContext) : getResearchPrompt(factContext) }] }],
+            contents: [{ role: 'user', parts: [{ text: getResearchPrompt(factContext) }] }],
             tools: [{ google_search: {} }],
             generation_config: {
               temperature: 0.1,
-              max_output_tokens: task === 'season-guide' ? 400 : 3_000,
-              thinking_config: { thinking_budget: task === 'season-guide' ? 0 : 512 }
+              max_output_tokens: 3_000,
+              thinking_config: { thinking_budget: 512 }
             }
           },
           metadata: { key: id }
@@ -231,6 +435,7 @@ async function handler(req, res) {
     }
 
     if (action === 'status') {
+      if (!apiKey) return res.status(503).json({ error: 'Article generation is not configured on the server.' });
       const operationName = cleanText(req.body?.operationName, 200);
       if (!/^batches\/[A-Za-z0-9_-]+$/.test(operationName)) {
         return res.status(400).json({ error: 'A valid Gemini batch operation name is required.' });
@@ -250,10 +455,17 @@ async function handler(req, res) {
         error: batch?.error || result?.error || null,
         batchStats
       };
+      if (req.body?.task === 'season-guide' && /(?:FAILED|CANCELLED|EXPIRED)$/.test(state)) {
+        const store = getSeasonGuideAdmin();
+        const detail = batch?.error?.message || result?.error?.message || state;
+        await persistSeasonGuideBatchFailure(store, operationName, detail);
+      }
       if (state.endsWith('SUCCEEDED')) {
-        const { results, total } = req.body?.task === 'season-guide'
+        const isSeasonGuide = req.body?.task === 'season-guide';
+        const { results, total } = isSeasonGuide
           ? normalizeSeasonGuideResults(batch, offset, limit)
           : normalizeResearchResults(batch, offset, limit);
+        if (isSeasonGuide) await persistSeasonGuideResults(getSeasonGuideAdmin(), operationName, results);
         response.results = results;
         response.totalResults = total;
         response.offset = offset;
@@ -265,7 +477,7 @@ async function handler(req, res) {
     return res.status(400).json({ error: 'Batch action must be "create" or "status".' });
   } catch (error) {
     const status = error.status === 429 ? 429 : error.status >= 400 && error.status < 500 ? error.status : 502;
-    return res.status(status).json({ error: { message: error.message || 'Gemini Batch API request failed.' } });
+    return res.status(status).json({ error: { message: getSeasonGuideStorageError(error) || error.message || 'Gemini Batch API request failed.' } });
   }
 }
 
