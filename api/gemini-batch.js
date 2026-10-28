@@ -1,6 +1,6 @@
 import { requireTrustedMutation } from '../server/api-security.js';
 import { withApiErrorLogging } from '../server/error-logger.js';
-import { getSeasonGuideAdmin, getSeasonGuideCacheKey, getSeasonGuideStorageError } from '../server/season-guide-store.js';
+import { getSeasonGuideClient, getSeasonGuideCacheKey, getSeasonGuideStorageError } from '../server/season-guide-store.js';
 import { getFactContext, getGroundedSources, getResearchPrompt, readText } from './generate-article.js';
 
 const GEMINI_BATCH_MODEL = process.env.GEMINI_BATCH_MODEL || 'gemini-2.5-flash';
@@ -132,7 +132,7 @@ const seasonGuideDbResult = (row, ids) => {
 };
 
 const createSeasonGuideBatch = async (apiKey, body) => {
-  const store = getSeasonGuideAdmin();
+  const store = getSeasonGuideClient();
   const forceIds = new Set(Array.isArray(body?.forceIds) ? body.forceIds.map((id) => String(id)) : []);
   const uniqueLocations = new Map();
   for (const location of body.locations) {
@@ -456,7 +456,7 @@ async function handler(req, res) {
         batchStats
       };
       if (req.body?.task === 'season-guide' && /(?:FAILED|CANCELLED|EXPIRED)$/.test(state)) {
-        const store = getSeasonGuideAdmin();
+        const store = getSeasonGuideClient();
         const detail = batch?.error?.message || result?.error?.message || state;
         await persistSeasonGuideBatchFailure(store, operationName, detail);
       }
@@ -465,7 +465,7 @@ async function handler(req, res) {
         const { results, total } = isSeasonGuide
           ? normalizeSeasonGuideResults(batch, offset, limit)
           : normalizeResearchResults(batch, offset, limit);
-        if (isSeasonGuide) await persistSeasonGuideResults(getSeasonGuideAdmin(), operationName, results);
+        if (isSeasonGuide) await persistSeasonGuideResults(getSeasonGuideClient(), operationName, results);
         response.results = results;
         response.totalResults = total;
         response.offset = offset;

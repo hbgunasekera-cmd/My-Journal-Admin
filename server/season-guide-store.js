@@ -14,20 +14,21 @@ export const getSeasonGuideCacheKey = (place) => {
   ]);
 };
 
-export const getSeasonGuideAdmin = () => {
+export const getSeasonGuideClient = () => {
   const url = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY
     || process.env.SUPABASE_SECRET_KEY
-    || process.env.SUPABASE_SERVICE_KEY;
-  if (!url || !serviceKey) {
+    || process.env.SUPABASE_SERVICE_KEY
+    || process.env.VITE_SUPABASE_KEY;
+  if (!url || !key) {
     const missing = !url
       ? 'Missing server-side Supabase project URL. Set SUPABASE_URL or VITE_SUPABASE_URL in the server environment.'
-      : 'Missing privileged server-side Supabase key. Set SUPABASE_SERVICE_ROLE_KEY or SUPABASE_SECRET_KEY in the server environment; do not expose it with a VITE_ prefix.';
+      : 'Missing Supabase API key. Set VITE_SUPABASE_KEY or a server-side service-role key in the environment.';
     const error = new Error(missing);
     error.status = 503;
     throw error;
   }
-  return createClient(url, serviceKey, {
+  return createClient(url, key, {
     auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false }
   });
 };
