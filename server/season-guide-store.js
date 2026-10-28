@@ -16,9 +16,16 @@ export const getSeasonGuideCacheKey = (place) => {
 
 export const getSeasonGuideAdmin = () => {
   const url = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+    || process.env.SUPABASE_SECRET_KEY
+    || process.env.SUPABASE_SERVICE_KEY;
   if (!url || !serviceKey) {
-    throw new Error('Season guide storage is not configured. Set VITE_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in the server environment.');
+    const missing = !url
+      ? 'Missing server-side Supabase project URL. Set SUPABASE_URL or VITE_SUPABASE_URL in the server environment.'
+      : 'Missing privileged server-side Supabase key. Set SUPABASE_SERVICE_ROLE_KEY or SUPABASE_SECRET_KEY in the server environment; do not expose it with a VITE_ prefix.';
+    const error = new Error(missing);
+    error.status = 503;
+    throw error;
   }
   return createClient(url, serviceKey, {
     auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false }

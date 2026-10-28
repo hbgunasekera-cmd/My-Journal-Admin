@@ -476,7 +476,9 @@ async function handler(req, res) {
 
     return res.status(400).json({ error: 'Batch action must be "create" or "status".' });
   } catch (error) {
-    const status = error.status === 429 ? 429 : error.status >= 400 && error.status < 500 ? error.status : 502;
+    const status = Number.isInteger(error.status) && error.status >= 400 && error.status < 600
+      ? error.status
+      : 502;
     return res.status(status).json({ error: { message: getSeasonGuideStorageError(error) || error.message || 'Gemini Batch API request failed.' } });
   }
 }
