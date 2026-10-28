@@ -4,7 +4,7 @@ import { withApiErrorLogging } from '../server/error-logger.js';
 const MAX_PROMPT_CHARS = 90_000;
 const MAX_OUTPUT_TOKENS = 16_384;
 
-const readText = (result) => (result?.candidates?.[0]?.content?.parts || [])
+export const readText = (result) => (result?.candidates?.[0]?.content?.parts || [])
   .map((part) => part?.text)
   .filter((part) => typeof part === 'string')
   .join('\n')
@@ -31,7 +31,7 @@ const sanitizeSources = (sources) => {
   }).slice(0, 12);
 };
 
-const getGroundedSources = (result) => {
+export const getGroundedSources = (result) => {
   const chunks = result?.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
   return sanitizeSources(chunks.map((chunk) => ({
     title: chunk?.web?.title,
@@ -39,7 +39,7 @@ const getGroundedSources = (result) => {
   })));
 };
 
-const getFactContext = (value) => {
+export const getFactContext = (value) => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const cleanString = (input) => typeof input === 'string'
     ? input.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 250)
@@ -64,7 +64,7 @@ const getFactContext = (value) => {
   };
 };
 
-const getResearchPrompt = (place) => {
+export const getResearchPrompt = (place) => {
   const coordinates = place.coordinates
     ? `${place.coordinates.latitude}, ${place.coordinates.longitude}`
     : 'not supplied';

@@ -2,6 +2,9 @@
   "functions": {
     "api/generate-article.js": {
       "maxDuration": 60
+    },
+    "api/gemini-batch.js": {
+      "maxDuration": 60
     }
   },
   "rewrites": [

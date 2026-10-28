@@ -1994,10 +1994,135 @@ function App() {
     };
   };
 
+  const runGeminiBatchArticleResearch = async (targets, operation, { stoppable = false } = {}) => {
+    const eligiblePlaces = targets.filter((place) => {
+      try {
+        getArticleLocationContext(place);
+        return Boolean(place?.id);
+      } catch {
+        return false;
+      }
+    });
+    const researchByPlaceId = new Map();
+    if (eligiblePlaces.length === 0) return { researchByPlaceId, paused: false };
+
+    const sortedIds = eligiblePlaces.map((place) => String(place.id)).sort();
+    const signature = sortedIds.join('|');
+    const storageKey = 'my-journal-admin-gemini-batch-jobs-v1';
+    const readSavedJobs = () => {
+      try {
+        const saved = JSON.parse(window.localStorage.getItem(storageKey) || '[]');
+        return Array.isArray(saved) ? saved : [];
+      } catch {
+        return [];
+      }
+    };
+    const saveJobs = (jobs) => {
+      try {
+        window.localStorage.setItem(storageKey, JSON.stringify(jobs.slice(-5)));
+      } catch {
+        // Batch processing can continue if local browser storage is unavailable.
+      }
+    };
+    const savedJobs = readSavedJobs();
+    let savedJob = savedJobs.find((job) => job.operation === operation && job.signature === signature);
+    const postBatchAction = async (body) => {
+      const response = await fetch('/api/gemini-batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || result.error) {
+        const message = typeof result.error === 'string'
+          ? result.error
+          : result.error?.message || `Gemini Batch request failed (${response.status}).`;
+        throw new Error(message);
+      }
+      return result;
+    };
+    let operationName = savedJob?.operationName;
+    let status;
+    if (!operationName) {
+      const locations = eligiblePlaces.map((place) => ({
+        id: String(place.id),
+        placeName: place.place_name,
+        category: place.category || '',
+        locality: place.locality,
+        latitude: place.latitude,
+        longitude: place.longitude
+      }));
+      status = await postBatchAction({
+        action: 'create',
+        displayName: `my-journal-admin-${operation.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${Date.now()}`,
+        locations
+      });
+      operationName = status.operationName;
+      savedJob = { operation, signature, operationName, targetIds: sortedIds, createdAt: new Date().toISOString() };
+      saveJobs([...savedJobs.filter((job) => job.signature !== signature), savedJob]);
+      triggerToast(`Gemini Batch research submitted for ${eligiblePlaces.length} locations. It may take up to 24 hours.`);
+    }
+
+    const setBatchProgress = (batchStatus) => {
+      updateBulkGenerationProgress({
+        batchState: batchStatus.state,
+        batchStats: batchStatus.batchStats || null
+      });
+    };
+    const terminal = (state) => /(?:SUCCEEDED|FAILED|CANCELLED|EXPIRED)$/.test(String(state || ''));
+    const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+    let pollResult = await postBatchAction({ action: 'status', operationName, offset: 0, limit: 25 });
+    setBatchProgress(pollResult);
+    while (!terminal(pollResult.state)) {
+      if (stoppable && bulkFactCheckStopRef.current) return { researchByPlaceId, paused: true };
+      await delay(30_000);
+      if (stoppable && bulkFactCheckStopRef.current) return { researchByPlaceId, paused: true };
+      pollResult = await postBatchAction({ action: 'status', operationName, offset: 0, limit: 25 });
+      setBatchProgress(pollResult);
+    }
+
+    if (!String(pollResult.state).endsWith('SUCCEEDED')) {
+      saveJobs(savedJobs.filter((job) => job.operationName !== operationName));
+      const detail = pollResult.error?.message || pollResult.error?.status || pollResult.state;
+      throw new Error(`Gemini Batch research ${pollResult.state.toLowerCase().replace(/_/g, ' ')}${detail ? `: ${detail}` : ''}.`);
+    }
+
+    const totalResults = Number(pollResult.totalResults) || eligiblePlaces.length;
+    let offset = 0;
+    let page = pollResult;
+    while (offset < totalResults) {
+      if (page?.results?.length) {
+        for (const result of page.results) {
+          if (result.success && result.key) {
+            researchByPlaceId.set(result.key, {
+              factEvidence: result.factEvidence,
+              factSources: result.factSources,
+              factCheckedAt: result.factCheckedAt
+            });
+          } else if (result.key) {
+            recordBulkGenerationError(operation, eligiblePlaces.find((place) => place.id === result.key)?.place_name || result.key, 1,
+              new Error(result.error || 'The batch research did not confirm this location.'),
+              'Will use the existing per-location research and AI fallback');
+          }
+        }
+        offset += page.results.length;
+      } else {
+        break;
+      }
+      if (offset >= totalResults || !page.hasMore) break;
+      page = await postBatchAction({ action: 'status', operationName, offset, limit: 25 });
+    }
+
+    saveJobs(savedJobs.filter((job) => job.operationName !== operationName));
+    updateBulkGenerationProgress({ batchState: 'RESULTS_READY', batchStats: pollResult.batchStats || null });
+    return { researchByPlaceId, paused: false };
+  };
+
   const generateTravelArticle = async (place, {
     articleOnly = false,
     quiet = false,
-    researchAttempt = 0
+    researchAttempt = 0,
+    precomputedResearch = null
   } = {}) => {
     let articleLocation;
     try {
@@ -2196,7 +2321,7 @@ Return only JSON matching the provided schema. Keep the information concise and 
     };
 
     try {
-      let researchData = null;
+      let researchData = precomputedResearch;
       let data = null;
       let aiJson = null;
       let generationMode = 'web_fact_checked';
@@ -2206,29 +2331,37 @@ Return only JSON matching the provided schema. Keep the information concise and 
         ...articleLocation,
         researchAttempt
       };
-      try {
-        const researchResponse = await fetch('/api/generate-article', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: requestBody.contents,
-            generationConfig: requestBody.generationConfig,
-            factCheck,
-            researchOnly: true
-          })
-        });
-        researchData = await researchResponse.json().catch(() => ({}));
-        if (!researchResponse.ok || researchData.error) {
-          const message = typeof researchData.error === 'string'
-            ? researchData.error
-            : researchData.error?.message || `Article fact-check research failed (${researchResponse.status}).`;
-          throw new Error(message);
+      if (researchData) {
+        if (typeof researchData.factEvidence !== 'string' || !researchData.factEvidence.trim()
+          || !Array.isArray(researchData.factSources) || researchData.factSources.length === 0) {
+          researchData = null;
+          aiOnlyFallbackReason = 'The Gemini Batch research result was incomplete.';
         }
-        if (typeof researchData.factEvidence !== 'string' || !researchData.factEvidence.trim()) {
-          throw new Error('The fact-check research step returned no usable evidence.');
+      } else {
+        try {
+          const researchResponse = await fetch('/api/generate-article', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: requestBody.contents,
+              generationConfig: requestBody.generationConfig,
+              factCheck,
+              researchOnly: true
+            })
+          });
+          researchData = await researchResponse.json().catch(() => ({}));
+          if (!researchResponse.ok || researchData.error) {
+            const message = typeof researchData.error === 'string'
+              ? researchData.error
+              : researchData.error?.message || `Article fact-check research failed (${researchResponse.status}).`;
+            throw new Error(message);
+          }
+          if (typeof researchData.factEvidence !== 'string' || !researchData.factEvidence.trim()) {
+            throw new Error('The fact-check research step returned no usable evidence.');
+          }
+        } catch (researchError) {
+          aiOnlyFallbackReason = researchError?.message || 'Web fact-check research failed.';
         }
-      } catch (researchError) {
-        aiOnlyFallbackReason = researchError?.message || 'Web fact-check research failed.';
       }
 
       const aiOnlyFallbackInstructions = `AI-ONLY FALLBACK MODE: Web fact-check research failed, timed out, or could not confidently match this place. Generate the complete article from your learned model knowledge only. Do not browse, search, cite, or rely on web sources. This instruction overrides earlier directions to use supplied web research.
@@ -2773,7 +2906,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
       ? `all ${targets.length} completed/visited articles, including ${alreadyFactChecked} already fact-checked`
       : `${targets.length} completed/visited articles that are not already fact-checked, skipping ${alreadyFactChecked} already checked`;
     const confirmed = window.confirm(
-      `Rebuild ${selectionDescription}?\nOnly article content changes, and only after successful generation.`
+      `Rebuild ${selectionDescription}?\nOnly article content changes after successful generation. Gemini Batch research is asynchronous and may take up to 24 hours. If you reload before it finishes, run the same selection again to resume it.`
     );
     setBulkFactCheckChoice(null);
     if (!confirmed) return;
@@ -2786,7 +2919,8 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
       total: targets.length,
       retryRound: 1,
       waitingForQuota: false,
-      waitingForRetry: false
+      waitingForRetry: false,
+      waitingForBatch: true
     });
     let rebuilt = 0;
     let retryCount = 0;
@@ -2806,6 +2940,16 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
     };
 
     try {
+      let researchByPlaceId = new Map();
+      try {
+        const batchResult = await runGeminiBatchArticleResearch(targets, 'Article fact-check', { stoppable: true });
+        researchByPlaceId = batchResult.researchByPlaceId;
+        if (batchResult.paused) pendingPlaces = [...targets];
+      } catch (batchError) {
+        recordBulkGenerationError('Article fact-check', 'Gemini Batch research', 1, batchError, 'Continuing with the existing per-location article flow');
+        triggerToast('Gemini Batch research could not be used. Continuing with the existing article process.');
+      }
+
       while (pendingPlaces.length > 0 && !bulkFactCheckStopRef.current) {
         retryRound += 1;
         const retryQueue = [];
@@ -2833,7 +2977,8 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
             const result = await generateTravelArticle(place, {
               articleOnly: true,
               quiet: true,
-              researchAttempt: attemptNumber - 1
+              researchAttempt: attemptNumber - 1,
+              precomputedResearch: researchByPlaceId.get(String(place.id)) || null
             });
             if (result === true) {
               rebuilt += 1;
@@ -3224,6 +3369,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
 
 
   const bulkGenerateArticles = async () => {
+    if (bulkFactCheckInProgressRef.current || bulkGenerationProgress?.running) return;
     // 1. Identify items currently missing their story narrative
     const targets = places.filter(p => p.status === 'done' && !p.ai_article?.story);
 
@@ -3231,57 +3377,69 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
       triggerToast("No pending articles found to process.");
       return;
     }
+    if (!window.confirm(`Generate articles for ${targets.length} completed locations using Gemini Batch research? Batch processing is asynchronous and may take up to 24 hours; articles are saved after research completes. If you reload before it finishes, run this action again to resume it.`)) return;
 
     startBulkGenerationProgress('Article generation', targets.length);
     triggerToast(`Processing ${targets.length} items...`);
+    bulkFactCheckStopRef.current = false;
 
     // 2. Sequential generation with automated safety cooldowns
     let completedCount = 0;
     const failedPlaces = new Set();
-    for (const place of targets) {
-      let success = false;
-      let attemptNumber = 0;
-      const placeKey = place.id || place.place_name;
-      while (!success) { // Keep trying until this specific place is done
-        attemptNumber += 1;
-        try {
-          await generateTravelArticle(place);
-          success = true; // Move to next place
-          failedPlaces.delete(placeKey);
-          completedCount += 1;
-          clearBulkGenerationErrorsForPlace('Article generation', place.place_name);
-          updateBulkGenerationProgress({ completed: completedCount, failed: failedPlaces.size });
-          await new Promise(r => setTimeout(r, 4000)); // 4s safety gap
-        } catch (err) {
-          const isQuotaError = /quota|429|rate.?limit|resource_exhausted/i.test(err?.message || '');
-          failedPlaces.add(placeKey);
-          updateBulkGenerationProgress({ completed: completedCount, failed: failedPlaces.size });
-          recordBulkGenerationError(
-            'Article generation',
-            place.place_name,
-            attemptNumber,
-            err,
-            isQuotaError ? 'Waiting for quota cooldown, then retrying' : 'Skipped for this run'
-          );
-          if (isQuotaError) {
-            triggerToast("Quota Full. Pausing for 65s...");
-            await new Promise(r => setTimeout(r, 65000)); // Wait for API reset window
-            // success remains false, so the 'while' loop will retry this 'place' again
-          } else {
-            triggerToast("Skipping due to non-quota error.");
-            success = true; // Skip to avoid infinite loop on bad data
+    try {
+      let researchByPlaceId = new Map();
+      try {
+        const batchResult = await runGeminiBatchArticleResearch(targets, 'Article generation');
+        researchByPlaceId = batchResult.researchByPlaceId;
+      } catch (batchError) {
+        recordBulkGenerationError('Article generation', 'Gemini Batch research', 1, batchError, 'Continuing with the existing per-location article flow');
+        triggerToast('Gemini Batch research could not be used. Continuing with the existing article process.');
+      }
+
+      for (const place of targets) {
+        let success = false;
+        let attemptNumber = 0;
+        const placeKey = place.id || place.place_name;
+        while (!success) { // Keep trying until this specific place is done
+          attemptNumber += 1;
+          try {
+            await generateTravelArticle(place, { precomputedResearch: researchByPlaceId.get(String(place.id)) || null });
+            success = true; // Move to next place
+            failedPlaces.delete(placeKey);
+            completedCount += 1;
+            clearBulkGenerationErrorsForPlace('Article generation', place.place_name);
+            updateBulkGenerationProgress({ completed: completedCount, failed: failedPlaces.size });
+            await new Promise(r => setTimeout(r, 4000)); // 4s safety gap
+          } catch (err) {
+            const isQuotaError = /quota|429|rate.?limit|resource_exhausted/i.test(err?.message || '');
+            failedPlaces.add(placeKey);
+            updateBulkGenerationProgress({ completed: completedCount, failed: failedPlaces.size });
+            recordBulkGenerationError(
+              'Article generation',
+              place.place_name,
+              attemptNumber,
+              err,
+              isQuotaError ? 'Waiting for quota cooldown, then retrying' : 'Skipped for this run'
+            );
+            if (isQuotaError) {
+              triggerToast("Quota Full. Pausing for 65s...");
+              await new Promise(r => setTimeout(r, 65000)); // Wait for API reset window
+              // success remains false, so the 'while' loop will retry this 'place' again
+            } else {
+              triggerToast("Skipping due to non-quota error.");
+              success = true; // Skip to avoid infinite loop on bad data
+            }
           }
         }
       }
+    } finally {
+      updateBulkGenerationProgress({ running: false });
+      if (typeof refreshAllData === 'function') refreshAllData();
     }
 
-    updateBulkGenerationProgress({ running: false });
     triggerToast("Bulk generation finished!");
 
     // 3. Global state sync to display newly built stories
-    if (typeof refreshAllData === 'function') {
-      refreshAllData();
-    }
   };
 
   /**
@@ -4644,7 +4802,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                 {/* ⚡ BULK ARTICLE GENERATOR */}
                 <button
                   onClick={bulkGenerateArticles}
-                  disabled={Boolean(bulkFactCheckProgress)}
+                  disabled={Boolean(bulkFactCheckProgress || bulkGenerationProgress?.running)}
                   className="flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all border bg-violet-50 border-violet-200 text-violet-600 hover:bg-violet-100 active:scale-95 shadow-sm disabled:opacity-60 disabled:cursor-wait"
                   title="Regenerate Articles for all visited locations"
                 >
@@ -4663,9 +4821,12 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                     }
                     bulkFactCheckArticles();
                   }}
+                  disabled={Boolean(bulkGenerationProgress?.running && !bulkFactCheckProgress)}
                   className="flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all border bg-cyan-50 border-cyan-200 text-cyan-700 hover:bg-cyan-100 active:scale-95 shadow-sm disabled:opacity-60 disabled:cursor-wait"
                   title={bulkFactCheckProgress
-                    ? 'Stop after the current article attempt'
+                    ? bulkFactCheckProgress.waitingForBatch
+                      ? 'Pause waiting; the Gemini Batch job continues in the background and can be resumed'
+                      : 'Stop after the current article attempt'
                     : 'Choose whether to rebuild all completed articles or only articles not yet fact-checked'}
                 >
                   <Icon
@@ -4676,6 +4837,8 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                     {bulkFactCheckProgress
                       ? bulkFactCheckProgress.stopping
                         ? 'Stopping…'
+                        : bulkFactCheckProgress.waitingForBatch
+                          ? 'Gemini Batch research'
                         : bulkFactCheckProgress.waitingForQuota
                           ? `Quota wait · retry ${bulkFactCheckProgress.retryRound}`
                           : bulkFactCheckProgress.waitingForRetry
@@ -6697,6 +6860,14 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                 <p className="text-xs text-slate-500 mt-1">
                   {bulkGenerationProgress?.operation || 'Bulk operation'} · {bulkGenerationLogs.length} unresolved error{bulkGenerationLogs.length === 1 ? '' : 's'} shown.
                 </p>
+                {bulkGenerationProgress?.batchState && (
+                  <p className="mt-1 text-[10px] font-semibold text-indigo-700">
+                    Gemini Batch research: {String(bulkGenerationProgress.batchState).replace(/^JOB_STATE_|^BATCH_STATE_/, '').toLowerCase().replace(/_/g, ' ')}
+                    {bulkGenerationProgress.batchStats?.pendingRequestCount != null
+                      ? ` · ${bulkGenerationProgress.batchStats.pendingRequestCount} pending`
+                      : ''}
+                  </p>
+                )}
               </div>
               <button
                 type="button"
