@@ -59,6 +59,69 @@ const getResultError = (response) => {
   return error?.message || error?.status || (typeof error === 'string' ? error : 'The research request failed in the batch.');
 };
 
+const getSeasonGuidePrompt = (place) => `Use Google Search to prepare a very concise, source-backed seasonal visit guide for this exact Sri Lankan pin. Search the place name with its category, locality, and coordinates; use the coordinates to identify the correct area and reject similar-name places elsewhere. Prefer Sri Lanka Department of Meteorology, government/tourism or conservation sources, and reliable local climate sources. Use the local side of the island, highland/rain-shadow effects, monsoon and inter-monsoon rainfall, cloud/light, sunshine, and wind; do not copy one island-wide month range to every place.
+Name: ${place.placeName}; category: ${place.category || 'Location'}; locality: ${place.locality}; coordinates: ${place.coordinates.latitude},${place.coordinates.longitude}.
+For waterfalls, give a likely higher-flow rainfall window and separately choose the best photography compromise: strong flow with a better chance of dry, calmer, clearer periods for phone/drone images. Rainfall is only a flow clue, not measured discharge; never promise flyable weather or drone permission. For every other category, favor the category's appealing soft/charming light while avoiding persistently wet or windy periods. Prefer sunrise to about 08:00 and late afternoon from about 16:30 to sunset for softer light; avoid harsh midday light, adjusting these guide times to the local weather and terrain. Recommend month ranges, not unsupported exact dates. Say if a window is an area-level estimate rather than verified for the exact feature. Keep every field brief (one sentence, about 20 words maximum); do not write an article. Return only one JSON object with these string keys: location_match (CONFIRMED, AREA_CLIMATE_ONLY, or UNCONFIRMED), resolved_area, primary_window, secondary_window, waterfall_flow_window (empty if not a waterfall), photo_window, rationale, rain_and_monsoon, sky_and_light, wind_and_drone, best_time_of_day, confidence (high, medium, or low). If the exact feature is obscure but the coordinate and locality agree, use AREA_CLIMATE_ONLY and source the nearest relevant climate area. If the pin conflicts with the supplied locality, use UNCONFIRMED. Do not invent measurements, exact flow, weather forecasts, safety, or access rules.`;
+
+const parseSeasonGuideJson = (text) => {
+  const cleaned = String(text || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+  try {
+    return JSON.parse(cleaned);
+  } catch {
+    const first = cleaned.indexOf('{');
+    const last = cleaned.lastIndexOf('}');
+    if (first >= 0 && last > first) return JSON.parse(cleaned.slice(first, last + 1));
+    throw new Error('The Gemini response was not valid season-guide JSON.');
+  }
+};
+
+const normalizeSeasonGuideResults = (batch, offset, limit) => {
+  const inlineResponses = getInlineResponses(batch);
+  const total = inlineResponses.length;
+  const results = inlineResponses.slice(offset, offset + limit).map((inline, pageIndex) => {
+    const index = offset + pageIndex;
+    const key = cleanText(inline?.metadata?.key || inline?.metadata?.id || '', 120) || String(index);
+    const response = inline?.response || inline?.output?.response;
+    if (!response) return { key, success: false, error: getResultError(inline) };
+
+    const sources = getGroundedSources(response).slice(0, 5);
+    try {
+      const parsed = parseSeasonGuideJson(readText(response));
+      const guide = {
+        locationMatch: cleanText(parsed?.location_match, 40).toUpperCase(),
+        resolvedArea: cleanText(parsed?.resolved_area, 180),
+        primaryWindow: cleanText(parsed?.primary_window, 100),
+        secondaryWindow: cleanText(parsed?.secondary_window, 100),
+        waterfallFlowWindow: cleanText(parsed?.waterfall_flow_window, 100),
+        photoWindow: cleanText(parsed?.photo_window, 100),
+        rationale: cleanText(parsed?.rationale, 500),
+        rainAndMonsoon: cleanText(parsed?.rain_and_monsoon, 500),
+        skyAndLight: cleanText(parsed?.sky_and_light, 500),
+        windAndDrone: cleanText(parsed?.wind_and_drone, 500),
+        bestTimeOfDay: cleanText(parsed?.best_time_of_day, 240),
+        confidence: cleanText(parsed?.confidence, 20).toLowerCase()
+      };
+
+      if (!['CONFIRMED', 'AREA_CLIMATE_ONLY'].includes(guide.locationMatch)) {
+        return { key, success: false, error: 'The pin and supplied locality could not be reconciled to a reliable local climate source.' };
+      }
+      if (!guide.primaryWindow || !guide.photoWindow || !guide.rainAndMonsoon || !guide.skyAndLight || sources.length === 0) {
+        return { key, success: false, error: 'The season research did not return a complete recommendation with grounded sources.' };
+      }
+      return {
+        key,
+        success: true,
+        guide,
+        sources,
+        researchedAt: batch?.endTime || batch?.end_time || batch?.updateTime || batch?.update_time || new Date().toISOString()
+      };
+    } catch (error) {
+      return { key, success: false, error: error?.message || 'The season research response could not be read.' };
+    }
+  });
+  return { results, total };
+};
+
 const normalizeResearchResults = (batch, offset, limit) => {
   const inlineResponses = getInlineResponses(batch);
   const total = inlineResponses.length;
@@ -117,6 +180,7 @@ async function handler(req, res) {
       if (!Array.isArray(locations) || locations.length === 0 || locations.length > MAX_BATCH_REQUESTS) {
         return res.status(400).json({ error: `Provide between 1 and ${MAX_BATCH_REQUESTS} locations for batch research.` });
       }
+      const task = req.body?.task === 'season-guide' ? 'season-guide' : 'article-research';
       const requests = [];
       for (const location of locations) {
         const id = cleanText(location?.id, 120);
@@ -126,12 +190,12 @@ async function handler(req, res) {
         }
         requests.push({
           request: {
-            contents: [{ role: 'user', parts: [{ text: getResearchPrompt(factContext) }] }],
+            contents: [{ role: 'user', parts: [{ text: task === 'season-guide' ? getSeasonGuidePrompt(factContext) : getResearchPrompt(factContext) }] }],
             tools: [{ google_search: {} }],
             generation_config: {
               temperature: 0.1,
-              max_output_tokens: 3_000,
-              thinking_config: { thinking_budget: 512 }
+              max_output_tokens: task === 'season-guide' ? 400 : 3_000,
+              thinking_config: { thinking_budget: task === 'season-guide' ? 0 : 512 }
             }
           },
           metadata: { key: id }
@@ -140,7 +204,7 @@ async function handler(req, res) {
 
       const requestBody = {
         batch: {
-          display_name: cleanText(req.body?.displayName || 'my-journal-admin-article-research', 128),
+          display_name: cleanText(req.body?.displayName || `my-journal-admin-${task}`, 128),
           input_config: { requests: { requests } }
         }
       };
@@ -161,6 +225,7 @@ async function handler(req, res) {
         operationName,
         state: getBatchState(result, batch),
         requestCount: requests.length,
+        task,
         displayName: batch?.displayName || batch?.display_name || requestBody.batch.display_name
       });
     }
@@ -186,7 +251,9 @@ async function handler(req, res) {
         batchStats
       };
       if (state.endsWith('SUCCEEDED')) {
-        const { results, total } = normalizeResearchResults(batch, offset, limit);
+        const { results, total } = req.body?.task === 'season-guide'
+          ? normalizeSeasonGuideResults(batch, offset, limit)
+          : normalizeResearchResults(batch, offset, limit);
         response.results = results;
         response.totalResults = total;
         response.offset = offset;

@@ -1,6 +1,14 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import { generateCleanSlug } from './utils.js';
+import {
+  clearSeasonGuideCache,
+  getSeasonGuideCacheKey,
+  readSeasonGuideCache,
+  renderSeasonGuidePopup,
+  renderSeasonGuideTooltip,
+  writeSeasonGuideCache
+} from './seasonGuide.js';
 
 // --- Leaflet & Routing ---
 import L from 'leaflet';
@@ -228,6 +236,140 @@ const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (character
   "'": '&#39;'
 })[character]);
 
+const SEASON_GUIDE_BATCH_STORAGE_KEY = 'my-journal-admin-season-guide-batches-v1';
+const seasonGuideBatchRuns = new Map();
+
+const getSeasonGuideSignature = (places) => JSON.stringify(
+  [...new Set(places.map((place) => getSeasonGuideCacheKey(place)))].sort()
+);
+
+const readSeasonGuideBatchJobs = () => {
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(SEASON_GUIDE_BATCH_STORAGE_KEY) || '[]');
+    return Array.isArray(saved) ? saved : [];
+  } catch {
+    return [];
+  }
+};
+
+const writeSeasonGuideBatchJobs = (jobs) => {
+  try {
+    window.localStorage.setItem(SEASON_GUIDE_BATCH_STORAGE_KEY, JSON.stringify(jobs.slice(-5)));
+  } catch {
+    // Research can continue when browser storage is unavailable.
+  }
+};
+
+const clearSeasonGuideBatchJob = (places) => {
+  const signature = getSeasonGuideSignature(places);
+  writeSeasonGuideBatchJobs(readSeasonGuideBatchJobs().filter((job) => job.signature !== signature));
+};
+
+const executeGeminiSeasonGuideBatch = async (places, publish) => {
+  const signature = getSeasonGuideSignature(places);
+  const savedJobs = readSeasonGuideBatchJobs();
+  let savedJob = savedJobs.find((job) => job.signature === signature);
+  const post = async (body) => {
+    const response = await fetch('/api/gemini-batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || result.error) {
+      const message = typeof result.error === 'string' ? result.error : result.error?.message;
+      throw new Error(message || `Season research request failed (${response.status}).`);
+    }
+    return result;
+  };
+
+  let operationName = savedJob?.operationName;
+  if (!operationName) {
+    const created = await post({
+      action: 'create',
+      task: 'season-guide',
+      displayName: `my-journal-admin-season-guide-${Date.now()}`,
+      locations: places.map((place) => ({
+        id: String(place.id),
+        placeName: place.place_name,
+        category: place.category || 'Location',
+        locality: place.locality,
+        latitude: place.latitude,
+        longitude: place.longitude
+      }))
+    });
+    operationName = created.operationName;
+    savedJob = { signature, operationName, targetIds: places.map((place) => String(place.id)), createdAt: new Date().toISOString() };
+    writeSeasonGuideBatchJobs([...savedJobs.filter((job) => job.signature !== signature), savedJob]);
+  }
+
+  const terminal = (state) => /(?:SUCCEEDED|FAILED|CANCELLED|EXPIRED)$/.test(String(state || ''));
+  const updateProgress = (status) => {
+    const stats = status.batchStats || {};
+    const completed = Number(stats.successfulRequestCount ?? stats.succeededRequestCount ?? stats.successful_request_count ?? 0);
+    const failed = Number(stats.failedRequestCount ?? stats.failed_request_count ?? 0);
+    publish({ type: 'progress', completed, failed, state: status.state });
+  };
+  const pause = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+  let status = await post({ action: 'status', task: 'season-guide', operationName, offset: 0, limit: 25 });
+  updateProgress(status);
+  while (!terminal(status.state)) {
+    await pause(30_000);
+    status = await post({ action: 'status', task: 'season-guide', operationName, offset: 0, limit: 25 });
+    updateProgress(status);
+  }
+
+  if (!String(status.state).endsWith('SUCCEEDED')) {
+    writeSeasonGuideBatchJobs(readSeasonGuideBatchJobs().filter((job) => job.operationName !== operationName));
+    const detail = status.error?.message || status.error?.status || status.state;
+    throw new Error(`Gemini season research ${String(status.state).toLowerCase().replace(/_/g, ' ')}${detail ? `: ${detail}` : ''}.`);
+  }
+
+  const results = new Map();
+  const totalResults = Number(status.totalResults) || places.length;
+  let offset = 0;
+  let page = status;
+  while (offset < totalResults) {
+    for (const result of page.results || []) {
+      if (!result.key) continue;
+      if (result.success) {
+        const guide = { ...result.guide, sources: result.sources, researchedAt: result.researchedAt };
+        results.set(result.key, guide);
+        publish({ type: 'guide', key: result.key, guide });
+      } else {
+        const guide = { error: result.error || 'Season research did not return a usable result.' };
+        results.set(result.key, guide);
+        publish({ type: 'guide', key: result.key, guide });
+      }
+    }
+    offset += (page.results || []).length;
+    if (offset >= totalResults || !page.hasMore || page.results?.length === 0) break;
+    page = await post({ action: 'status', task: 'season-guide', operationName, offset, limit: 25 });
+  }
+
+  writeSeasonGuideBatchJobs(readSeasonGuideBatchJobs().filter((job) => job.operationName !== operationName));
+  return results;
+};
+
+const subscribeToGeminiSeasonGuideBatch = (places, listener) => {
+  const signature = getSeasonGuideSignature(places);
+  let run = seasonGuideBatchRuns.get(signature);
+  if (!run) {
+    const listeners = new Set();
+    const publish = (event) => listeners.forEach((subscriber) => subscriber(event));
+    const promise = executeGeminiSeasonGuideBatch(places, publish)
+      .finally(() => seasonGuideBatchRuns.delete(signature));
+    run = { listeners, promise };
+    seasonGuideBatchRuns.set(signature, run);
+  }
+  run.listeners.add(listener);
+  return {
+    promise: run.promise,
+    unsubscribe: () => run.listeners.delete(listener)
+  };
+};
+
 const getCoordinates = (point) => {
   const firstValidNumber = (...values) => values
     .map((value) => Number.parseFloat(value))
@@ -394,6 +536,9 @@ function App() {
   const [sharesData, setSharesData] = useState([]);
   const [videoLikesData, setVideoLikesData] = useState([]);
   const [videoSharesData, setVideoSharesData] = useState([]);
+  const [seasonGuides, setSeasonGuides] = useState({});
+  const [seasonGuideProgress, setSeasonGuideProgress] = useState({ completed: 0, failed: 0, total: 0, running: false });
+  const [seasonGuideRetryToken, setSeasonGuideRetryToken] = useState(0);
   const [subscribersData, setSubscribersData] = useState([]);
   const [expandedLikeLoc, setExpandedLikeLoc] = useState(null);
   const [expandedShareLoc, setExpandedShareLoc] = useState(null);
@@ -485,6 +630,21 @@ function App() {
     )));
   };
 
+  const retryFailedSeasonGuides = () => {
+    const failedPlaces = pendingSeasonGuidePlaces.filter((place) => (
+      seasonGuides[place.id]?.error || readSeasonGuideCache(place)?.error
+    ));
+    if (failedPlaces.length === 0) return;
+    failedPlaces.forEach(clearSeasonGuideCache);
+    clearSeasonGuideBatchJob(failedPlaces);
+    setSeasonGuides((current) => {
+      const next = { ...current };
+      failedPlaces.forEach((place) => delete next[place.id]);
+      return next;
+    });
+    setSeasonGuideRetryToken((current) => current + 1);
+  };
+
   // --- Active Trip & Route Planning States ---
   const [selectedTrip, setSelectedTrip] = useState([]);
   const [activeRouteName, setActiveRouteName] = useState('');
@@ -511,8 +671,130 @@ function App() {
   const bulkFactCheckInProgressRef = useRef(false);
   const bulkFactCheckStopRef = useRef(false);
   const bulkGenerationHasShownLogRef = useRef(false);
+  const seasonGuideStateRef = useRef({});
   const REFRESH_INTERVAL_SECONDS = 600;
   const [timeLeft, setTimeLeft] = useState(REFRESH_INTERVAL_SECONDS);
+
+  seasonGuideStateRef.current = seasonGuides;
+
+  const pendingSeasonGuidePlaces = places.filter((place) => place?.status === 'pending');
+  const pendingSeasonGuideSignature = pendingSeasonGuidePlaces
+    .map((place) => [place.id, place.latitude, place.longitude, place.category, place.locality, place.place_name].join(':'))
+    .join('|');
+
+  // Research each distinct pending pin once, cache the result, and reuse it for duplicate records.
+  useEffect(() => {
+    if (!isLoggedIn || pendingSeasonGuidePlaces.length === 0) {
+      setSeasonGuideProgress({ completed: 0, failed: 0, total: 0, running: false });
+      return undefined;
+    }
+
+    let cancelled = false;
+    const pending = [...pendingSeasonGuidePlaces];
+    const cached = {};
+    const targets = [];
+    const targetByIdentity = new Map();
+    let completed = 0;
+    let failed = 0;
+
+    pending.forEach((place) => {
+      const cachedGuide = readSeasonGuideCache(place);
+      if (cachedGuide) {
+        cached[place.id] = cachedGuide;
+        completed += 1;
+        if (cachedGuide.error) failed += 1;
+        return;
+      }
+      const hasCoordinateValues = place.latitude !== null && place.latitude !== undefined
+        && String(place.latitude).trim() !== '' && place.longitude !== null && place.longitude !== undefined
+        && String(place.longitude).trim() !== '';
+      const latitude = hasCoordinateValues ? Number(place.latitude) : Number.NaN;
+      const longitude = hasCoordinateValues ? Number(place.longitude) : Number.NaN;
+      const hasCoords = Number.isFinite(latitude) && latitude >= -90 && latitude <= 90
+        && Number.isFinite(longitude) && longitude >= -180 && longitude <= 180;
+      if (!place.place_name || !place.locality || !hasCoords) {
+        const error = {
+          error: 'Add this location’s name, locality, and saved map coordinates to research its season.',
+          location: [place.place_name, place.locality, 'Sri Lanka'].filter(Boolean).join(' · ')
+        };
+        cached[place.id] = error;
+        writeSeasonGuideCache(place, error);
+        completed += 1;
+        failed += 1;
+        return;
+      }
+      const identity = getSeasonGuideCacheKey(place);
+      if (!targetByIdentity.has(identity)) {
+        targetByIdentity.set(identity, place);
+        targets.push(place);
+      }
+    });
+
+    if (Object.keys(cached).length > 0) setSeasonGuides((current) => ({ ...current, ...cached }));
+    setSeasonGuideProgress({ completed, failed, total: pending.length, running: targets.length > 0 });
+    if (targets.length === 0) return undefined;
+
+    const subscription = subscribeToGeminiSeasonGuideBatch(targets, (event) => {
+      if (cancelled) return;
+      if (event.type === 'progress') {
+        const reportedCompleted = Number(event.completed) || 0;
+        const reportedFailed = Number(event.failed) || 0;
+        setSeasonGuideProgress((current) => ({
+          ...current,
+          completed: Math.min(current.total, Math.max(current.completed, completed + reportedCompleted)),
+          failed: Math.min(current.total, Math.max(current.failed, failed + reportedFailed)),
+          running: true,
+          state: event.state
+        }));
+      } else if (event.type === 'guide') {
+        const place = targets.find((candidate) => String(candidate.id) === String(event.key));
+        if (!place) return;
+        writeSeasonGuideCache(place, event.guide);
+        const matchingPlaces = pending.filter((candidate) => getSeasonGuideCacheKey(candidate) === getSeasonGuideCacheKey(place));
+        setSeasonGuides((current) => ({
+          ...current,
+          ...Object.fromEntries(matchingPlaces.map((candidate) => [candidate.id, event.guide]))
+        }));
+      }
+    });
+
+    void subscription.promise.then((results) => {
+      if (cancelled) return;
+      let batchFailed = 0;
+      targets.forEach((place) => {
+        const result = results.get(String(place.id));
+        const guide = result || { error: 'The batch completed without a season guide for this pin.' };
+        const matchingPlaces = pending.filter((candidate) => getSeasonGuideCacheKey(candidate) === getSeasonGuideCacheKey(place));
+        if (guide.error) batchFailed += matchingPlaces.length;
+        writeSeasonGuideCache(place, guide);
+        setSeasonGuides((current) => ({
+          ...current,
+          ...Object.fromEntries(matchingPlaces.map((candidate) => [candidate.id, guide]))
+        }));
+      });
+      setSeasonGuideProgress({ completed: pending.length, failed: failed + batchFailed, total: pending.length, running: false });
+    }).catch((error) => {
+      if (cancelled) return;
+      let batchFailed = 0;
+      targets.forEach((place) => {
+        const guide = { error: String(error?.message || 'The season research batch failed.') };
+        const matchingPlaces = pending.filter((candidate) => getSeasonGuideCacheKey(candidate) === getSeasonGuideCacheKey(place));
+        batchFailed += matchingPlaces.length;
+        writeSeasonGuideCache(place, guide);
+        setSeasonGuides((current) => ({
+          ...current,
+          ...Object.fromEntries(matchingPlaces.map((candidate) => [candidate.id, guide]))
+        }));
+      });
+      setSeasonGuideProgress({ completed: pending.length, failed: failed + batchFailed, total: pending.length, running: false });
+    });
+
+    return () => {
+      cancelled = true;
+      subscription.unsubscribe();
+    };
+    // pendingSeasonGuideSignature captures every field used by the request and recommendation.
+  }, [isLoggedIn, pendingSeasonGuideSignature, seasonGuideRetryToken]);
 
   // --- 1. GPS & DATA INITIALIZATION ---
 
@@ -723,7 +1005,7 @@ function App() {
     markersLayer.current.clearLayers();
 
     // Helper: Renders customizable Leaflet circle markers
-    const addDot = (lat, lng, color, title, subtitle, routePlanName = null) => {
+    const addDot = (lat, lng, color, title, subtitle, routePlanName = null, seasonGuidePlace = null) => {
       const pLat = parseFloat(lat);
       const pLng = parseFloat(lng);
       if (isNaN(pLat) || isNaN(pLng)) return;
@@ -740,7 +1022,9 @@ function App() {
       const safeTitle = escapeHtml(title);
       const safeSubtitle = escapeHtml(subtitle);
       const safeRoutePlanName = escapeHtml(routePlanName);
-      const tooltipContent = routePlanName ? `${safeTitle} (Plan: ${safeRoutePlanName})` : safeTitle;
+      const tooltipContent = seasonGuidePlace
+        ? renderSeasonGuideTooltip(seasonGuidePlace, seasonGuideStateRef.current[seasonGuidePlace.id])
+        : routePlanName ? `${safeTitle} (Plan: ${safeRoutePlanName})` : safeTitle;
       marker.bindTooltip(tooltipContent, {
         direction: 'top',
         sticky: true,
@@ -748,7 +1032,7 @@ function App() {
         offset: [0, -5]
       });
 
-      marker.bindPopup(`
+      const popupBaseHtml = `
       <div style="padding: 4px; font-family: sans-serif; min-width: 120px;">
         <b style="font-size: 11px; color: ${color}; text-transform: uppercase;">${safeTitle}</b><br/>
         <span style="font-size: 9px; color: #64748b; font-weight: bold; text-transform: uppercase;">${safeSubtitle}</span>
@@ -759,7 +1043,10 @@ function App() {
           </div>
         ` : ''}
       </div>
-    `);
+    `;
+      marker._seasonGuidePlace = seasonGuidePlace;
+      marker._seasonGuidePopupBaseHtml = popupBaseHtml;
+      marker.bindPopup(`${popupBaseHtml}${seasonGuidePlace ? renderSeasonGuidePopup(seasonGuidePlace, seasonGuideStateRef.current[seasonGuidePlace.id]) : ''}`);
 
       marker.addTo(markersLayer.current);
     };
@@ -781,7 +1068,8 @@ function App() {
         color,
         p.place_name || 'Location',
         p.category || 'Point of Interest',
-        reservedRouteName
+        reservedRouteName,
+        p.status === 'pending' ? p : null
       );
     });
 
@@ -804,6 +1092,19 @@ function App() {
     };
 
   }, [mapReady, activeTab, filteredPlaces, places, savedRoutes, searchTerm]);
+
+  useEffect(() => {
+    if (!mapReady) return;
+    markersLayer.current.eachLayer((marker) => {
+      const place = marker?._seasonGuidePlace;
+      if (!place) return;
+      const guide = seasonGuides[place.id];
+      marker.setTooltipContent(renderSeasonGuideTooltip(place, guide));
+      if (marker.getPopup()) {
+        marker.setPopupContent(`${marker._seasonGuidePopupBaseHtml || ''}${renderSeasonGuidePopup(place, guide)}`);
+      }
+    });
+  }, [seasonGuides, mapReady]);
 
   useEffect(() => {
 
@@ -5464,6 +5765,40 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
           {/* MAP CONTAINER - Top on Mobile (40%), Right on Desktop */}
           <section className="w-full flex-[0.4] md:flex-1 relative bg-slate-100 order-1 md:order-2 min-h-[300px]">
             <div id="map-container" className="w-full h-full"></div>
+            {seasonGuideProgress.total > 0 && (
+              <div className="absolute left-3 top-3 z-[1000] w-[min(340px,calc(100%-24px))] rounded-xl border border-indigo-100 bg-white/95 p-3 shadow-lg backdrop-blur-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-[10px] font-black uppercase tracking-wide text-indigo-900">Season Guide · Pending Pins</p>
+                  <span className="shrink-0 text-[10px] font-bold text-slate-600">
+                    {seasonGuideProgress.completed}/{seasonGuideProgress.total}
+                  </span>
+                </div>
+                <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100">
+                  <div
+                    className="h-full rounded-full bg-indigo-500 transition-all"
+                    style={{ width: `${seasonGuideProgress.total > 0 ? Math.min(100, Math.round((seasonGuideProgress.completed / seasonGuideProgress.total) * 100)) : 0}%` }}
+                  />
+                </div>
+                <div className="mt-2 flex items-center justify-between gap-2">
+                  <p className="text-[9px] leading-4 text-slate-500">
+                    {seasonGuideProgress.running
+                      ? `AI climate research is running${seasonGuideProgress.state ? ` (${String(seasonGuideProgress.state).replace(/^JOB_STATE_|^BATCH_STATE_/, '').toLowerCase().replace(/_/g, ' ')})` : ''}. Results are saved for this browser.`
+                      : seasonGuideProgress.failed > 0
+                        ? `${seasonGuideProgress.failed} guide${seasonGuideProgress.failed === 1 ? '' : 's'} need a retry or location details.`
+                        : 'Guides are ready. Cached guides are reused for one year unless you retry them.'}
+                  </p>
+                  {seasonGuideProgress.failed > 0 && !seasonGuideProgress.running && (
+                    <button
+                      type="button"
+                      onClick={retryFailedSeasonGuides}
+                      className="shrink-0 rounded-lg bg-rose-50 px-2 py-1 text-[8px] font-black uppercase text-rose-700 hover:bg-rose-100"
+                    >
+                      Retry failed
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
           </section>
 
           {/* SIDEBAR / BOTTOM PANEL - Fixed Container with 3 Vertically Split Scrollable Sections */}
