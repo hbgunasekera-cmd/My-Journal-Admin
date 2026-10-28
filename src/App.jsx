@@ -867,6 +867,7 @@ function App() {
   // --- Active Trip & Route Planning States ---
   const [selectedTrip, setSelectedTrip] = useState([]);
   const [activeRouteName, setActiveRouteName] = useState('');
+  const [activeSavedRouteId, setActiveSavedRouteId] = useState(null);
 
   // --- Location & Add Location Flow States ---
   const [userCoords, setUserCoords] = useState(null);
@@ -898,6 +899,15 @@ function App() {
     .map((route) => getRouteSeasonGuideContext(route, places))
     .filter(Boolean);
   const failedSeasonGuideCount = savedRoutes.filter((route) => route.seasonal_guide?.status === 'error').length;
+  const activeSavedRoute = activeSavedRouteId
+    ? savedRoutes.find((route) => String(route.id) === String(activeSavedRouteId)) || null
+    : null;
+  const activeSeasonGuide = activeSavedRoute?.seasonal_guide && typeof activeSavedRoute.seasonal_guide === 'object'
+    ? activeSavedRoute.seasonal_guide
+    : null;
+  const activeSeasonGuideArea = activeSeasonGuide?.mainArea
+    || getRouteSeasonGuideContext(activeSavedRoute, places)?.request.mainArea
+    || '';
   const seasonGuideResearchSignature = JSON.stringify(routeSeasonGuideContexts.map((context) => ({
     id: context.id,
     request: context.request
@@ -4142,6 +4152,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
       await refreshAllData();
       setSelectedTrip([]);
       setActiveRouteName(''); // Reset active route name upon saving
+      setActiveSavedRouteId(null);
       triggerToast("Route saved successfully!");
     } catch (err) {
       console.error("Save Route Error:", err);
@@ -4169,7 +4180,8 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
           place_name: waypoint.place_name || waypoint.n || "Saved Waypoint",
           latitude: coordinates.lat,
           longitude: coordinates.lng,
-          category: waypoint.category || "Location"
+          category: waypoint.category || "Location",
+          locality: waypoint.locality || ''
         }];
       });
 
@@ -4180,6 +4192,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
 
       setSelectedTrip(formattedTrip);
       setActiveRouteName(route.route_name || ""); // Track and display active route name
+      setActiveSavedRouteId(String(route.id));
       triggerToast(`Loaded "${route.route_name}" into active trip!`);
     } catch (err) {
       console.error("Load Route Error:", err);
@@ -6046,6 +6059,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                     onClick={() => {
                       setSelectedTrip([]);
                       setActiveRouteName('');
+                      setActiveSavedRouteId(null);
                       if (routingControl?.current && mapRef?.current) {
                         mapRef.current.removeControl(routingControl.current);
                       }
@@ -6062,6 +6076,73 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
 
               {/* Active Trip Scrollable Body */}
               <div className="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar">
+                {activeSavedRoute && selectedTrip.length > 0 && (
+                  <section className="rounded-xl border border-sky-200 bg-sky-50/80 px-2.5 py-2 shadow-sm">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-[9px] font-black uppercase tracking-wide text-sky-800">Trip season guide</p>
+                      {activeSeasonGuideArea && (
+                        <span className="truncate text-[8px] font-bold text-slate-500">{activeSeasonGuideArea}</span>
+                      )}
+                    </div>
+                    {activeSeasonGuide?.status === 'ready' ? (
+                      <div className="mt-1 space-y-0.5">
+                        <p className="text-[10px] leading-4 text-slate-700">
+                          <b>Best period:</b> {activeSeasonGuide.primaryWindow || 'Recommendation unavailable'}
+                        </p>
+                        {activeSeasonGuide.secondaryWindow && (
+                          <p className="text-[9px] leading-4 text-slate-600">
+                            <b>Alternative:</b> {activeSeasonGuide.secondaryWindow}
+                          </p>
+                        )}
+                        {activeSeasonGuide.rationale && (
+                          <p className="text-[9px] leading-4 text-slate-600">{activeSeasonGuide.rationale}</p>
+                        )}
+                        {activeSeasonGuide.sources?.length > 0 ? (
+                          <p className="flex flex-wrap gap-x-2 border-t border-sky-100 pt-1 text-[8px]">
+                            <b className="text-slate-600">Sources:</b>
+                            {activeSeasonGuide.sources.slice(0, 2).map((source, sourceIndex) => {
+                              let safeUrl = null;
+                              try {
+                                const parsedUrl = new URL(source?.url);
+                                if (['http:', 'https:'].includes(parsedUrl.protocol)) safeUrl = parsedUrl.href;
+                              } catch {
+                                safeUrl = null;
+                              }
+                              return safeUrl ? (
+                                <a key={safeUrl + '-' + sourceIndex} href={safeUrl} target="_blank" rel="noopener noreferrer" className="font-bold text-indigo-600 underline">
+                                  {source.title || 'Source ' + (sourceIndex + 1)}
+                                </a>
+                              ) : null;
+                            })}
+                          </p>
+                        ) : activeSeasonGuide.sourceStatus !== 'grounded' ? (
+                          <p className="border-t border-sky-100 pt-1 text-[8px] leading-3 text-slate-500">
+                            {activeSeasonGuide.sourceStatus === 'search_used_no_citations'
+                              ? 'Search ran, but citation links were not returned.'
+                              : 'AI seasonal estimate; citation links were unavailable.'}
+                          </p>
+                        ) : null}
+                      </div>
+                    ) : activeSeasonGuide?.status === 'error' ? (
+                      <div className="mt-1 flex items-start justify-between gap-2 text-[9px] leading-4 text-rose-700">
+                        <span className="min-w-0">{activeSeasonGuide.error || 'Season guide research failed.'}</span>
+                        <button
+                          type="button"
+                          onClick={() => retryFailedSeasonGuides(activeSavedRoute.id)}
+                          disabled={seasonGuideProgress.running}
+                          className="shrink-0 font-black uppercase disabled:opacity-50"
+                        >Retry</button>
+                      </div>
+                    ) : (
+                      <p className="mt-1 text-[9px] leading-4 text-slate-600">
+                        Researching the best travel period for this route area…
+                      </p>
+                    )}
+                    <p className="mt-1 border-t border-sky-100 pt-1 text-[8px] text-slate-400">
+                      Seasonal guidance only; conditions can vary and this is not a forecast or drone clearance.
+                    </p>
+                  </section>
+                )}
                 <DragDropContext onDragEnd={handleDragEnd}>
                   <Droppable droppableId="trip-planner-list">
                     {(provided) => (
