@@ -300,14 +300,39 @@ const executeGeminiSeasonGuideBatch = async (places, publish, forceIds = []) => 
   };
 
   const terminal = (state) => /(?:SUCCEEDED|FAILED|CANCELLED|EXPIRED)$/.test(String(state || ''));
-  const updateProgress = (status, completedBase, failedBase) => {
-    const stats = status.batchStats || {};
-    const completed = Number(stats.successfulRequestCount ?? stats.succeededRequestCount ?? stats.successful_request_count ?? 0);
-    const failed = Number(stats.failedRequestCount ?? stats.failed_request_count ?? 0);
-    publish({ type: 'progress', completed: completedBase + completed, failed: failedBase + failed, state: status.state });
-  };
   const pause = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
   const results = new Map();
+  let completedBase = 0;
+  let failedBase = 0;
+  const progressByOperation = new Map();
+  const publishAggregateProgress = (state) => {
+    const running = [...progressByOperation.values()].reduce((total, progress) => ({
+      completed: total.completed + progress.completed,
+      failed: total.failed + progress.failed
+    }), { completed: 0, failed: 0 });
+    publish({
+      type: 'progress',
+      completed: Math.min(places.length, completedBase + running.completed),
+      failed: Math.min(places.length, failedBase + running.failed),
+      state: progressByOperation.size > 0 ? 'RUNNING' : state
+    });
+  };
+  const updateProgress = (operation, status) => {
+    const stats = status.batchStats || {};
+    const succeeded = Number(stats.successfulRequestCount ?? stats.succeededRequestCount ?? stats.successful_request_count ?? 0);
+    const failed = Number(stats.failedRequestCount ?? stats.failed_request_count ?? 0);
+    const keyCount = Object.keys(operation.keyMap || {}).length;
+    const requestTotal = Number(stats.totalRequestCount ?? stats.total_request_count ?? 0) || keyCount || operation.targetIds?.length || 0;
+    const targetTotal = operation.targetIds?.length || requestTotal;
+    const requestCompleted = Math.min(requestTotal, succeeded + failed);
+    const completed = requestTotal > 0 ? Math.round(targetTotal * requestCompleted / requestTotal) : 0;
+    const mappedFailures = requestTotal > 0 ? Math.round(targetTotal * Math.min(requestTotal, failed) / requestTotal) : 0;
+    progressByOperation.set(operation.operationName, {
+      completed: terminal(status.state) && requestCompleted === 0 ? targetTotal : completed,
+      failed: mappedFailures
+    });
+    publishAggregateProgress(status.state);
+  };
   const rememberGuide = (key, guide) => {
     if (!key) return;
     results.set(String(key), guide);
@@ -346,8 +371,12 @@ const executeGeminiSeasonGuideBatch = async (places, publish, forceIds = []) => 
     }
   };
   const createGroupSize = 20;
+  publish({ type: 'progress', completed: 0, failed: 0, state: 'SUBMITTING' });
   for (let offset = 0; offset < places.length; offset += createGroupSize) {
     await createGroup(places.slice(offset, offset + createGroupSize), Math.floor(offset / createGroupSize));
+    const cachedCompleted = created.results.length;
+    const cachedFailed = created.results.filter((result) => !result.success).length;
+    publish({ type: 'progress', completed: cachedCompleted, failed: cachedFailed, state: 'SUBMITTING' });
   }
 
   for (const item of created.results || []) {
@@ -364,73 +393,89 @@ const executeGeminiSeasonGuideBatch = async (places, publish, forceIds = []) => 
   const operations = Array.isArray(created.operations) ? created.operations : (
     created.operationName ? [{ operationName: created.operationName, targetIds: places.map((place) => String(place.id)) }] : []
   );
-  let completedBase = results.size;
-  let failedBase = [...results.values()].filter((guide) => guide.error).length;
-  publish({ type: 'progress', completed: completedBase, failed: failedBase, state: operations.length ? 'RUNNING' : 'CACHED' });
+  completedBase = results.size;
+  failedBase = [...results.values()].filter((guide) => guide.error).length;
+  publishAggregateProgress(operations.length ? 'RUNNING' : 'CACHED');
 
-  for (const operation of operations) {
+  await Promise.all(operations.map(async (operation) => {
     const operationName = operation.operationName;
-    if (!operationName) continue;
+    if (!operationName) return;
     const keyMap = operation.keyMap || {};
     const mapKeys = (key) => {
       const mapped = keyMap[String(key)];
       if (Array.isArray(mapped)) return mapped.map(String);
       return mapped ? [String(mapped)] : [String(key)];
     };
-    let status = await post({ action: 'status', task: 'season-guide', operationName, offset: 0, limit: 25 });
-    updateProgress(status, completedBase, failedBase);
-    while (!terminal(status.state)) {
-      await pause(30_000);
-      status = await post({ action: 'status', task: 'season-guide', operationName, offset: 0, limit: 25 });
-      updateProgress(status, completedBase, failedBase);
-    }
+    const targetIds = operation.targetIds || [];
+    let operationCompleted = 0;
+    let operationFailed = 0;
+    try {
+      let status = await post({ action: 'status', task: 'season-guide', operationName, offset: 0, limit: 25 });
+      updateProgress(operation, status);
+      while (!terminal(status.state)) {
+        await pause(5_000);
+        status = await post({ action: 'status', task: 'season-guide', operationName, offset: 0, limit: 25 });
+        updateProgress(operation, status);
+      }
 
-    if (!String(status.state).endsWith('SUCCEEDED')) {
-      const detail = status.error?.message || status.error?.status || status.state;
-      const errorGuide = { error: `Gemini season research ${String(status.state).toLowerCase().replace(/_/g, ' ')}${detail ? `: ${detail}` : ''}.` };
-      const targetIds = operation.targetIds || [];
-      const targetPlaces = places.filter((place) => targetIds.map(String).includes(String(place.id)));
+      if (!String(status.state).endsWith('SUCCEEDED')) {
+        const detail = status.error?.message || status.error?.status || status.state;
+        const errorGuide = { error: `Gemini season research ${String(status.state).toLowerCase().replace(/_/g, ' ')}${detail ? `: ${detail}` : ''}.` };
+        const targetPlaces = places.filter((place) => targetIds.map(String).includes(String(place.id)));
+        logSeasonGuideFailure(errorGuide.error, null, {
+          action: 'status',
+          operation_name: operationName,
+          location_count: targetPlaces.length,
+          location_names: targetPlaces.map((place) => place.place_name).filter(Boolean).slice(0, 20).join(', ')
+        });
+        targetIds.forEach((id) => rememberGuide(id, errorGuide));
+        operationCompleted = targetIds.length;
+        operationFailed = targetIds.length;
+      } else {
+        const totalResults = Number(status.totalResults) || targetIds.length || 0;
+        let offset = 0;
+        let page = status;
+        while (offset < totalResults) {
+          for (const result of page.results || []) {
+            if (!result.key) continue;
+            const guide = result.success
+              ? { ...result.guide, sources: result.sources || [], researchedAt: result.researchedAt }
+              : { error: result.error || 'Season research did not return a usable result.' };
+            const mappedKeys = mapKeys(result.key);
+            if (guide.error) {
+              mappedKeys.forEach((mappedKey) => {
+                const place = places.find((candidate) => String(candidate.id) === String(mappedKey));
+                logSeasonGuideFailure(guide.error, place, { action: 'status', operation_name: operationName });
+              });
+            }
+            mappedKeys.forEach((mappedKey) => rememberGuide(mappedKey, guide));
+            operationCompleted += mappedKeys.length;
+            if (guide.error) operationFailed += mappedKeys.length;
+          }
+          offset += (page.results || []).length;
+          if (offset >= totalResults || !page.hasMore || page.results?.length === 0) break;
+          page = await post({ action: 'status', task: 'season-guide', operationName, offset, limit: 25 });
+        }
+      }
+    } catch (error) {
+      const errorGuide = { error: error.message || 'Season research status request failed.' };
       logSeasonGuideFailure(errorGuide.error, null, {
         action: 'status',
         operation_name: operationName,
-        location_count: targetPlaces.length,
-        location_names: targetPlaces.map((place) => place.place_name).filter(Boolean).slice(0, 20).join(', ')
+        location_count: targetIds.length,
+        location_names: places.filter((place) => targetIds.map(String).includes(String(place.id)))
+          .map((place) => place.place_name).filter(Boolean).slice(0, 20).join(', ')
       });
       targetIds.forEach((id) => rememberGuide(id, errorGuide));
-      completedBase += targetIds.length;
-      failedBase += targetIds.length;
-      continue;
+      operationCompleted = targetIds.length;
+      operationFailed = targetIds.length;
+    } finally {
+      completedBase += operationCompleted;
+      failedBase += operationFailed;
+      progressByOperation.delete(operationName);
+      publishAggregateProgress('RUNNING');
     }
-
-    const totalResults = Number(status.totalResults) || operation.targetIds?.length || 0;
-    let offset = 0;
-    let page = status;
-    let operationCompleted = 0;
-    let operationFailed = 0;
-    while (offset < totalResults) {
-      for (const result of page.results || []) {
-        if (!result.key) continue;
-        const guide = result.success
-          ? { ...result.guide, sources: result.sources || [], researchedAt: result.researchedAt }
-          : { error: result.error || 'Season research did not return a usable result.' };
-        const mappedKeys = mapKeys(result.key);
-        if (guide.error) {
-          mappedKeys.forEach((mappedKey) => {
-            const place = places.find((candidate) => String(candidate.id) === String(mappedKey));
-            logSeasonGuideFailure(guide.error, place, { action: 'status', operation_name: operationName });
-          });
-        }
-        mappedKeys.forEach((mappedKey) => rememberGuide(mappedKey, guide));
-        operationCompleted += mappedKeys.length;
-        if (guide.error) operationFailed += mappedKeys.length;
-      }
-      offset += (page.results || []).length;
-      if (offset >= totalResults || !page.hasMore || page.results?.length === 0) break;
-      page = await post({ action: 'status', task: 'season-guide', operationName, offset, limit: 25 });
-    }
-    completedBase += operationCompleted;
-    failedBase += operationFailed;
-  }
+  }));
 
   for (const place of places) {
     if (results.has(String(place.id))) continue;
@@ -5866,7 +5911,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                 <div className="flex items-center justify-between gap-3">
                   <p className="text-[10px] font-black uppercase tracking-wide text-indigo-900">Season Guide Research</p>
                   <span className="shrink-0 text-[10px] font-bold text-slate-600">
-                    {seasonGuideProgress.completed}/{seasonGuideProgress.total}
+                    {seasonGuideProgress.completed}/{seasonGuideProgress.total} · {seasonGuideProgress.total > 0 ? Math.min(100, Math.round((seasonGuideProgress.completed / seasonGuideProgress.total) * 100)) : 0}%
                   </span>
                 </div>
                 <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100">
