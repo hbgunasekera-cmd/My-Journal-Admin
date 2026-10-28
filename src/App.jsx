@@ -4,9 +4,7 @@ import { generateCleanSlug } from './utils.js';
 import { logClientError } from './errorLogger.js';
 import {
   clearLegacySeasonGuideBrowserStorage,
-  getSeasonGuideCacheKey,
-  renderSeasonGuidePopup,
-  renderSeasonGuideTooltip
+  getSeasonGuideCacheKey
 } from './seasonGuide.js';
 
 clearLegacySeasonGuideBrowserStorage();
@@ -451,6 +449,25 @@ const getRouteWaypoints = (route) => {
   }
 };
 
+const getPlaceForRouteWaypoint = (waypoint, placeList) => {
+  if (waypoint?.id !== null && waypoint?.id !== undefined) {
+    const byId = placeList.find((place) => String(place.id) === String(waypoint.id));
+    if (byId) return byId;
+  }
+
+  const coordinates = getCoordinates(waypoint);
+  const waypointName = String(waypoint?.place_name || waypoint?.n || '').trim().toLocaleLowerCase('en');
+  if (!coordinates || !waypointName) return null;
+  return placeList.find((place) => {
+    const placeCoordinates = getCoordinates(place);
+    const placeName = String(place?.place_name || place?.n || '').trim().toLocaleLowerCase('en');
+    return placeName === waypointName
+      && placeCoordinates
+      && Math.abs(placeCoordinates.lat - coordinates.lat) <= 0.0001
+      && Math.abs(placeCoordinates.lng - coordinates.lng) <= 0.0001;
+  }) || null;
+};
+
 let googleMapsLoadPromise;
 const loadGoogleMapsApi = (apiKey) => {
   if (window.google?.maps?.importLibrary) return Promise.resolve();
@@ -688,8 +705,10 @@ function App() {
     )));
   };
 
-  const retryFailedSeasonGuides = () => {
-    const failedPlaces = pendingSeasonGuidePlaces.filter((place) => seasonGuides[place.id]?.error);
+  const retryFailedSeasonGuides = (placeId = null) => {
+    const failedPlaces = seasonGuideResearchPlaces.filter((place) => (
+      seasonGuides[place.id]?.error && (!placeId || String(place.id) === String(placeId))
+    ));
     if (failedPlaces.length === 0) return;
     seasonGuideRetryIdsRef.current = failedPlaces.map((place) => String(place.id));
     setSeasonGuides((current) => {
@@ -726,34 +745,40 @@ function App() {
   const bulkFactCheckInProgressRef = useRef(false);
   const bulkFactCheckStopRef = useRef(false);
   const bulkGenerationHasShownLogRef = useRef(false);
-  const seasonGuideStateRef = useRef({});
   const seasonGuideRetryIdsRef = useRef([]);
   const REFRESH_INTERVAL_SECONDS = 600;
   const [timeLeft, setTimeLeft] = useState(REFRESH_INTERVAL_SECONDS);
 
-  seasonGuideStateRef.current = seasonGuides;
-
   const pendingSeasonGuidePlaces = places.filter((place) => place?.status === 'pending');
-  const pendingSeasonGuideSignature = pendingSeasonGuidePlaces
+  const savedRouteSeasonGuidePlaces = savedRoutes
+    .flatMap((route) => getRouteWaypoints(route)
+      .map((waypoint) => getPlaceForRouteWaypoint(waypoint, places)))
+    .filter(Boolean);
+  const seasonGuideResearchPlaces = [...new Map(
+    [...pendingSeasonGuidePlaces, ...savedRouteSeasonGuidePlaces]
+      .map((place) => [String(place.id), place])
+  ).values()];
+  const seasonGuideResearchSignature = seasonGuideResearchPlaces
     .map((place) => [place.id, place.latitude, place.longitude, place.category, place.locality, place.place_name].join(':'))
+    .sort()
     .join('|');
 
-  // Research each distinct pending pin once, cache the result, and reuse it for duplicate records.
+  // Research each distinct pending pin or saved-route stop once, cache the result, and reuse it.
   useEffect(() => {
-    if (!isLoggedIn || pendingSeasonGuidePlaces.length === 0) {
+    if (!isLoggedIn || seasonGuideResearchPlaces.length === 0) {
       setSeasonGuideProgress({ completed: 0, failed: 0, total: 0, running: false });
       return undefined;
     }
 
     let cancelled = false;
-    const pending = [...pendingSeasonGuidePlaces];
+    const researchPlaces = [...seasonGuideResearchPlaces];
     const immediate = {};
     const targets = [];
     const targetByIdentity = new Map();
     let completed = 0;
     let failed = 0;
 
-    pending.forEach((place) => {
+    researchPlaces.forEach((place) => {
       const hasCoordinateValues = place.latitude !== null && place.latitude !== undefined
         && String(place.latitude).trim() !== '' && place.longitude !== null && place.longitude !== undefined
         && String(place.longitude).trim() !== '';
@@ -780,7 +805,7 @@ function App() {
     });
 
     if (Object.keys(immediate).length > 0) setSeasonGuides((current) => ({ ...current, ...immediate }));
-    setSeasonGuideProgress({ completed, failed, total: pending.length, running: targets.length > 0 });
+    setSeasonGuideProgress({ completed, failed, total: researchPlaces.length, running: targets.length > 0 });
     if (targets.length === 0) return undefined;
 
     const forceIds = [...seasonGuideRetryIdsRef.current];
@@ -799,7 +824,7 @@ function App() {
       } else if (event.type === 'guide') {
         const place = targets.find((candidate) => String(candidate.id) === String(event.key));
         if (!place) return;
-        const matchingPlaces = pending.filter((candidate) => getSeasonGuideCacheKey(candidate) === getSeasonGuideCacheKey(place));
+        const matchingPlaces = researchPlaces.filter((candidate) => getSeasonGuideCacheKey(candidate) === getSeasonGuideCacheKey(place));
         setSeasonGuides((current) => ({
           ...current,
           ...Object.fromEntries(matchingPlaces.map((candidate) => [candidate.id, event.guide]))
@@ -814,42 +839,42 @@ function App() {
       targets.forEach((place) => {
         const result = results.get(String(place.id));
         const guide = result || { error: 'The batch completed without a season guide for this pin.' };
-        const matchingPlaces = pending.filter((candidate) => getSeasonGuideCacheKey(candidate) === getSeasonGuideCacheKey(place));
+        const matchingPlaces = researchPlaces.filter((candidate) => getSeasonGuideCacheKey(candidate) === getSeasonGuideCacheKey(place));
         if (guide.error) batchFailed += matchingPlaces.length;
         setSeasonGuides((current) => ({
           ...current,
           ...Object.fromEntries(matchingPlaces.map((candidate) => [candidate.id, guide]))
         }));
       });
-      setSeasonGuideProgress({ completed: pending.length, failed: failed + batchFailed, total: pending.length, running: false });
+      setSeasonGuideProgress({ completed: researchPlaces.length, failed: failed + batchFailed, total: researchPlaces.length, running: false });
     }).catch((error) => {
       if (JSON.stringify(seasonGuideRetryIdsRef.current) === JSON.stringify(forceIds)) seasonGuideRetryIdsRef.current = [];
       if (cancelled) return;
       logSeasonGuideFailure(error, null, {
         action: 'request',
-        request_signature: pendingSeasonGuideSignature.slice(0, 450),
+        request_signature: seasonGuideResearchSignature.slice(0, 450),
         location_count: targets.length,
         location_names: targets.map((place) => place.place_name).filter(Boolean).slice(0, 20).join(', ')
       });
       let batchFailed = 0;
       targets.forEach((place) => {
         const guide = { error: String(error?.message || 'The season research batch failed.') };
-        const matchingPlaces = pending.filter((candidate) => getSeasonGuideCacheKey(candidate) === getSeasonGuideCacheKey(place));
+        const matchingPlaces = researchPlaces.filter((candidate) => getSeasonGuideCacheKey(candidate) === getSeasonGuideCacheKey(place));
         batchFailed += matchingPlaces.length;
         setSeasonGuides((current) => ({
           ...current,
           ...Object.fromEntries(matchingPlaces.map((candidate) => [candidate.id, guide]))
         }));
       });
-      setSeasonGuideProgress({ completed: pending.length, failed: failed + batchFailed, total: pending.length, running: false });
+      setSeasonGuideProgress({ completed: researchPlaces.length, failed: failed + batchFailed, total: researchPlaces.length, running: false });
     });
 
     return () => {
       cancelled = true;
       subscription.unsubscribe();
     };
-    // pendingSeasonGuideSignature captures every field used by the request and recommendation.
-  }, [isLoggedIn, pendingSeasonGuideSignature, seasonGuideRetryToken]);
+    // seasonGuideResearchSignature captures every field used by the requests.
+  }, [isLoggedIn, seasonGuideResearchSignature, seasonGuideRetryToken]);
 
   // --- 1. GPS & DATA INITIALIZATION ---
 
@@ -1060,7 +1085,7 @@ function App() {
     markersLayer.current.clearLayers();
 
     // Helper: Renders customizable Leaflet circle markers
-    const addDot = (lat, lng, color, title, subtitle, routePlanName = null, seasonGuidePlace = null) => {
+    const addDot = (lat, lng, color, title, subtitle, routePlanName = null) => {
       const pLat = parseFloat(lat);
       const pLng = parseFloat(lng);
       if (isNaN(pLat) || isNaN(pLng)) return;
@@ -1077,9 +1102,7 @@ function App() {
       const safeTitle = escapeHtml(title);
       const safeSubtitle = escapeHtml(subtitle);
       const safeRoutePlanName = escapeHtml(routePlanName);
-      const tooltipContent = seasonGuidePlace
-        ? renderSeasonGuideTooltip(seasonGuidePlace, seasonGuideStateRef.current[seasonGuidePlace.id])
-        : routePlanName ? `${safeTitle} (Plan: ${safeRoutePlanName})` : safeTitle;
+      const tooltipContent = routePlanName ? `${safeTitle} (Plan: ${safeRoutePlanName})` : safeTitle;
       marker.bindTooltip(tooltipContent, {
         direction: 'top',
         sticky: true,
@@ -1099,9 +1122,7 @@ function App() {
         ` : ''}
       </div>
     `;
-      marker._seasonGuidePlace = seasonGuidePlace;
-      marker._seasonGuidePopupBaseHtml = popupBaseHtml;
-      marker.bindPopup(`${popupBaseHtml}${seasonGuidePlace ? renderSeasonGuidePopup(seasonGuidePlace, seasonGuideStateRef.current[seasonGuidePlace.id]) : ''}`);
+      marker.bindPopup(popupBaseHtml);
 
       marker.addTo(markersLayer.current);
     };
@@ -1123,8 +1144,7 @@ function App() {
         color,
         p.place_name || 'Location',
         p.category || 'Point of Interest',
-        reservedRouteName,
-        p.status === 'pending' ? p : null
+        reservedRouteName
       );
     });
 
@@ -1147,19 +1167,6 @@ function App() {
     };
 
   }, [mapReady, activeTab, filteredPlaces, places, savedRoutes, searchTerm]);
-
-  useEffect(() => {
-    if (!mapReady) return;
-    markersLayer.current.eachLayer((marker) => {
-      const place = marker?._seasonGuidePlace;
-      if (!place) return;
-      const guide = seasonGuides[place.id];
-      marker.setTooltipContent(renderSeasonGuideTooltip(place, guide));
-      if (marker.getPopup()) {
-        marker.setPopupContent(`${marker._seasonGuidePopupBaseHtml || ''}${renderSeasonGuidePopup(place, guide)}`);
-      }
-    });
-  }, [seasonGuides, mapReady]);
 
   useEffect(() => {
 
@@ -5823,7 +5830,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
             {seasonGuideProgress.total > 0 && (
               <div className="absolute left-3 top-3 z-[1000] w-[min(340px,calc(100%-24px))] rounded-xl border border-indigo-100 bg-white/95 p-3 shadow-lg backdrop-blur-sm">
                 <div className="flex items-center justify-between gap-3">
-                  <p className="text-[10px] font-black uppercase tracking-wide text-indigo-900">Season Guide · Pending Pins</p>
+                  <p className="text-[10px] font-black uppercase tracking-wide text-indigo-900">Season Guide Research</p>
                   <span className="shrink-0 text-[10px] font-bold text-slate-600">
                     {seasonGuideProgress.completed}/{seasonGuideProgress.total}
                   </span>
@@ -5837,7 +5844,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                 <div className="mt-2 flex items-center justify-between gap-2">
                   <p className="text-[9px] leading-4 text-slate-500">
                     {seasonGuideProgress.running
-                    ? `AI climate research is running${seasonGuideProgress.state ? ` (${String(seasonGuideProgress.state).replace(/^JOB_STATE_|^BATCH_STATE_/, '').toLowerCase().replace(/_/g, ' ')})` : ''}. Results are saved in Supabase.`
+                    ? `AI climate research for pending places and saved-route stops is running${seasonGuideProgress.state ? ` (${String(seasonGuideProgress.state).replace(/^JOB_STATE_|^BATCH_STATE_/, '').toLowerCase().replace(/_/g, ' ')})` : ''}. Results are saved in Supabase.`
                       : seasonGuideProgress.failed > 0
                         ? `${seasonGuideProgress.failed} guide${seasonGuideProgress.failed === 1 ? '' : 's'} need a retry or location details.`
                         : 'Guides are ready. Saved guides are reused for one year unless you retry them.'}
@@ -6072,6 +6079,24 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                         ) : (
                           savedRoutes.map((route, index) => {
                             const wpArray = getRouteWaypoints(route);
+                            const routeGuideStops = wpArray.map((waypoint, waypointIndex) => {
+                              const place = getPlaceForRouteWaypoint(waypoint, places);
+                              return {
+                                id: String(place?.id || waypoint.id || `${route.id}-${waypointIndex}`),
+                                waypoint,
+                                place,
+                                guide: place ? seasonGuides[place.id] : null
+                              };
+                            });
+                            const readyRouteGuides = routeGuideStops.filter((stop) => stop.guide && !stop.guide.error);
+                            const routeSeasonWindows = [...new Set(
+                              readyRouteGuides.map((stop) => stop.guide.primaryWindow).filter(Boolean)
+                            )];
+                            const sharedRouteWindow = readyRouteGuides.length === routeGuideStops.length
+                              && readyRouteGuides.length > 0
+                              && routeSeasonWindows.length === 1
+                              ? readyRouteGuides[0].guide.primaryWindow
+                              : '';
                             return (
                               <Draggable
                                 key={route.id}
@@ -6130,6 +6155,102 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                                         <Icon name="trash-2" className="w-3 h-3" />
                                       </button>
                                     </div>
+
+                                    {routeGuideStops.length > 0 && (
+                                      <details className="mt-2 rounded-lg border border-sky-100 bg-sky-50/70 open:bg-white">
+                                        <summary className="flex cursor-pointer flex-wrap items-baseline gap-x-1.5 gap-y-0.5 px-2 py-1.5 text-[9px]">
+                                          <span className="font-black uppercase tracking-wide text-sky-700">Trip season guide</span>
+                                          <span className="font-bold text-slate-600">{readyRouteGuides.length}/{routeGuideStops.length} stops ready</span>
+                                          {sharedRouteWindow && <span className="w-full pl-3 font-black text-slate-800">Overall window: {sharedRouteWindow}</span>}
+                                          {!sharedRouteWindow && routeSeasonWindows.length > 0 && (
+                                            <span className="w-full pl-3 font-black text-slate-800">
+                                              Suggested windows: {routeSeasonWindows.join(' · ')}
+                                            </span>
+                                          )}
+                                        </summary>
+                                        <div className="space-y-1.5 border-t border-sky-100 px-2 py-2">
+                                          {readyRouteGuides.length > 0 && !sharedRouteWindow && (
+                                            <p className="px-1 text-[9px] leading-4 text-slate-500">Best timing varies by stop; each location’s recommended window is listed below.</p>
+                                          )}
+                                          {routeGuideStops.map((stop) => {
+                                            const stopName = stop.place?.place_name || stop.waypoint?.place_name || stop.waypoint?.n || 'Saved stop';
+                                            const stopLocality = stop.place?.locality || stop.waypoint?.locality || '';
+                                            const guide = stop.guide;
+                                            const guideDetails = guide && !guide.error
+                                              ? [
+                                                ['Photo / drone balance', guide.photoWindow],
+                                                ['Fuller waterfall flow', guide.waterfallFlowWindow],
+                                                ['Rain and monsoon', guide.rainAndMonsoon],
+                                                ['Sky and light', guide.skyAndLight],
+                                                ['Wind / drone note', guide.windAndDrone],
+                                                ['Best time of day', guide.bestTimeOfDay],
+                                                ['Why this season', guide.rationale]
+                                              ].filter(([, value]) => value)
+                                              : [];
+
+                                            if (!guide) {
+                                              return (
+                                                <div key={stop.id} className="rounded-md bg-white/80 px-2 py-1.5 text-[9px] text-slate-500">
+                                                  <b className="text-slate-700">{stopName}</b>{stopLocality ? ` · ${stopLocality}` : ''}: {stop.place ? 'Season guide is being researched…' : 'Location details are not linked to a Places record.'}
+                                                </div>
+                                              );
+                                            }
+
+                                            if (guide.error) {
+                                              return (
+                                                <div key={stop.id} className="flex items-start justify-between gap-2 rounded-md bg-rose-50 px-2 py-1.5 text-[9px] leading-4 text-rose-700">
+                                                  <span className="min-w-0"><b>{stopName}</b>{stopLocality ? ` · ${stopLocality}` : ''}: {guide.error}</span>
+                                                  {stop.place && (
+                                                    <button
+                                                      type="button"
+                                                      onClick={() => retryFailedSeasonGuides(stop.place.id)}
+                                                      disabled={seasonGuideProgress.running}
+                                                      className="shrink-0 font-black uppercase hover:text-rose-900 disabled:opacity-50"
+                                                    >Retry</button>
+                                                  )}
+                                                </div>
+                                              );
+                                            }
+
+                                            return (
+                                              <details key={stop.id} className="rounded-md border border-slate-100 bg-white">
+                                                <summary className="flex cursor-pointer flex-wrap items-baseline gap-x-1.5 px-2 py-1.5 text-[9px]">
+                                                  <span className="font-black text-slate-700">{stopName}</span>
+                                                  <span className="text-slate-400">{stopLocality}</span>
+                                                  <span className="ml-auto font-bold text-indigo-700">{guide.primaryWindow}</span>
+                                                </summary>
+                                                <div className="space-y-1 border-t border-slate-100 px-2 py-1.5 text-[9px] leading-4 text-slate-600">
+                                                  {guide.secondaryWindow && <p><b className="text-slate-700">Alternative:</b> {guide.secondaryWindow}</p>}
+                                                  {guideDetails.map(([label, value]) => <p key={label}><b className="text-slate-700">{label}:</b> {value}</p>)}
+                                                  {Array.isArray(guide.sources) && guide.sources.length > 0 && (
+                                                    <p className="flex flex-wrap gap-x-2 border-t border-slate-100 pt-1">
+                                                      <b className="text-slate-700">Sources:</b>
+                                                      {guide.sources.slice(0, 2).map((source, sourceIndex) => {
+                                                        let safeUrl;
+                                                        try {
+                                                          const parsedUrl = new URL(source?.url);
+                                                          if (['http:', 'https:'].includes(parsedUrl.protocol)) safeUrl = parsedUrl.href;
+                                                        } catch {
+                                                          safeUrl = null;
+                                                        }
+                                                        return safeUrl ? (
+                                                          <a key={`${safeUrl}-${sourceIndex}`} href={safeUrl} target="_blank" rel="noopener noreferrer" className="font-bold text-indigo-600 underline">
+                                                            {source.title || `Source ${sourceIndex + 1}`}
+                                                          </a>
+                                                        ) : null;
+                                                      })}
+                                                    </p>
+                                                  )}
+                                                  <p className="border-t border-slate-100 pt-1 text-slate-400">
+                                                    {guide.locationMatch === 'AREA_CLIMATE_ONLY' ? 'Area-level climate estimate.' : 'Location and area matched.'} Seasonal guidance is not a forecast or drone clearance.
+                                                  </p>
+                                                </div>
+                                              </details>
+                                            );
+                                          })}
+                                        </div>
+                                      </details>
+                                    )}
                                   </div>
                                 )}
                               </Draggable>
@@ -6171,6 +6292,19 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                       : null;
                     const km = d === null ? '—' : (d / 1000).toFixed(1);
                     const isDone = p.status === 'done';
+                    const hasSeasonGuide = p.status === 'pending';
+                    const seasonGuide = hasSeasonGuide ? seasonGuides[p.id] : null;
+                    const guideDetails = seasonGuide && !seasonGuide.error
+                      ? [
+                        ['Photo / drone balance', seasonGuide.photoWindow],
+                        ['Fuller waterfall flow', seasonGuide.waterfallFlowWindow],
+                        ['Rain and monsoon', seasonGuide.rainAndMonsoon],
+                        ['Sky and light', seasonGuide.skyAndLight],
+                        ['Wind / drone note', seasonGuide.windAndDrone],
+                        ['Best time of day', seasonGuide.bestTimeOfDay],
+                        ['Why this season', seasonGuide.rationale]
+                      ].filter(([, value]) => value)
+                      : [];
 
                     // Check if location is part of any saved route plan
                     const matchingRoute = savedRoutes.find(route =>
@@ -6185,62 +6319,126 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                     const isReserved = !!reservedRouteName;
 
                     return (
-                      <div key={p.id} className="flex justify-between items-center p-2 hover:bg-slate-50 rounded-xl transition-all border border-transparent hover:border-slate-100 group">
-                        <div className="flex flex-col truncate pr-2">
-                          <div className="flex items-center gap-2">
-                            <span className="text-[9px] font-black uppercase truncate text-slate-600 group-hover:text-slate-900">
-                              {p.place_name}
-                            </span>
-
-                            {/* DYNAMIC STATUS TAG */}
-                            <div className={`flex items-center gap-1 px-1 py-0.5 rounded-md border ${isReserved
-                              ? 'bg-purple-50 border-purple-100 text-purple-600'
-                              : isDone
-                                ? 'bg-emerald-50 border-emerald-100 text-emerald-600'
-                                : 'bg-orange-50 border-orange-100 text-orange-600'
-                              }`}>
-                              <div className={`w-1 h-1 rounded-full ${isReserved
-                                ? 'bg-purple-500'
-                                : isDone
-                                  ? 'bg-emerald-500'
-                                  : 'bg-orange-400 animate-pulse'
-                                }`}></div>
-                              <span className="text-[8px] font-black uppercase tracking-tighter">
-                                {isReserved ? 'Reserved' : isDone ? 'Done' : 'Pending'}
+                      <div key={p.id} className="p-2 hover:bg-slate-50 rounded-xl transition-all border border-transparent hover:border-slate-100 group">
+                        <div className="flex justify-between items-start gap-2">
+                          <div className="flex min-w-0 flex-col truncate pr-1">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="text-[9px] font-black uppercase truncate text-slate-600 group-hover:text-slate-900">
+                                {p.place_name}
                               </span>
+
+                              {/* DYNAMIC STATUS TAG */}
+                              <div className={`flex items-center gap-1 px-1 py-0.5 rounded-md border shrink-0 ${isReserved
+                                ? 'bg-purple-50 border-purple-100 text-purple-600'
+                                : isDone
+                                  ? 'bg-emerald-50 border-emerald-100 text-emerald-600'
+                                  : 'bg-orange-50 border-orange-100 text-orange-600'
+                              }`}>
+                                <div className={`w-1 h-1 rounded-full ${isReserved
+                                  ? 'bg-purple-500'
+                                  : isDone
+                                    ? 'bg-emerald-500'
+                                    : 'bg-orange-400 animate-pulse'
+                                }`}></div>
+                                <span className="text-[8px] font-black uppercase tracking-tighter">
+                                  {isReserved ? 'Reserved' : isDone ? 'Done' : 'Pending'}
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* DISTANCE & ROUTE PLAN ASSOCIATION */}
+                            <div className="flex items-center gap-1.5 truncate">
+                              <span className="text-[9px] font-bold uppercase text-slate-400 tracking-tight shrink-0">
+                                {km} KM
+                              </span>
+                              {isReserved && (
+                                <span className="text-[8px] font-black uppercase text-purple-500 tracking-tight truncate italic">
+                                  • Plan: {reservedRouteName}
+                                </span>
+                              )}
                             </div>
                           </div>
 
-                          {/* DISTANCE & ROUTE PLAN ASSOCIATION */}
-                          <div className="flex items-center gap-1.5 truncate">
-                            <span className="text-[9px] font-bold uppercase text-slate-400 tracking-tight shrink-0">
-                              {km} KM
-                            </span>
-                            {isReserved && (
-                              <span className="text-[8px] font-black uppercase text-purple-500 tracking-tight truncate italic">
-                                • Plan: {reservedRouteName}
-                              </span>
-                            )}
-                          </div>
+                          <button
+                            onClick={() => {
+                              if (!coordinates) {
+                                triggerToast('This location needs valid coordinates before it can be routed.');
+                                return;
+                              }
+                              const updatedTrip = [...selectedTrip, p];
+                              setSelectedTrip(updatedTrip);
+                              if (typeof fetchRouteWeather === 'function') fetchRouteWeather(updatedTrip);
+                              triggerToast(`Added ${p.place_name}`);
+                            }}
+                            disabled={!coordinates}
+                            className="text-emerald-500 hover:bg-emerald-50 disabled:text-slate-300 disabled:cursor-not-allowed p-1.5 rounded-lg active:scale-90 transition-transform shrink-0"
+                            title={coordinates ? 'Add to Active Route' : 'This location has no valid coordinates'}
+                          >
+                            <Icon name="plus-circle" className="w-4 h-4" />
+                          </button>
                         </div>
 
-                        <button
-                          onClick={() => {
-                            if (!coordinates) {
-                              triggerToast('This location needs valid coordinates before it can be routed.');
-                              return;
-                            }
-                            const updatedTrip = [...selectedTrip, p];
-                            setSelectedTrip(updatedTrip);
-                            if (typeof fetchRouteWeather === 'function') fetchRouteWeather(updatedTrip);
-                            triggerToast(`Added ${p.place_name}`);
-                          }}
-                          disabled={!coordinates}
-                          className="text-emerald-500 hover:bg-emerald-50 disabled:text-slate-300 disabled:cursor-not-allowed p-1.5 rounded-lg active:scale-90 transition-transform shrink-0"
-                          title={coordinates ? 'Add to Active Route' : 'This location has no valid coordinates'}
-                        >
-                          <Icon name="plus-circle" className="w-4 h-4" />
-                        </button>
+                        {hasSeasonGuide && (
+                          <div className="mt-2">
+                            {!seasonGuide && (
+                              <div className="rounded-lg border border-indigo-100 bg-indigo-50/70 px-2.5 py-1.5 text-[9px] font-semibold text-indigo-700">
+                                Seasonal guide is being researched…
+                              </div>
+                            )}
+                            {seasonGuide?.error && (
+                              <div className="flex items-start justify-between gap-2 rounded-lg border border-rose-100 bg-rose-50 px-2.5 py-1.5">
+                                <p className="min-w-0 text-[9px] leading-4 text-rose-700">Season guide unavailable: {seasonGuide.error}</p>
+                                <button
+                                  type="button"
+                                  onClick={() => retryFailedSeasonGuides(p.id)}
+                                  disabled={seasonGuideProgress.running}
+                                  className="shrink-0 text-[8px] font-black uppercase text-rose-700 hover:text-rose-900 disabled:opacity-50"
+                                >
+                                  Retry
+                                </button>
+                              </div>
+                            )}
+                            {seasonGuide && !seasonGuide.error && (
+                              <details className="rounded-lg border border-indigo-100 bg-indigo-50/70 open:bg-white">
+                                <summary className="flex cursor-pointer flex-wrap items-baseline gap-x-1.5 gap-y-0.5 px-2.5 py-1.5 text-[9px]">
+                                  <span className="font-black uppercase tracking-wide text-indigo-700">Best season</span>
+                                  <span className="font-bold text-slate-800">{seasonGuide.primaryWindow}</span>
+                                  {seasonGuide.confidence && (
+                                    <span className="ml-auto text-[8px] font-bold uppercase text-slate-400">{seasonGuide.confidence} confidence</span>
+                                  )}
+                                </summary>
+                                <div className="space-y-1 border-t border-indigo-100 px-2.5 py-2 text-[9px] leading-4 text-slate-600">
+                                  {seasonGuide.secondaryWindow && <p><b className="text-slate-700">Alternative:</b> {seasonGuide.secondaryWindow}</p>}
+                                  {guideDetails.map(([label, value]) => (
+                                    <p key={label}><b className="text-slate-700">{label}:</b> {value}</p>
+                                  ))}
+                                  {Array.isArray(seasonGuide.sources) && seasonGuide.sources.length > 0 && (
+                                    <p className="flex flex-wrap gap-x-2 gap-y-1 border-t border-slate-100 pt-1.5">
+                                      <b className="text-slate-700">Sources:</b>
+                                      {seasonGuide.sources.slice(0, 3).map((source, index) => {
+                                        let safeUrl;
+                                        try {
+                                          const parsedUrl = new URL(source?.url);
+                                          if (['http:', 'https:'].includes(parsedUrl.protocol)) safeUrl = parsedUrl.href;
+                                        } catch {
+                                          safeUrl = null;
+                                        }
+                                        return safeUrl ? (
+                                          <a key={`${safeUrl}-${index}`} href={safeUrl} target="_blank" rel="noopener noreferrer" className="font-bold text-indigo-600 underline">
+                                            {source.title || `Source ${index + 1}`}
+                                          </a>
+                                        ) : null;
+                                      })}
+                                    </p>
+                                  )}
+                                  <p className="border-t border-slate-100 pt-1.5 text-[8px] text-slate-400">
+                                    {seasonGuide.locationMatch === 'AREA_CLIMATE_ONLY' ? 'Area-level climate estimate.' : 'Location and area matched.'} Seasonal guidance is not a forecast or drone clearance; check current weather and local rules.
+                                  </p>
+                                </div>
+                              </details>
+                            )}
+                          </div>
+                        )}
                       </div>
                     );
                   })}
