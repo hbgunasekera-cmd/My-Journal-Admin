@@ -105,6 +105,69 @@ const VALID_CATEGORIES = [
   "Reservoir", "Pool", "Stream", "Location"
 ];
 
+const TRAFFIC_BOT_RULES = [
+  { source: 'Apple Bot', patterns: ['applebot'] },
+  { source: 'Google Bot', patterns: ['googlebot', 'googleother', 'google-safety', 'google-read-aloud', 'adsbot', 'adsense'] },
+  { source: 'Meta Scraper', patterns: ['facebookexternalhit', 'facebookbot', 'facebot', 'meta-externalagent', 'meta-externalfetcher', 'meta-webindexer', 'meta-externalads'] },
+  { source: 'Twitter Bot', patterns: ['twitterbot'] },
+  { source: 'Bing Bot', patterns: ['bingbot', 'msnbot'] },
+  { source: 'AI Crawler', patterns: ['gptbot', 'chatgpt', 'claudebot', 'anthropic', 'perplexitybot', 'bytespider', 'cohere-ai'] },
+  { source: 'SEO & Audit Tool', patterns: ['ahrefsbot', 'semrushbot', 'screaming frog', 'gtmetrix', 'lighthouse', 'clarity', 'inspect', 'preview'] },
+  { source: 'Pinterest Bot', patterns: ['pinterestbot'] },
+  { source: 'Other Search Engine', patterns: ['baiduspider', 'yandexbot', 'duckduckbot', 'slurp', 'sogou'] },
+  { source: 'Generic Bot', patterns: ['bot', 'spider', 'crawl', 'headless', 'ia_archiver'] }
+];
+
+const getErrorLogTrafficSource = (log = {}) => {
+  const context = log.context && typeof log.context === 'object' && !Array.isArray(log.context)
+    ? log.context
+    : {};
+  const userAgent = String(log.user_agent || context.user_agent || '').toLowerCase();
+  const matchedBot = TRAFFIC_BOT_RULES.find((rule) => rule.patterns.some((pattern) => userAgent.includes(pattern)));
+
+  if (matchedBot) {
+    return {
+      label: `${matchedBot.source} · Bot/Crawler`,
+      className: 'bg-rose-100 text-rose-800',
+      detail: `Traffic Intelligence classifies this as a bot/crawler (${matchedBot.source}).`
+    };
+  }
+
+  if (log.is_webdriver === true || context.is_webdriver === true) {
+    return {
+      label: 'Automated Browser · Bot/Crawler',
+      className: 'bg-violet-100 text-violet-800',
+      detail: 'Traffic Intelligence classifies this as an automated browser.'
+    };
+  }
+
+  if (!userAgent) {
+    return {
+      label: 'Unknown Source',
+      className: 'bg-slate-100 text-slate-600',
+      detail: 'No user-agent information was recorded, so the traffic source could not be classified.'
+    };
+  }
+
+  return {
+    label: 'Real Person',
+    className: 'bg-emerald-100 text-emerald-800',
+    detail: 'Traffic Intelligence classifies this as a real-person visit.'
+  };
+};
+
+const ErrorLogTrafficBadge = ({ log }) => {
+  const trafficSource = getErrorLogTrafficSource(log);
+  return (
+    <span
+      title={trafficSource.detail}
+      className={`rounded-full px-2.5 py-1 text-[9px] font-black uppercase tracking-wide ${trafficSource.className}`}
+    >
+      {trafficSource.label}
+    </span>
+  );
+};
+
 // --- Helper Components ---
 
 /**
@@ -4554,22 +4617,9 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
         ip.startsWith('3.') || ip.startsWith('52.') || ip.startsWith('54.');
 
       // 3. Bot Classification Rules
-      const botRules = [
-        { source: 'Apple Bot', patterns: ['applebot'] },
-        { source: 'Google Bot', patterns: ['googlebot', 'googleother', 'google-safety', 'google-read-aloud', 'adsbot', 'adsense'] },
-        { source: 'Meta Scraper', patterns: ['facebookexternalhit', 'facebookbot', 'facebot', 'meta-externalagent', 'meta-externalfetcher', 'meta-webindexer', 'meta-externalads'] },
-        { source: 'Twitter Bot', patterns: ['twitterbot'] },
-        { source: 'Bing Bot', patterns: ['bingbot', 'msnbot'] },
-        { source: 'AI Crawler', patterns: ['gptbot', 'chatgpt', 'claudebot', 'anthropic', 'perplexitybot', 'bytespider', 'cohere-ai'] },
-        { source: 'SEO & Audit Tool', patterns: ['ahrefsbot', 'semrushbot', 'screaming frog', 'gtmetrix', 'lighthouse', 'clarity', 'inspect', 'preview'] },
-        { source: 'Pinterest Bot', patterns: ['pinterestbot'] },
-        { source: 'Other Search Engine', patterns: ['baiduspider', 'yandexbot', 'duckduckbot', 'slurp', 'sogou'] },
-        { source: 'Generic Bot', patterns: ['bot', 'spider', 'crawl', 'headless', 'ia_archiver'] }
-      ];
-
       // Match specific bot source from UA string
       let detectedBotSource = null;
-      for (const rule of botRules) {
+      for (const rule of TRAFFIC_BOT_RULES) {
         if (rule.patterns.some(pattern => lowerUA.includes(pattern))) {
           detectedBotSource = rule.source;
           break;
@@ -7611,6 +7661,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                         <span className={`rounded-full px-2.5 py-1 text-[9px] font-black uppercase tracking-wide ${log.reporter === 'Client' ? 'bg-cyan-100 text-cyan-800' : 'bg-indigo-100 text-indigo-800'}`}>
                           {log.reporter || 'Admin'}
                         </span>
+                        <ErrorLogTrafficBadge log={log} />
                         {log.error_code && (
                           <span className="rounded-full bg-amber-50 px-2.5 py-1 text-[9px] font-black text-amber-800">
                             Code {log.error_code}
