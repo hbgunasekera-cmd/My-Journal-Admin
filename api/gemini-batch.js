@@ -60,20 +60,85 @@ const getResultError = (response) => {
   return error?.message || error?.status || (typeof error === 'string' ? error : 'The research request failed in the batch.');
 };
 
-const getSeasonGuidePrompt = (place) => `Use Google Search to prepare a very concise, source-backed seasonal visit guide for this exact Sri Lankan pin. Search the place name with its category, locality, and coordinates; use the coordinates to identify the correct area and reject similar-name places elsewhere. Prefer Sri Lanka Department of Meteorology, government/tourism or conservation sources, and reliable local climate sources. Use the local side of the island, highland/rain-shadow effects, monsoon and inter-monsoon rainfall, cloud/light, sunshine, and wind; do not copy one island-wide month range to every place.
+const getSeasonGuidePrompt = (place) => `Use Google Search to prepare a concise, source-backed seasonal visit guide for this exact Sri Lankan pin. You must perform a web search and use at least one relevant result; search the place name with its category, locality, and coordinates, and use the coordinates to identify the correct area and reject similar-name places elsewhere. Prefer Sri Lanka Department of Meteorology, government/tourism or conservation sources, and reliable local climate sources. If the exact feature has no coverage, use a sourced climate reference for the nearest matching area and set location_match to AREA_CLIMATE_ONLY. Do not invent or name sources.
+Use the local side of the island, highland/rain-shadow effects, monsoon and inter-monsoon rainfall, cloud/light, sunshine, and wind; do not copy one island-wide month range to every place.
 Name: ${place.placeName}; category: ${place.category || 'Location'}; locality: ${place.locality}; coordinates: ${place.coordinates.latitude},${place.coordinates.longitude}.
-For waterfalls, give a likely higher-flow rainfall window and separately choose the best photography compromise: strong flow with a better chance of dry, calmer, clearer periods for phone/drone images. Rainfall is only a flow clue, not measured discharge; never promise flyable weather or drone permission. For every other category, favor the category's appealing soft/charming light while avoiding persistently wet or windy periods. Prefer sunrise to about 08:00 and late afternoon from about 16:30 to sunset for softer light; avoid harsh midday light, adjusting these guide times to the local weather and terrain. Recommend month ranges, not unsupported exact dates. Say if a window is an area-level estimate rather than verified for the exact feature. Keep every field brief (one sentence, about 20 words maximum); do not write an article. Return only one JSON object with these string keys: location_match (CONFIRMED, AREA_CLIMATE_ONLY, or UNCONFIRMED), resolved_area, primary_window, secondary_window, waterfall_flow_window (empty if not a waterfall), photo_window, rationale, rain_and_monsoon, sky_and_light, wind_and_drone, best_time_of_day, confidence (high, medium, or low). If the exact feature is obscure but the coordinate and locality agree, use AREA_CLIMATE_ONLY and source the nearest relevant climate area. If the pin conflicts with the supplied locality, use UNCONFIRMED. Do not invent measurements, exact flow, weather forecasts, safety, or access rules.`;
+For waterfalls, give a likely higher-flow rainfall window and separately choose the best photography compromise: strong flow with a better chance of dry, calmer, clearer periods for phone/drone images. Rainfall is only a flow clue, not measured discharge; never promise flyable weather or drone permission. For every other category, favor the category's appealing soft/charming light while avoiding persistently wet or windy periods. Prefer sunrise to about 08:00 and late afternoon from about 16:30 to sunset for softer light; avoid harsh midday light, adjusting these guide times to the local weather and terrain. Recommend month ranges, not unsupported exact dates. Say if a window is an area-level estimate rather than verified for the exact feature. Keep every value to one short sentence (12 words maximum); omit optional details instead of adding explanation. Do not write an article. Return only one compact JSON object with these string keys: location_match (CONFIRMED, AREA_CLIMATE_ONLY, or UNCONFIRMED), resolved_area, primary_window, secondary_window, waterfall_flow_window (empty if not a waterfall), photo_window, rationale, rain_and_monsoon, sky_and_light, wind_and_drone, best_time_of_day, confidence (high, medium, or low). If the pin conflicts with the supplied locality, use UNCONFIRMED. Do not invent measurements, exact flow, weather forecasts, safety, or access rules.`;
+
+const extractJsonObject = (value) => {
+  const text = String(value || '');
+  const start = text.indexOf('{');
+  if (start < 0) return null;
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < text.length; index += 1) {
+    const character = text[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (character === '\\') escaped = true;
+      else if (character === '"') inString = false;
+      continue;
+    }
+    if (character === '"') inString = true;
+    else if (character === '{') depth += 1;
+    else if (character === '}') {
+      depth -= 1;
+      if (depth === 0) return text.slice(start, index + 1);
+    }
+  }
+  return null;
+};
 
 const parseSeasonGuideJson = (text) => {
-  const cleaned = String(text || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+  const cleaned = String(text || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
   try {
     return JSON.parse(cleaned);
-  } catch {
-    const first = cleaned.indexOf('{');
-    const last = cleaned.lastIndexOf('}');
-    if (first >= 0 && last > first) return JSON.parse(cleaned.slice(first, last + 1));
-    throw new Error('The Gemini response was not valid season-guide JSON.');
+  } catch (initialError) {
+    const objectText = extractJsonObject(cleaned);
+    if (objectText && objectText !== cleaned) {
+      try {
+        return JSON.parse(objectText);
+      } catch {
+        // Keep one stable, user-facing error rather than exposing parser internals.
+      }
+    }
+    const parseError = new Error('The Gemini response was not valid season-guide JSON.');
+    parseError.cause = initialError;
+    if (!objectText) parseError.incomplete = true;
+    throw parseError;
   }
+};
+
+const getSeasonGuideGroundedSources = (response) => {
+  const candidate = response?.candidates?.[0] || response?.response?.candidates?.[0];
+  const groundingMetadata = candidate?.groundingMetadata
+    || candidate?.grounding_metadata
+    || response?.groundingMetadata
+    || response?.grounding_metadata
+    || response?.response?.groundingMetadata
+    || response?.response?.grounding_metadata;
+  const groundingChunks = groundingMetadata?.groundingChunks
+    || groundingMetadata?.grounding_chunks
+    || [];
+  const fallbackSources = groundingChunks.flatMap((chunk) => {
+    const web = chunk?.web || chunk?.webSearch || chunk?.web_search;
+    const url = web?.uri || web?.url;
+    return typeof url === 'string' ? [{ title: web?.title, url }] : [];
+  });
+  const deduplicatedSources = new Map();
+  [...getGroundedSources(response), ...fallbackSources].forEach((source) => {
+    try {
+      const url = new URL(source?.url);
+      if (['http:', 'https:'].includes(url.protocol)) {
+        deduplicatedSources.set(url.href, { title: source?.title || url.hostname, url: url.href });
+      }
+    } catch {
+      // Ignore malformed or non-web grounding chunks.
+    }
+  });
+  return [...deduplicatedSources.values()].slice(0, 5);
 };
 
 const normalizeSeasonGuideResults = (batch, offset, limit) => {
@@ -85,29 +150,49 @@ const normalizeSeasonGuideResults = (batch, offset, limit) => {
     const response = inline?.response || inline?.output?.response;
     if (!response) return { key, success: false, error: getResultError(inline) };
 
-    const sources = getGroundedSources(response).slice(0, 5);
+    const sources = getSeasonGuideGroundedSources(response);
     try {
-      const parsed = parseSeasonGuideJson(readText(response));
-      const guide = {
-        locationMatch: cleanText(parsed?.location_match, 40).toUpperCase(),
-        resolvedArea: cleanText(parsed?.resolved_area, 180),
-        primaryWindow: cleanText(parsed?.primary_window, 100),
-        secondaryWindow: cleanText(parsed?.secondary_window, 100),
-        waterfallFlowWindow: cleanText(parsed?.waterfall_flow_window, 100),
-        photoWindow: cleanText(parsed?.photo_window, 100),
-        rationale: cleanText(parsed?.rationale, 500),
-        rainAndMonsoon: cleanText(parsed?.rain_and_monsoon, 500),
-        skyAndLight: cleanText(parsed?.sky_and_light, 500),
-        windAndDrone: cleanText(parsed?.wind_and_drone, 500),
-        bestTimeOfDay: cleanText(parsed?.best_time_of_day, 240),
-        confidence: cleanText(parsed?.confidence, 20).toLowerCase()
+      const parsedResponse = parseSeasonGuideJson(readText(response));
+      const parsed = parsedResponse?.season_guide || parsedResponse?.seasonGuide || parsedResponse?.guide || parsedResponse;
+      const readGuideValue = (...keys) => {
+        for (const keyName of keys) {
+          const value = parsed?.[keyName];
+          if (typeof value === 'string' && value.trim()) return value;
+        }
+        return '';
       };
+      const guide = {
+        locationMatch: cleanText(readGuideValue('location_match', 'locationMatch'), 40).toUpperCase().replace(/[\s-]+/g, '_'),
+        resolvedArea: cleanText(readGuideValue('resolved_area', 'resolvedArea'), 180),
+        primaryWindow: cleanText(readGuideValue('primary_window', 'primaryWindow', 'best_season', 'bestSeason'), 100),
+        secondaryWindow: cleanText(readGuideValue('secondary_window', 'secondaryWindow', 'alternative_window', 'alternativeWindow'), 100),
+        waterfallFlowWindow: cleanText(readGuideValue('waterfall_flow_window', 'waterfallFlowWindow', 'flow_window', 'flowWindow'), 100),
+        photoWindow: cleanText(readGuideValue('photo_window', 'photoWindow', 'photography_window', 'photographyWindow'), 100),
+        rationale: cleanText(readGuideValue('rationale', 'reason'), 500),
+        rainAndMonsoon: cleanText(readGuideValue('rain_and_monsoon', 'rainAndMonsoon', 'rainfall'), 500),
+        skyAndLight: cleanText(readGuideValue('sky_and_light', 'skyAndLight', 'light'), 500),
+        windAndDrone: cleanText(readGuideValue('wind_and_drone', 'windAndDrone', 'wind'), 500),
+        bestTimeOfDay: cleanText(readGuideValue('best_time_of_day', 'bestTimeOfDay'), 240),
+        confidence: cleanText(readGuideValue('confidence'), 20).toLowerCase()
+      };
+
+      // The primary season is the concise recommendation and can also serve as
+      // the photography window when the model omits a redundant separate value.
+      if (!guide.photoWindow) guide.photoWindow = guide.primaryWindow;
 
       if (!['CONFIRMED', 'AREA_CLIMATE_ONLY'].includes(guide.locationMatch)) {
         return { key, success: false, error: 'The pin and supplied locality could not be reconciled to a reliable local climate source.' };
       }
-      if (!guide.primaryWindow || !guide.photoWindow || !guide.rainAndMonsoon || !guide.skyAndLight || sources.length === 0) {
-        return { key, success: false, error: 'The season research did not return a complete recommendation with grounded sources.' };
+      const missingParts = [
+        !guide.primaryWindow && 'best season',
+        sources.length === 0 && 'grounded web sources'
+      ].filter(Boolean);
+      if (missingParts.length > 0) {
+        return {
+          key,
+          success: false,
+          error: `The season research omitted ${missingParts.join(', ')}. Retry this guide.`
+        };
       }
       return {
         key,
@@ -117,7 +202,18 @@ const normalizeSeasonGuideResults = (batch, offset, limit) => {
         researchedAt: batch?.endTime || batch?.end_time || batch?.updateTime || batch?.update_time || new Date().toISOString()
       };
     } catch (error) {
-      return { key, success: false, error: error?.message || 'The season research response could not be read.' };
+      const finishReason = response?.candidates?.[0]?.finishReason
+        || response?.candidates?.[0]?.finish_reason
+        || response?.response?.candidates?.[0]?.finishReason
+        || response?.response?.candidates?.[0]?.finish_reason;
+      const truncated = error?.incomplete || /MAX_TOKENS|MAX_OUTPUT_TOKENS/i.test(String(finishReason || ''));
+      return {
+        key,
+        success: false,
+        error: truncated
+          ? 'Gemini ended before the season guide JSON was complete. Retry this guide.'
+          : error?.message || 'The season research response could not be read.'
+      };
     }
   });
   return { results, total };
@@ -196,7 +292,7 @@ const createSeasonGuideBatch = async (apiKey, body) => {
           tools: [{ google_search: {} }],
           generation_config: {
             temperature: 0.1,
-            max_output_tokens: 400,
+            max_output_tokens: 768,
             thinking_config: { thinking_budget: 0 }
           }
         },
