@@ -31,6 +31,7 @@ import {
   Landmark,
   LayoutGrid,
   Mail,
+  Maximize2,
   MapPin,
   MessageSquare,
   Navigation,
@@ -176,6 +177,7 @@ const Icon = React.memo(({ name, className = "w-4 h-4" }) => {
     'landmark': Landmark,
     'layout-grid': LayoutGrid,
     'mail': Mail,
+    'maximize-2': Maximize2,
     'map-pin': MapPin,
     'message-square': MessageSquare,
     'navigation': Navigation,
@@ -868,6 +870,7 @@ function App() {
   const [selectedTrip, setSelectedTrip] = useState([]);
   const [activeRouteName, setActiveRouteName] = useState('');
   const [activeSavedRouteId, setActiveSavedRouteId] = useState(null);
+  const [activeTripDialogOpen, setActiveTripDialogOpen] = useState(false);
 
   // --- Location & Add Location Flow States ---
   const [userCoords, setUserCoords] = useState(null);
@@ -908,6 +911,20 @@ function App() {
   const activeSeasonGuideArea = activeSeasonGuide?.mainArea
     || getRouteSeasonGuideContext(activeSavedRoute, places)?.request.mainArea
     || '';
+
+  useEffect(() => {
+    if (!activeTripDialogOpen) return undefined;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const handleEscape = (event) => {
+      if (event.key === 'Escape') setActiveTripDialogOpen(false);
+    };
+    window.addEventListener('keydown', handleEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener('keydown', handleEscape);
+    };
+  }, [activeTripDialogOpen]);
   const seasonGuideResearchSignature = JSON.stringify(routeSeasonGuideContexts.map((context) => ({
     id: context.id,
     request: context.request
@@ -6019,6 +6036,17 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
 
                 {/* Active Route Toolbar */}
                 <div className="flex items-center gap-1 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setActiveTripDialogOpen(true)}
+                    disabled={selectedTrip.length === 0}
+                    className="p-1 text-sky-700 hover:bg-sky-100 disabled:opacity-40 rounded-lg transition-all"
+                    title="Open active trip details"
+                    aria-label="Open active trip details"
+                  >
+                    <Icon name="maximize-2" className="w-3.5 h-3.5" />
+                  </button>
+
                   {/* SAVE ROUTE BUTTON */}
                   <button
                     onClick={handleSaveRoute}
@@ -7532,6 +7560,167 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
       )}
 
       </main>
+
+      {activeTripDialogOpen && selectedTrip.length > 0 && (
+        <div
+          className="fixed inset-0 z-[7000] flex items-center justify-center bg-slate-950/65 p-3 backdrop-blur-sm sm:p-6"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="active-trip-dialog-title"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setActiveTripDialogOpen(false);
+          }}
+        >
+          <section className="flex max-h-[94vh] w-full max-w-6xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl">
+            <header className="flex items-start justify-between gap-4 border-b border-slate-100 bg-slate-50 px-5 py-4 sm:px-7">
+              <div className="min-w-0">
+                <p className="text-[10px] font-black uppercase tracking-[0.18em] text-sky-700">Active trip details</p>
+                <h2 id="active-trip-dialog-title" className="mt-1 truncate text-lg font-black text-slate-900 sm:text-xl">
+                  {activeRouteName || 'Current Trip'}
+                </h2>
+                <p className="mt-1 text-xs font-semibold text-slate-500">
+                  {selectedTrip.length} stop{selectedTrip.length === 1 ? '' : 's'} · Estimated route distance {calculateRouteDistance()} km
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActiveTripDialogOpen(false)}
+                className="rounded-xl p-2 text-slate-500 hover:bg-slate-200 hover:text-slate-900"
+                aria-label="Close active trip details"
+              >
+                <Icon name="x" className="h-5 w-5" />
+              </button>
+            </header>
+
+            <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto p-4 sm:p-6 lg:grid-cols-[minmax(260px,0.8fr)_minmax(0,1.5fr)]">
+              <section className="h-fit rounded-2xl border border-sky-200 bg-sky-50/80 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-xs font-black uppercase tracking-wide text-sky-900">Trip season guide</h3>
+                    {activeSeasonGuideArea && <p className="mt-1 text-xs font-semibold text-slate-500">{activeSeasonGuideArea}</p>}
+                  </div>
+                  {activeSeasonGuide?.status === 'ready' && (
+                    <span className="rounded-full bg-emerald-100 px-2 py-1 text-[9px] font-black uppercase text-emerald-800">Ready</span>
+                  )}
+                </div>
+                {activeSavedRoute ? (
+                  activeSeasonGuide?.status === 'ready' ? (
+                    <div className="mt-4 space-y-3">
+                      <div className="rounded-xl border border-sky-100 bg-white p-3">
+                        <p className="text-[9px] font-black uppercase tracking-wide text-slate-400">Best period</p>
+                        <p className="mt-1 text-base font-black text-slate-900">{activeSeasonGuide.primaryWindow || 'Recommendation unavailable'}</p>
+                      </div>
+                      {activeSeasonGuide.secondaryWindow && (
+                        <div className="rounded-xl border border-sky-100 bg-white p-3">
+                          <p className="text-[9px] font-black uppercase tracking-wide text-slate-400">Alternative period</p>
+                          <p className="mt-1 text-sm font-bold text-slate-800">{activeSeasonGuide.secondaryWindow}</p>
+                        </div>
+                      )}
+                      {activeSeasonGuide.rationale && (
+                        <p className="text-xs leading-relaxed text-slate-600">{activeSeasonGuide.rationale}</p>
+                      )}
+                      {activeSeasonGuide.sources?.length > 0 ? (
+                        <div className="border-t border-sky-200 pt-3">
+                          <p className="mb-2 text-[9px] font-black uppercase tracking-wide text-slate-500">Sources</p>
+                          <ul className="space-y-1.5">
+                            {activeSeasonGuide.sources.slice(0, 5).map((source, sourceIndex) => {
+                              let safeUrl = null;
+                              try {
+                                const parsedUrl = new URL(source?.url);
+                                if (['http:', 'https:'].includes(parsedUrl.protocol)) safeUrl = parsedUrl.href;
+                              } catch {
+                                safeUrl = null;
+                              }
+                              return safeUrl ? (
+                                <li key={safeUrl + '-' + sourceIndex}>
+                                  <a href={safeUrl} target="_blank" rel="noopener noreferrer" className="break-words text-xs font-bold text-indigo-700 underline">
+                                    {source.title || safeUrl}
+                                  </a>
+                                </li>
+                              ) : null;
+                            })}
+                          </ul>
+                        </div>
+                      ) : (
+                        <p className="border-t border-sky-200 pt-3 text-[10px] leading-relaxed text-slate-500">
+                          {activeSeasonGuide.sourceStatus === 'search_used_no_citations'
+                            ? 'Search ran, but citation links were not returned.'
+                            : 'AI seasonal estimate; citation links were unavailable.'}
+                        </p>
+                      )}
+                      <p className="border-t border-sky-200 pt-3 text-[10px] leading-relaxed text-slate-400">
+                        Seasonal guidance only. Conditions vary and this is not a forecast or drone clearance.
+                      </p>
+                    </div>
+                  ) : activeSeasonGuide?.status === 'error' ? (
+                    <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-3">
+                      <p className="text-xs leading-relaxed text-rose-800">{activeSeasonGuide.error || 'Season guide research failed.'}</p>
+                      <button
+                        type="button"
+                        onClick={() => retryFailedSeasonGuides(activeSavedRoute.id)}
+                        disabled={seasonGuideProgress.running}
+                        className="mt-3 rounded-lg bg-rose-100 px-3 py-2 text-[10px] font-black uppercase text-rose-800 hover:bg-rose-200 disabled:opacity-50"
+                      >Retry guide</button>
+                    </div>
+                  ) : (
+                    <p className="mt-4 rounded-xl border border-sky-100 bg-white p-3 text-xs leading-relaxed text-slate-600">
+                      Researching the best travel period for this route area…
+                    </p>
+                  )
+                ) : (
+                  <p className="mt-4 rounded-xl border border-sky-100 bg-white p-3 text-xs leading-relaxed text-slate-600">
+                    This is a manually assembled trip. Load a saved route plan to show its stored seasonal guide here.
+                  </p>
+                )}
+              </section>
+
+              <section className="min-w-0">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <h3 className="text-xs font-black uppercase tracking-wide text-slate-800">Route stops</h3>
+                  <span className="text-[10px] font-semibold text-slate-400">Ordered trip details</span>
+                </div>
+                <ol className="space-y-2">
+                  {selectedTrip.map((stop, index) => {
+                    const stopName = stop.place_name || stop.n || 'Saved waypoint';
+                    const weather = weatherData[stopName];
+                    return (
+                      <li key={stop.id || 'active-stop-' + index} className="rounded-2xl border border-slate-200 bg-white p-3 sm:p-4">
+                        <div className="flex items-start gap-3">
+                          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-900 text-xs font-black text-white">{index + 1}</span>
+                          <div className="min-w-0 flex-1">
+                            <p className="break-words text-sm font-black text-slate-900">{stopName}</p>
+                            <p className="mt-1 text-xs text-slate-500">
+                              {[stop.category, stop.locality].filter(Boolean).join(' · ') || 'Location'}
+                            </p>
+                            <p className="mt-1 text-[10px] font-medium text-slate-400">
+                              {Number(stop.latitude).toFixed(5)}, {Number(stop.longitude).toFixed(5)}
+                            </p>
+                          </div>
+                          {weather && (
+                            <div className="shrink-0 rounded-xl bg-slate-50 px-3 py-2 text-right">
+                              <p className="text-[9px] font-black uppercase tracking-wide text-slate-400">Now / next day</p>
+                              <p className="mt-1 text-xs font-bold text-slate-700">{weather.current}°C · {weather.nextDay}°C</p>
+                              <p className="text-[9px] text-slate-500">{weather.currentCond} · {weather.nextCond}</p>
+                            </div>
+                          )}
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ol>
+              </section>
+            </div>
+
+            <footer className="flex justify-end border-t border-slate-100 bg-slate-50 px-5 py-3 sm:px-7">
+              <button
+                type="button"
+                onClick={() => setActiveTripDialogOpen(false)}
+                className="rounded-xl bg-slate-900 px-4 py-2 text-[10px] font-black uppercase tracking-wide text-white hover:bg-slate-700"
+              >Close details</button>
+            </footer>
+          </section>
+        </div>
+      )}
 
       {bulkGenerationLogDialogOpen && (
         <div
