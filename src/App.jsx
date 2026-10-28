@@ -935,7 +935,8 @@ function App() {
     const map = L.map(activeTripMiniMapContainerRef.current, {
       zoomControl: true,
       attributionControl: true,
-      scrollWheelZoom: false,
+      scrollWheelZoom: true,
+      dragging: true,
       fadeAnimation: true
     }).setView([sortCenter.lat, sortCenter.lng], 8);
 
