@@ -288,7 +288,13 @@ const executeGeminiSeasonGuideBatch = async (places, publish, forceIds = []) => 
     const result = await response.json().catch(() => ({}));
     if (!response.ok || result.error) {
       const message = typeof result.error === 'string' ? result.error : result.error?.message;
-      throw new Error(message || `Season research request failed (${response.status}).`);
+      const details = typeof result.error?.details === 'string'
+        ? result.error.details
+        : result.error?.details ? JSON.stringify(result.error.details) : '';
+      const diagnostic = details && /bad request/i.test(String(message || '')) ? ` ${details.slice(0, 800)}` : '';
+      const error = new Error(`${message || `Season research request failed (${response.status}).`}${diagnostic}`);
+      error.status = response.status;
+      throw error;
     }
     return result;
   };
@@ -307,20 +313,42 @@ const executeGeminiSeasonGuideBatch = async (places, publish, forceIds = []) => 
     results.set(String(key), guide);
     publish({ type: 'guide', key: String(key), guide });
   };
-  const created = await post({
-    action: 'create',
-    task: 'season-guide',
-    displayName: `my-journal-admin-season-guide-${Date.now()}`,
-    forceIds,
-    locations: places.map((place) => ({
-      id: String(place.id),
-      placeName: place.place_name,
-      category: place.category || 'Location',
-      locality: place.locality,
-      latitude: place.latitude,
-      longitude: place.longitude
-    }))
-  });
+  // Keep inline Gemini jobs small. A large location list can exceed per-job
+  // request limits, and a failed job would otherwise strand every guide.
+  const created = { results: [], operations: [] };
+  const createGroup = async (group, groupIndex) => {
+    try {
+      const part = await post({
+        action: 'create',
+        task: 'season-guide',
+        displayName: `my-journal-admin-season-guide-${Date.now()}-${groupIndex + 1}`,
+        forceIds,
+        locations: group.map((place) => ({
+          id: String(place.id),
+          placeName: place.place_name,
+          category: place.category || 'Location',
+          locality: place.locality,
+          latitude: place.latitude,
+          longitude: place.longitude
+        }))
+      });
+      created.results.push(...(part.results || []));
+      created.operations.push(...(part.operations || (part.operationName ? [{
+        operationName: part.operationName,
+        targetIds: group.map((place) => String(place.id))
+      }] : [])));
+    } catch (error) {
+      group.forEach((place) => created.results.push({
+        key: String(place.id),
+        success: false,
+        error: error.message || 'Season research request failed.'
+      }));
+    }
+  };
+  const createGroupSize = 20;
+  for (let offset = 0; offset < places.length; offset += createGroupSize) {
+    await createGroup(places.slice(offset, offset + createGroupSize), Math.floor(offset / createGroupSize));
+  }
 
   for (const item of created.results || []) {
     const guide = item.success

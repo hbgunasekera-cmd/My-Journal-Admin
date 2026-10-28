@@ -26,11 +26,26 @@ async function callGeminiBatch(apiKey, path, options = {}) {
     },
     signal: AbortSignal.timeout(25_000)
   });
-  const result = await response.json().catch(() => ({}));
+  const responseText = await response.text().catch(() => '');
+  let result = {};
+  try {
+    result = responseText ? JSON.parse(responseText) : {};
+  } catch {
+    // Keep the empty response object when Gemini returns a non-JSON body.
+  }
   if (!response.ok) {
-    const message = result?.error?.message || `Gemini Batch API request failed (${response.status}).`;
+    const apiError = result?.error || {};
+    const errorDetails = Array.isArray(apiError.details) ? apiError.details : [];
+    const fieldViolations = errorDetails
+      .flatMap((detail) => detail?.fieldViolations || detail?.field_violations || [])
+      .map((violation) => [violation?.field, violation?.description].filter(Boolean).join(': '))
+      .filter(Boolean);
+    const message = fieldViolations.length
+      ? `Gemini rejected the batch request: ${fieldViolations.join('; ')}`
+      : apiError.message || response.statusText || `Gemini Batch API request failed (${response.status}).`;
     const error = new Error(message);
     error.status = response.status;
+    error.details = responseText.slice(0, 2_000);
     throw error;
   }
   return result;
@@ -74,7 +89,7 @@ const getResultError = (response) => {
 const getSeasonGuidePrompt = (place) => `Use Google Search to prepare a concise, source-backed seasonal visit guide for this exact Sri Lankan pin. You must perform a web search and use at least one relevant result; search the place name with its category, locality, and coordinates, and use the coordinates to identify the correct area and reject similar-name places elsewhere. Prefer Sri Lanka Department of Meteorology, government/tourism or conservation sources, and reliable local climate sources. If the exact feature has no coverage, use a sourced climate reference for the nearest matching area and set location_match to AREA_CLIMATE_ONLY. Do not invent or name sources.
 Use the local side of the island, highland/rain-shadow effects, monsoon and inter-monsoon rainfall, cloud/light, sunshine, and wind; do not copy one island-wide month range to every place.
 Name: ${place.placeName}; category: ${place.category || 'Location'}; locality: ${place.locality}; coordinates: ${place.coordinates.latitude},${place.coordinates.longitude}.
-For waterfalls, give a likely higher-flow rainfall window and separately choose the best photography compromise: strong flow with a better chance of dry, calmer, clearer periods for phone/drone images. Rainfall is only a flow clue, not measured discharge; never promise flyable weather or drone permission. For every other category, favor the category's appealing soft/charming light while avoiding persistently wet or windy periods. Prefer sunrise to about 08:00 and late afternoon from about 16:30 to sunset for softer light; avoid harsh midday light, adjusting these guide times to the local weather and terrain. Recommend month ranges, not unsupported exact dates. Say if a window is an area-level estimate rather than verified for the exact feature. Keep every value to one short sentence (12 words maximum); omit optional details instead of adding explanation. Do not write an article. Return only one compact JSON object with these string keys: location_match (CONFIRMED, AREA_CLIMATE_ONLY, or UNCONFIRMED), resolved_area, primary_window, secondary_window, waterfall_flow_window (empty if not a waterfall), photo_window, rationale, rain_and_monsoon, sky_and_light, wind_and_drone, best_time_of_day, confidence (high, medium, or low). If the pin conflicts with the supplied locality, use UNCONFIRMED. Do not invent measurements, exact flow, weather forecasts, safety, or access rules.`;
+For waterfalls, give a likely higher-flow rainfall window and separately choose the best photography compromise: strong flow with a better chance of dry, calmer, clearer periods for phone/drone images. Rainfall is only a flow clue, not measured discharge; never promise flyable weather or drone permission. For every other category, favor the category's appealing soft/charming light while avoiding persistently wet or windy periods. Prefer sunrise to about 08:00 and late afternoon from about 16:30 to sunset for softer light; avoid harsh midday light, adjusting these guide times to the local weather and terrain. Recommend month ranges, not unsupported exact dates. Say if a window is an area-level estimate rather than verified for the exact feature. Keep each value to a brief phrase (8 words maximum); omit optional details instead of adding explanation. Put location_match, primary_window, and photo_window first. Do not write an article. Return only one compact JSON object with these string keys: location_match (CONFIRMED, AREA_CLIMATE_ONLY, or UNCONFIRMED), resolved_area, primary_window, secondary_window, waterfall_flow_window (empty if not a waterfall), photo_window, rationale, rain_and_monsoon, sky_and_light, wind_and_drone, best_time_of_day, confidence (high, medium, or low). If the pin conflicts with the supplied locality, use UNCONFIRMED. Do not invent measurements, exact flow, weather forecasts, safety, or access rules.`;
 
 const extractJsonObject = (value) => {
   const text = String(value || '');
@@ -330,7 +345,7 @@ const createSeasonGuideBatch = async (apiKey, body) => {
           tools: [{ google_search: {} }],
           generation_config: {
             temperature: 0.1,
-            max_output_tokens: 768,
+            max_output_tokens: 2_048,
             thinking_config: { thinking_budget: 0 }
           }
         },
@@ -656,7 +671,12 @@ async function handler(req, res) {
     const status = Number.isInteger(error.status) && error.status >= 400 && error.status < 600
       ? error.status
       : 502;
-    return res.status(status).json({ error: { message: getSeasonGuideStorageError(error) || error.message || 'Gemini Batch API request failed.' } });
+    return res.status(status).json({
+      error: {
+        message: getSeasonGuideStorageError(error) || error.message || 'Gemini Batch API request failed.',
+        details: error?.details || null
+      }
+    });
   }
 }
 
