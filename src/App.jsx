@@ -118,46 +118,143 @@ const TRAFFIC_BOT_RULES = [
   { source: 'Generic Bot', patterns: ['bot', 'spider', 'crawl', 'headless', 'ia_archiver'] }
 ];
 
-const getErrorLogTrafficSource = (log = {}) => {
+const parseUATrafficSource = (v = {}) => {
+  const rawUA = v.user_agent || '';
+  const lowerUA = rawUA.toLowerCase();
+  const referrer = (v.referrer || '').toLowerCase();
+  const rawPath = (v.page_path || 'Unknown').toLowerCase();
+  const utmSource = (v.utm_source || v.source || '').toLowerCase();
+  const utmMedium = (v.utm_medium || v.medium || '').toLowerCase();
+  const subscriberToken = v.subscriber_email || v.sub_id || '';
+  const ip = String(v.ip_address || '');
+  const isDataCenterNetwork =
+    ip.startsWith('66.220.') || ip.startsWith('173.252.') ||
+    ip.startsWith('31.13.') || ip.startsWith('66.249.') ||
+    ip.startsWith('74.125.') || ip.startsWith('69.171.') ||
+    ip.startsWith('34.') || ip.startsWith('35.') ||
+    ip.startsWith('104.') || ip.startsWith('20.') ||
+    ip.startsWith('3.') || ip.startsWith('52.') || ip.startsWith('54.');
+
+  const detectedBotSource = TRAFFIC_BOT_RULES.find((rule) =>
+    rule.patterns.some((pattern) => lowerUA.includes(pattern))
+  )?.source || null;
+  const isBot = Boolean(detectedBotSource)
+    || lowerUA.includes('headlesschrome')
+    || v.is_webdriver === true
+    || isDataCenterNetwork;
+
+  let source;
+  if (isBot) {
+    if (detectedBotSource) source = detectedBotSource;
+    else if (ip.startsWith('31.13.') || ip.startsWith('66.220.')) source = 'Meta Scraper';
+    else if (ip.startsWith('66.249.') || ip.startsWith('74.125.')) source = 'Google Bot';
+    else source = 'Automated Crawler';
+  } else if (
+    utmSource.includes('newsletter') ||
+    utmSource.includes('email') ||
+    utmMedium.includes('email') ||
+    Boolean(subscriberToken) ||
+    rawPath.includes('utm_source=newsletter') ||
+    rawPath.includes('utm_medium=email') ||
+    rawPath.includes('sub_id=')
+  ) {
+    source = 'Newsletter';
+  } else if (
+    utmSource.includes('qrcode') ||
+    utmSource.includes('qr') ||
+    rawPath.includes('utm_source=qrcode') ||
+    rawPath.includes('utm_source=qr')
+  ) {
+    source = 'QR Scan';
+  } else if (utmSource) {
+    if (utmSource.includes('facebook') || utmSource.includes('fb')) source = 'Facebook';
+    else if (utmSource.includes('instagram') || utmSource.includes('ig')) source = 'Instagram';
+    else if (utmSource.includes('twitter') || utmSource.includes('x')) source = 'Twitter(X)';
+    else source = utmSource.charAt(0).toUpperCase() + utmSource.slice(1);
+  } else if (
+    referrer.includes('google.') || referrer.includes('bing.com') ||
+    referrer.includes('duckduckgo.com') || referrer.includes('yahoo.com') ||
+    referrer.includes('baidu.com') || referrer.includes('yandex.')
+  ) {
+    source = 'Search Engine';
+  } else if (lowerUA.includes('instagram') || referrer.includes('instagram.com')) {
+    source = 'Instagram';
+  } else if (lowerUA.includes('fban') || lowerUA.includes('fbav') || referrer.includes('facebook.com')) {
+    source = 'Facebook';
+  } else {
+    source = 'Direct';
+  }
+
+  return { source, isBot };
+};
+
+const normalizeTrafficPagePath = (path = '') => String(path).toLowerCase().split('?')[0];
+
+const getErrorLogTrafficSource = (log = {}, analyticsVisits = []) => {
   const context = log.context && typeof log.context === 'object' && !Array.isArray(log.context)
     ? log.context
     : {};
-  const userAgent = String(log.user_agent || context.user_agent || '').toLowerCase();
-  const matchedBot = TRAFFIC_BOT_RULES.find((rule) => rule.patterns.some((pattern) => userAgent.includes(pattern)));
+  const userAgent = String(log.user_agent || context.user_agent || '').trim();
+  const pagePath = normalizeTrafficPagePath(log.page_path || context.page_path || '');
+  const logTime = Date.parse(log.created_at || '');
+  const sessionId = String(log.session_id || '');
 
-  if (matchedBot) {
+  const closestVisit = (Array.isArray(analyticsVisits) ? analyticsVisits : [])
+    .filter((visit) => {
+      const sameSession = sessionId && String(visit.session_id || '') === sessionId;
+      if (sameSession) return true;
+      if (!userAgent || String(visit.user_agent || '').trim().toLowerCase() !== userAgent.toLowerCase()) return false;
+      if (pagePath && normalizeTrafficPagePath(visit.page_path || '') !== pagePath) return false;
+      const visitTime = Date.parse(visit.created_at || '');
+      return Number.isFinite(logTime) && Number.isFinite(visitTime) && Math.abs(logTime - visitTime) <= 15 * 60 * 1000;
+    })
+    .sort((a, b) => {
+      const aSessionMatch = sessionId && String(a.session_id || '') === sessionId ? 1 : 0;
+      const bSessionMatch = sessionId && String(b.session_id || '') === sessionId ? 1 : 0;
+      if (aSessionMatch !== bSessionMatch) return bSessionMatch - aSessionMatch;
+      return Math.abs(logTime - Date.parse(a.created_at || '')) - Math.abs(logTime - Date.parse(b.created_at || ''));
+    })[0] || null;
+
+  const trafficRecord = {
+    ...(closestVisit || {}),
+    ...context,
+    user_agent: userAgent || closestVisit?.user_agent || '',
+    page_path: log.page_path || context.page_path || closestVisit?.page_path || '',
+    ip_address: context.ip_address || context.client_ip || context.ip || closestVisit?.ip_address || '',
+    referrer: context.referrer || closestVisit?.referrer || '',
+    utm_source: context.utm_source || closestVisit?.utm_source || '',
+    utm_medium: context.utm_medium || closestVisit?.utm_medium || '',
+    is_webdriver: log.is_webdriver === true || context.is_webdriver === true || closestVisit?.is_webdriver === true
+  };
+  const traffic = parseUATrafficSource(trafficRecord);
+
+  if (traffic.isBot) {
+    const source = traffic.source === 'Direct' ? 'Automated Crawler' : traffic.source;
     return {
-      label: `${matchedBot.source} · Bot/Crawler`,
+      label: `${source} · Bot/Crawler`,
       className: 'bg-rose-100 text-rose-800',
-      detail: `Traffic Intelligence classifies this as a bot/crawler (${matchedBot.source}).`
+      detail: `Traffic Intelligence parseUA classifies this as ${source} (bot/crawler).`
     };
   }
 
-  if (log.is_webdriver === true || context.is_webdriver === true) {
-    return {
-      label: 'Automated Browser · Bot/Crawler',
-      className: 'bg-violet-100 text-violet-800',
-      detail: 'Traffic Intelligence classifies this as an automated browser.'
-    };
-  }
-
-  if (!userAgent) {
+  if (!userAgent && !closestVisit && !context.ip_address && !context.client_ip && !context.ip) {
     return {
       label: 'Unknown Source',
       className: 'bg-slate-100 text-slate-600',
-      detail: 'No user-agent information was recorded, so the traffic source could not be classified.'
+      detail: 'Traffic source is unknown because this error has no user-agent or matching page visit.'
     };
   }
 
+  const source = traffic.source === 'Direct' ? 'Real Person' : `Real Person · ${traffic.source}`;
   return {
-    label: 'Real Person',
+    label: source,
     className: 'bg-emerald-100 text-emerald-800',
-    detail: 'Traffic Intelligence classifies this as a real-person visit.'
+    detail: `Traffic Intelligence parseUA classifies this as a real-person visit${traffic.source === 'Direct' ? '' : ` from ${traffic.source}`}.`
   };
 };
 
-const ErrorLogTrafficBadge = ({ log }) => {
-  const trafficSource = getErrorLogTrafficSource(log);
+const ErrorLogTrafficBadge = ({ log, analyticsVisits }) => {
+  const trafficSource = getErrorLogTrafficSource(log, analyticsVisits);
   return (
     <span
       title={trafficSource.detail}
@@ -4586,12 +4683,9 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
     const parseUA = (v = {}) => {
       const rawUA = v.user_agent || "";
       const lowerUA = rawUA.toLowerCase();
-      const referrer = (v.referrer || "").toLowerCase();
       const rawPath = (v.page_path || 'Unknown').toLowerCase();
 
       // Source/Medium & Subscriber tracking resolution
-      const utmSource = (v.utm_source || v.source || "").toLowerCase();
-      const utmMedium = (v.utm_medium || v.medium || "").toLowerCase();
       const subscriberToken = v.subscriber_email || v.sub_id || "";
 
       const ip = v.ip_address || "";
@@ -4607,81 +4701,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
         loyaltyStatus = "Unique Visit";
       }
 
-      // 2. Data-Center Network IP Ranges
-      const isDataCenterNetwork =
-        ip.startsWith('66.220.') || ip.startsWith('173.252.') ||
-        ip.startsWith('31.13.') || ip.startsWith('66.249.') ||
-        ip.startsWith('74.125.') || ip.startsWith('69.171.') ||
-        ip.startsWith('34.') || ip.startsWith('35.') ||
-        ip.startsWith('104.') || ip.startsWith('20.') ||
-        ip.startsWith('3.') || ip.startsWith('52.') || ip.startsWith('54.');
-
-      // 3. Bot Classification Rules
-      // Match specific bot source from UA string
-      let detectedBotSource = null;
-      for (const rule of TRAFFIC_BOT_RULES) {
-        if (rule.patterns.some(pattern => lowerUA.includes(pattern))) {
-          detectedBotSource = rule.source;
-          break;
-        }
-      }
-
-      const isBotUA = Boolean(detectedBotSource) || lowerUA.includes('headlesschrome') || v.is_webdriver === true;
-      const isBot = isBotUA || isDataCenterNetwork;
-
-      // 4. Traffic Source Determination
-      let finalSource;
-
-      if (isBot) {
-        if (detectedBotSource) {
-          finalSource = detectedBotSource;
-        } else if (ip.startsWith('31.13.') || ip.startsWith('66.220.')) {
-          finalSource = 'Meta Scraper';
-        } else if (ip.startsWith('66.249.') || ip.startsWith('74.125.')) {
-          finalSource = 'Google Bot';
-        } else {
-          finalSource = 'Automated Crawler';
-        }
-      } else {
-        // Newsletter & Subscriber Detection
-        if (
-          utmSource.includes('newsletter') ||
-          utmSource.includes('email') ||
-          utmMedium.includes('email') ||
-          Boolean(subscriberToken) ||
-          rawPath.includes('utm_source=newsletter') ||
-          rawPath.includes('utm_medium=email') ||
-          rawPath.includes('sub_id=')
-        ) {
-          finalSource = 'Newsletter';
-        }
-        // QR Code Detection
-        else if (
-          utmSource.includes('qrcode') ||
-          utmSource.includes('qr') ||
-          rawPath.includes('utm_source=qrcode') ||
-          rawPath.includes('utm_source=qr')
-        ) {
-          finalSource = 'QR Scan';
-        } else if (utmSource) {
-          if (utmSource.includes('facebook') || utmSource.includes('fb')) finalSource = 'Facebook';
-          else if (utmSource.includes('instagram') || utmSource.includes('ig')) finalSource = 'Instagram';
-          else if (utmSource.includes('twitter') || utmSource.includes('x')) finalSource = 'Twitter(X)';
-          else finalSource = utmSource.charAt(0).toUpperCase() + utmSource.slice(1);
-        } else if (
-          referrer.includes('google.') || referrer.includes('bing.com') ||
-          referrer.includes('duckduckgo.com') || referrer.includes('yahoo.com') ||
-          referrer.includes('baidu.com') || referrer.includes('yandex.')
-        ) {
-          finalSource = 'Search Engine';
-        } else if (lowerUA.includes('instagram') || referrer.includes('instagram.com')) {
-          finalSource = 'Instagram';
-        } else if (lowerUA.includes('fban') || lowerUA.includes('fbav') || referrer.includes('facebook.com')) {
-          finalSource = 'Facebook';
-        } else {
-          finalSource = "Direct";
-        }
-      }
+      const { source: finalSource, isBot } = parseUATrafficSource(v);
 
       // 5. Device and OS Resolution
       let type = 'Desktop';
@@ -7661,7 +7681,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                         <span className={`rounded-full px-2.5 py-1 text-[9px] font-black uppercase tracking-wide ${log.reporter === 'Client' ? 'bg-cyan-100 text-cyan-800' : 'bg-indigo-100 text-indigo-800'}`}>
                           {log.reporter || 'Admin'}
                         </span>
-                        <ErrorLogTrafficBadge log={log} />
+                        <ErrorLogTrafficBadge log={log} analyticsVisits={analyticsData} />
                         {log.error_code && (
                           <span className="rounded-full bg-amber-50 px-2.5 py-1 text-[9px] font-black text-amber-800">
                             Code {log.error_code}
