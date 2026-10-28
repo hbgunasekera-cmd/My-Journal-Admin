@@ -3,8 +3,8 @@ import { createClient } from '@supabase/supabase-js';
 const normalizePart = (value) => String(value ?? '').trim().replace(/\s+/g, ' ').toLocaleLowerCase('en');
 
 export const getSeasonGuideCacheKey = (place) => {
-  const latitude = Number(place?.latitude);
-  const longitude = Number(place?.longitude);
+  const latitude = Number(place?.latitude ?? place?.coordinates?.latitude);
+  const longitude = Number(place?.longitude ?? place?.coordinates?.longitude);
   return JSON.stringify([
     normalizePart(place?.placeName ?? place?.place_name),
     normalizePart(place?.category || 'Location'),

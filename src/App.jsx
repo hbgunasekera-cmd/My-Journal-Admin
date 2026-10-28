@@ -344,7 +344,11 @@ const executeGeminiSeasonGuideBatch = async (places, publish, forceIds = []) => 
     const operationName = operation.operationName;
     if (!operationName) continue;
     const keyMap = operation.keyMap || {};
-    const mapKey = (key) => keyMap[String(key)] || String(key);
+    const mapKeys = (key) => {
+      const mapped = keyMap[String(key)];
+      if (Array.isArray(mapped)) return mapped.map(String);
+      return mapped ? [String(mapped)] : [String(key)];
+    };
     let status = await post({ action: 'status', task: 'season-guide', operationName, offset: 0, limit: 25 });
     updateProgress(status, completedBase, failedBase);
     while (!terminal(status.state)) {
@@ -381,14 +385,16 @@ const executeGeminiSeasonGuideBatch = async (places, publish, forceIds = []) => 
         const guide = result.success
           ? { ...result.guide, sources: result.sources || [], researchedAt: result.researchedAt }
           : { error: result.error || 'Season research did not return a usable result.' };
-        const mappedKey = mapKey(result.key);
+        const mappedKeys = mapKeys(result.key);
         if (guide.error) {
-          const place = places.find((candidate) => String(candidate.id) === String(mappedKey));
-          logSeasonGuideFailure(guide.error, place, { action: 'status', operation_name: operationName });
+          mappedKeys.forEach((mappedKey) => {
+            const place = places.find((candidate) => String(candidate.id) === String(mappedKey));
+            logSeasonGuideFailure(guide.error, place, { action: 'status', operation_name: operationName });
+          });
         }
-        rememberGuide(mappedKey, guide);
-        operationCompleted += 1;
-        if (guide.error) operationFailed += 1;
+        mappedKeys.forEach((mappedKey) => rememberGuide(mappedKey, guide));
+        operationCompleted += mappedKeys.length;
+        if (guide.error) operationFailed += mappedKeys.length;
       }
       offset += (page.results || []).length;
       if (offset >= totalResults || !page.hasMore || page.results?.length === 0) break;

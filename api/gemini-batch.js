@@ -55,6 +55,17 @@ const getInlineResponses = (batch) => {
   return [];
 };
 
+const getInlineRequestKeys = (batch) => {
+  const inputConfig = batch?.inputConfig || batch?.input_config || {};
+  const requests = inputConfig?.requests?.requests
+    || inputConfig?.requests?.inlinedRequests
+    || inputConfig?.requests?.inlined_requests
+    || [];
+  return Array.isArray(requests) ? requests.map((request) => (
+    cleanText(request?.metadata?.key || request?.metadata?.id || '', 120)
+  )) : [];
+};
+
 const getResultError = (response) => {
   const error = response?.error || response?.output?.error;
   return error?.message || error?.status || (typeof error === 'string' ? error : 'The research request failed in the batch.');
@@ -143,10 +154,18 @@ const getSeasonGuideGroundedSources = (response) => {
 
 const normalizeSeasonGuideResults = (batch, offset, limit) => {
   const inlineResponses = getInlineResponses(batch);
+  const requestKeys = getInlineRequestKeys(batch);
   const total = inlineResponses.length;
   const results = inlineResponses.slice(offset, offset + limit).map((inline, pageIndex) => {
     const index = offset + pageIndex;
-    const key = cleanText(inline?.metadata?.key || inline?.metadata?.id || '', 120) || String(index);
+    const key = cleanText(
+      inline?.metadata?.key
+        || inline?.metadata?.id
+        || inline?.output?.metadata?.key
+        || inline?.output?.metadata?.id
+        || requestKeys[index],
+      120
+    ) || String(index);
     const response = inline?.response || inline?.output?.response;
     if (!response) return { key, success: false, error: getResultError(inline) };
 
@@ -240,16 +259,20 @@ const createSeasonGuideBatch = async (apiKey, body) => {
       throw error;
     }
     const cacheKey = getSeasonGuideCacheKey(factContext);
-    const target = uniqueLocations.get(cacheKey) || { cacheKey, factContext, ids: [] };
+    const legacyFactContext = { ...factContext };
+    delete legacyFactContext.coordinates;
+    const legacyCacheKey = getSeasonGuideCacheKey(legacyFactContext);
+    const target = uniqueLocations.get(cacheKey) || { cacheKey, legacyCacheKey, factContext, ids: [] };
     if (!target.ids.includes(id)) target.ids.push(id);
     uniqueLocations.set(cacheKey, target);
   }
 
   const targets = [...uniqueLocations.values()];
+  const lookupKeys = [...new Set(targets.flatMap((target) => [target.cacheKey, target.legacyCacheKey]))];
   const { data: existingRows, error: readError } = await store
     .from('location_season_guides')
     .select('*')
-    .in('cache_key', targets.map((target) => target.cacheKey));
+    .in('cache_key', lookupKeys);
   if (readError) throw new Error(getSeasonGuideStorageError(readError));
   const rowsByKey = new Map((existingRows || []).map((row) => [row.cache_key, row]));
   const cachedResults = [];
@@ -259,7 +282,17 @@ const createSeasonGuideBatch = async (apiKey, body) => {
   const isFresh = (row) => !row?.expires_at || Date.parse(row.expires_at) > now;
 
   targets.forEach((target) => {
-    const row = rowsByKey.get(target.cacheKey);
+    let row = rowsByKey.get(target.cacheKey);
+    if (!row && target.legacyCacheKey !== target.cacheKey) {
+      const legacyRow = rowsByKey.get(target.legacyCacheKey);
+      const coordinatesMatch = legacyRow
+        && Math.abs(Number(legacyRow.latitude) - target.factContext.coordinates.latitude) <= 0.000001
+        && Math.abs(Number(legacyRow.longitude) - target.factContext.coordinates.longitude) <= 0.000001;
+      if (coordinatesMatch) {
+        row = legacyRow;
+        target.persistCacheKey = legacyRow.cache_key;
+      }
+    }
     const forced = target.ids.some((id) => forceIds.has(id));
     if (!forced && row && ['ready', 'error'].includes(row.status) && isFresh(row)) {
       cachedResults.push(...seasonGuideDbResult(row, target.ids));
@@ -275,7 +308,11 @@ const createSeasonGuideBatch = async (apiKey, body) => {
         keyMap: {}
       };
       operation.targetIds.push(...target.ids.filter((id) => !operation.targetIds.includes(id)));
-      target.ids.forEach((id) => { operation.keyMap[String(row.batch_request_key || id)] = id; });
+      const requestKey = String(row.batch_request_key || target.ids[0]);
+      const existingIds = Array.isArray(operation.keyMap[requestKey])
+        ? operation.keyMap[requestKey]
+        : operation.keyMap[requestKey] ? [String(operation.keyMap[requestKey])] : [];
+      operation.keyMap[requestKey] = [...new Set([...existingIds, ...target.ids.map(String)])];
       operationsByName.set(row.batch_operation_name, operation);
       return;
     }
@@ -284,8 +321,9 @@ const createSeasonGuideBatch = async (apiKey, body) => {
 
   if (newTargets.length > 0) {
     if (!apiKey) throw new Error('Article generation is not configured on the server.');
-    const requests = newTargets.map((target) => {
-      const requestKey = target.ids[0];
+    const requests = newTargets.map((target, requestIndex) => {
+      const requestKey = String(requestIndex);
+      target.requestKey = requestKey;
       return {
         request: {
           contents: [{ role: 'user', parts: [{ text: getSeasonGuidePrompt(target.factContext) }] }],
@@ -322,7 +360,7 @@ const createSeasonGuideBatch = async (apiKey, body) => {
 
     const timestamp = new Date().toISOString();
     const rowsToSave = newTargets.map((target) => ({
-      cache_key: target.cacheKey,
+      cache_key: target.persistCacheKey || target.cacheKey,
       place_name: target.factContext.placeName,
       category: target.factContext.category || 'Location',
       locality: target.factContext.locality,
@@ -332,7 +370,7 @@ const createSeasonGuideBatch = async (apiKey, body) => {
       guide: null,
       error: null,
       batch_operation_name: operationName,
-      batch_request_key: target.ids[0],
+      batch_request_key: target.requestKey,
       researched_at: null,
       expires_at: null,
       updated_at: timestamp
@@ -343,7 +381,10 @@ const createSeasonGuideBatch = async (apiKey, body) => {
     operationsByName.set(operationName, {
       operationName,
       targetIds: newTargets.flatMap((target) => target.ids),
-      keyMap: Object.fromEntries(newTargets.flatMap((target) => target.ids.map((id) => [String(id), id])))
+      keyMap: Object.fromEntries(newTargets.map((target) => [
+        target.requestKey,
+        target.ids.map(String)
+      ]))
     });
   }
 
@@ -416,6 +457,36 @@ const persistSeasonGuideBatchFailure = async (store, operationName, reason) => {
   }));
   const { error: saveError } = await store.from('location_season_guides').upsert(records, { onConflict: 'cache_key' });
   if (saveError) throw new Error(getSeasonGuideStorageError(saveError));
+};
+
+const persistUnreturnedSeasonGuideResults = async (store, operationName) => {
+  const { data: rows, error: readError } = await store
+    .from('location_season_guides')
+    .select('*')
+    .eq('batch_operation_name', operationName);
+  if (readError) throw new Error(getSeasonGuideStorageError(readError));
+  if (!rows?.length) return [];
+
+  const now = Date.now();
+  const updatedAt = new Date(now).toISOString();
+  const errorMessage = 'Gemini finished the batch without returning a response for this location. Retry this guide.';
+  const records = rows.map((row) => ({
+    ...row,
+    status: 'error',
+    guide: { error: errorMessage },
+    error: errorMessage,
+    batch_operation_name: null,
+    batch_request_key: null,
+    expires_at: new Date(now + 24 * 60 * 60 * 1000).toISOString(),
+    updated_at: updatedAt
+  }));
+  const { error: saveError } = await store.from('location_season_guides').upsert(records, { onConflict: 'cache_key' });
+  if (saveError) throw new Error(getSeasonGuideStorageError(saveError));
+  return rows.map((row) => ({
+    key: String(row.batch_request_key || row.id),
+    success: false,
+    error: errorMessage
+  }));
 };
 
 const normalizeResearchResults = (batch, offset, limit) => {
@@ -561,11 +632,21 @@ async function handler(req, res) {
         const { results, total } = isSeasonGuide
           ? normalizeSeasonGuideResults(batch, offset, limit)
           : normalizeResearchResults(batch, offset, limit);
-        if (isSeasonGuide) await persistSeasonGuideResults(getSeasonGuideClient(), operationName, results);
-        response.results = results;
-        response.totalResults = total;
+        let completeResults = results;
+        let completeTotal = total;
+        if (isSeasonGuide) {
+          const store = getSeasonGuideClient();
+          await persistSeasonGuideResults(store, operationName, results);
+          if (offset + results.length >= total) {
+            const unreturnedResults = await persistUnreturnedSeasonGuideResults(store, operationName);
+            completeResults = [...results, ...unreturnedResults];
+            completeTotal += unreturnedResults.length;
+          }
+        }
+        response.results = completeResults;
+        response.totalResults = completeTotal;
         response.offset = offset;
-        response.hasMore = offset + results.length < total;
+        response.hasMore = offset + completeResults.length < completeTotal;
       }
       return res.status(200).json(response);
     }
