@@ -7689,7 +7689,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
             if (event.target === event.currentTarget) setActiveTripDialogOpen(false);
           }}
         >
-          <section className="flex max-h-[94vh] w-full max-w-6xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl">
+          <section className="flex h-[94vh] max-h-[94vh] w-full max-w-6xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl">
             <header className="flex items-start justify-between gap-4 border-b border-slate-100 bg-slate-50 px-5 py-4 sm:px-7">
               <div className="min-w-0">
                 <p className="text-[10px] font-black uppercase tracking-[0.18em] text-sky-700">Active trip details</p>
@@ -7710,8 +7710,8 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
               </button>
             </header>
 
-            <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto p-4 sm:p-6 lg:grid-cols-[minmax(280px,0.8fr)_minmax(0,1.5fr)]">
-              <section className="order-3 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 lg:col-start-2 lg:row-start-1 lg:row-span-2">
+            <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)_minmax(0,0.8fr)_minmax(0,1.4fr)] gap-4 overflow-hidden p-4 sm:p-6 lg:grid-cols-[minmax(280px,0.8fr)_minmax(0,1.5fr)] lg:grid-rows-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
+              <section className="order-3 flex min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 lg:col-start-2 lg:row-start-1 lg:row-span-2">
                 <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
                   <div>
                     <h3 className="text-xs font-black uppercase tracking-wide text-slate-800">Route map</h3>
@@ -7721,12 +7721,12 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                     {selectedTrip.length} stop{selectedTrip.length === 1 ? '' : 's'}
                   </span>
                 </div>
-                <div className="h-64 w-full bg-slate-200 sm:h-80 lg:h-[min(68vh,660px)] lg:min-h-[420px]">
+                <div className="min-h-0 w-full flex-1 bg-slate-200">
                   <div ref={activeTripMiniMapContainerRef} className="h-full w-full" aria-label="Map showing the active trip route" />
                 </div>
               </section>
 
-              <section className="order-2 h-fit rounded-2xl border border-sky-200 bg-sky-50/80 p-4 lg:col-start-1 lg:row-start-2">
+              <section className="order-2 min-h-0 overflow-y-auto overscroll-contain rounded-2xl border border-sky-200 bg-sky-50/80 p-4 lg:col-start-1 lg:row-start-2">
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <h3 className="text-xs font-black uppercase tracking-wide text-sky-900">Trip season guide</h3>
@@ -7807,7 +7807,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                 )}
               </section>
 
-              <section className="order-1 min-w-0 lg:col-start-1 lg:row-start-1">
+              <section className="order-1 flex min-h-0 min-w-0 flex-col lg:col-start-1 lg:row-start-1">
                 <div className="mb-3 flex items-center justify-between gap-3">
                   <h3 className="text-xs font-black uppercase tracking-wide text-slate-800">Route stops</h3>
                   <span className="text-[10px] font-semibold text-slate-400">Drag to reorder</span>
@@ -7818,7 +7818,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                       <ol
                         ref={provided.innerRef}
                         {...provided.droppableProps}
-                        className="space-y-2"
+                        className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain pr-1"
                       >
                         {selectedTrip.map((stop, index) => {
                           const stopName = stop.place_name || stop.n || 'Saved waypoint';
