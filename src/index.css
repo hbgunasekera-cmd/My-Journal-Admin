@@ -95,6 +95,22 @@ button, a {
 
 .leaflet-container:active { cursor: grabbing !important; }
 .leaflet-routing-container { display: none !important; }
+.active-trip-route-marker { background: transparent; border: 0; }
+.active-trip-route-marker span {
+    display: flex;
+    width: 28px;
+    height: 28px;
+    align-items: center;
+    justify-content: center;
+    border: 2px solid #fff;
+    border-radius: 9999px;
+    background: #e11d48;
+    color: #fff;
+    font-size: 10px;
+    font-weight: 900;
+    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.35);
+}
+.active-trip-route-marker-start span { background: #0891b2; }
 
 .leaflet-popup-content-wrapper {
     padding: 0 !important;

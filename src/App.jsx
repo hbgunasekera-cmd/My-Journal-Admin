@@ -885,6 +885,9 @@ function App() {
   const mapRef = useRef(null);
   const markersLayer = useRef(L.layerGroup());
   const routingControl = useRef(null);
+  const activeTripMiniMapContainerRef = useRef(null);
+  const activeTripMiniMapRef = useRef(null);
+  const activeTripMiniRoutingControlRef = useRef(null);
   const autocompleteRef = useRef(null);
   const autocompleteInstanceRef = useRef(null);
   const autocompleteListenerRef = useRef(null);
@@ -925,6 +928,117 @@ function App() {
       window.removeEventListener('keydown', handleEscape);
     };
   }, [activeTripDialogOpen]);
+
+  useEffect(() => {
+    if (!activeTripDialogOpen || selectedTrip.length === 0 || !activeTripMiniMapContainerRef.current) return undefined;
+
+    const map = L.map(activeTripMiniMapContainerRef.current, {
+      zoomControl: true,
+      attributionControl: true,
+      scrollWheelZoom: false,
+      fadeAnimation: true
+    }).setView([sortCenter.lat, sortCenter.lng], 8);
+
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
+      attribution: 'Tiles &copy; Esri',
+      maxZoom: 19
+    }).addTo(map);
+
+    activeTripMiniMapRef.current = map;
+    const resizeTimer = window.setTimeout(() => map.invalidateSize(), 120);
+
+    return () => {
+      window.clearTimeout(resizeTimer);
+      if (activeTripMiniRoutingControlRef.current) {
+        try {
+          map.removeControl(activeTripMiniRoutingControlRef.current);
+        } catch (error) {
+          console.warn('Active trip mini-map routing cleanup error ignored:', error);
+        }
+        activeTripMiniRoutingControlRef.current = null;
+      }
+      map.remove();
+      activeTripMiniMapRef.current = null;
+    };
+  }, [activeTripDialogOpen, selectedTrip.length]);
+
+  useEffect(() => {
+    const map = activeTripMiniMapRef.current;
+    if (!activeTripDialogOpen || !map) return undefined;
+
+    const routeWaypoints = [
+      L.latLng(sortCenter.lat, sortCenter.lng),
+      ...selectedTrip
+        .map((point) => getCoordinates(point))
+        .filter(Boolean)
+        .map(({ lat, lng }) => L.latLng(lat, lng))
+    ];
+
+    if (activeTripMiniRoutingControlRef.current) {
+      try {
+        map.removeControl(activeTripMiniRoutingControlRef.current);
+      } catch (error) {
+        console.warn('Active trip mini-map route update cleanup error ignored:', error);
+      }
+      activeTripMiniRoutingControlRef.current = null;
+    }
+
+    if (routeWaypoints.length < 2) return undefined;
+
+    let routingControlInstance = null;
+    const routingTimer = window.setTimeout(() => {
+      if (!activeTripMiniMapRef.current || !activeTripDialogOpen) return;
+
+      try {
+        routingControlInstance = L.Routing.control({
+          waypoints: routeWaypoints,
+          lineOptions: { styles: [{ color: '#ef4444', weight: 5, opacity: 0.85 }] },
+          router: L.Routing.osrmv1({ serviceUrl: 'https://router.project-osrm.org/route/v1' }),
+          createMarker: (index, waypoint) => L.marker(waypoint.latLng, {
+            icon: L.divIcon({
+              className: `active-trip-route-marker${index === 0 ? ' active-trip-route-marker-start' : ''}`,
+              html: `<span>${index === 0 ? 'S' : index}</span>`,
+              iconSize: [28, 28],
+              iconAnchor: [14, 14]
+            }),
+            keyboard: false
+          }),
+          addWaypoints: false,
+          show: false,
+          fitSelectedRoutes: false
+        }).addTo(activeTripMiniMapRef.current);
+
+        activeTripMiniRoutingControlRef.current = routingControlInstance;
+        const bounds = L.latLngBounds(routeWaypoints);
+        if (bounds.isValid()) activeTripMiniMapRef.current.fitBounds(bounds.pad(0.18), { maxZoom: 11 });
+        routingControlInstance.on('routesfound', (event) => {
+          const routeBounds = event.routes?.[0]?.coordinates?.length
+            ? L.latLngBounds(event.routes[0].coordinates)
+            : null;
+          if (routeBounds?.isValid() && activeTripMiniMapRef.current) {
+            activeTripMiniMapRef.current.fitBounds(routeBounds.pad(0.12), { maxZoom: 12 });
+          }
+        });
+      } catch (error) {
+        console.error('Active trip mini-map route calculation failed:', error);
+      }
+    }, 400);
+
+    return () => {
+      window.clearTimeout(routingTimer);
+      if (routingControlInstance && activeTripMiniMapRef.current) {
+        try {
+          activeTripMiniMapRef.current.removeControl(routingControlInstance);
+        } catch (error) {
+          console.warn('Active trip mini-map route cleanup error ignored:', error);
+        }
+        if (activeTripMiniRoutingControlRef.current === routingControlInstance) {
+          activeTripMiniRoutingControlRef.current = null;
+        }
+      }
+    };
+  }, [activeTripDialogOpen, selectedTrip, sortCenter]);
+
   const seasonGuideResearchSignature = JSON.stringify(routeSeasonGuideContexts.map((context) => ({
     id: context.id,
     request: context.request
@@ -7593,6 +7707,21 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
             </header>
 
             <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto p-4 sm:p-6 lg:grid-cols-[minmax(260px,0.8fr)_minmax(0,1.5fr)]">
+              <section className="lg:col-span-2 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50">
+                <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
+                  <div>
+                    <h3 className="text-xs font-black uppercase tracking-wide text-slate-800">Route map</h3>
+                    <p className="mt-1 text-[10px] font-medium text-slate-500">Road route from the trip starting point through each stop</p>
+                  </div>
+                  <span className="rounded-full bg-white px-2.5 py-1 text-[9px] font-black uppercase tracking-wide text-slate-500 shadow-sm">
+                    {selectedTrip.length} stop{selectedTrip.length === 1 ? '' : 's'}
+                  </span>
+                </div>
+                <div className="h-56 w-full bg-slate-200 sm:h-72">
+                  <div ref={activeTripMiniMapContainerRef} className="h-full w-full" aria-label="Map showing the active trip route" />
+                </div>
+              </section>
+
               <section className="h-fit rounded-2xl border border-sky-200 bg-sky-50/80 p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div>
@@ -7677,37 +7806,65 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
               <section className="min-w-0">
                 <div className="mb-3 flex items-center justify-between gap-3">
                   <h3 className="text-xs font-black uppercase tracking-wide text-slate-800">Route stops</h3>
-                  <span className="text-[10px] font-semibold text-slate-400">Ordered trip details</span>
+                  <span className="text-[10px] font-semibold text-slate-400">Drag to reorder</span>
                 </div>
-                <ol className="space-y-2">
-                  {selectedTrip.map((stop, index) => {
-                    const stopName = stop.place_name || stop.n || 'Saved waypoint';
-                    const weather = weatherData[stopName];
-                    return (
-                      <li key={stop.id || 'active-stop-' + index} className="rounded-2xl border border-slate-200 bg-white p-3 sm:p-4">
-                        <div className="flex items-start gap-3">
-                          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-900 text-xs font-black text-white">{index + 1}</span>
-                          <div className="min-w-0 flex-1">
-                            <p className="break-words text-sm font-black text-slate-900">{stopName}</p>
-                            <p className="mt-1 text-xs text-slate-500">
-                              {[stop.category, stop.locality].filter(Boolean).join(' · ') || 'Location'}
-                            </p>
-                            <p className="mt-1 text-[10px] font-medium text-slate-400">
-                              {Number(stop.latitude).toFixed(5)}, {Number(stop.longitude).toFixed(5)}
-                            </p>
-                          </div>
-                          {weather && (
-                            <div className="shrink-0 rounded-xl bg-slate-50 px-3 py-2 text-right">
-                              <p className="text-[9px] font-black uppercase tracking-wide text-slate-400">Now / next day</p>
-                              <p className="mt-1 text-xs font-bold text-slate-700">{weather.current}°C · {weather.nextDay}°C</p>
-                              <p className="text-[9px] text-slate-500">{weather.currentCond} · {weather.nextCond}</p>
-                            </div>
-                          )}
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ol>
+                <DragDropContext onDragEnd={handleDragEnd}>
+                  <Droppable droppableId="active-trip-dialog-stops">
+                    {(provided) => (
+                      <ol
+                        ref={provided.innerRef}
+                        {...provided.droppableProps}
+                        className="space-y-2"
+                      >
+                        {selectedTrip.map((stop, index) => {
+                          const stopName = stop.place_name || stop.n || 'Saved waypoint';
+                          const weather = weatherData[stopName];
+                          const stopId = String(stop.id || `active-stop-${index}`);
+                          return (
+                            <Draggable
+                              key={`dialog-${stopId}`}
+                              draggableId={`dialog-${stopId}`}
+                              index={index}
+                            >
+                              {(dragProvided, snapshot) => (
+                                <li
+                                  ref={dragProvided.innerRef}
+                                  {...dragProvided.draggableProps}
+                                  {...dragProvided.dragHandleProps}
+                                  className={`rounded-2xl border bg-white p-3 transition-shadow sm:p-4 ${snapshot.isDragging ? 'border-sky-300 shadow-xl' : 'border-slate-200'}`}
+                                >
+                                  <div className="flex items-start gap-3">
+                                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-900 text-xs font-black text-white">{index + 1}</span>
+                                    <div className="min-w-0 flex-1">
+                                      <p className="break-words text-sm font-black text-slate-900">{stopName}</p>
+                                      <p className="mt-1 text-xs text-slate-500">
+                                        {[stop.category, stop.locality].filter(Boolean).join(' · ') || 'Location'}
+                                      </p>
+                                      <p className="mt-1 text-[10px] font-medium text-slate-400">
+                                        {Number(stop.latitude).toFixed(5)}, {Number(stop.longitude).toFixed(5)}
+                                      </p>
+                                    </div>
+                                    <span className="shrink-0 rounded-lg p-1 text-slate-400" aria-label="Drag to reorder stop">
+                                      <Icon name="layout-grid" className="h-4 w-4" />
+                                    </span>
+                                    {weather && (
+                                      <div className="shrink-0 rounded-xl bg-slate-50 px-3 py-2 text-right">
+                                        <p className="text-[9px] font-black uppercase tracking-wide text-slate-400">Now / next day</p>
+                                        <p className="mt-1 text-xs font-bold text-slate-700">{weather.current}°C · {weather.nextDay}°C</p>
+                                        <p className="text-[9px] text-slate-500">{weather.currentCond} · {weather.nextCond}</p>
+                                      </div>
+                                    )}
+                                  </div>
+                                </li>
+                              )}
+                            </Draggable>
+                          );
+                        })}
+                        {provided.placeholder}
+                      </ol>
+                    )}
+                  </Droppable>
+                </DragDropContext>
               </section>
             </div>
 
