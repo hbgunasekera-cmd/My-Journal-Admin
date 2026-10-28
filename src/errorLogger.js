@@ -4,6 +4,7 @@ const ERROR_ENDPOINT = SUPABASE_URL ? `${SUPABASE_URL}/rest/v1/error_logs` : '';
 const MAX_MESSAGE_LENGTH = 4000;
 const MAX_STACK_LENGTH = 8000;
 const reportedErrors = new Map();
+const consoleErrorMetadata = new WeakMap();
 let installed = false;
 
 const redact = (value, maxLength) => String(value ?? '')
@@ -114,6 +115,19 @@ export function reportClientError(error, options = {}) {
   }
 }
 
+// Log handled application failures to both the browser console and error_logs.
+// The console wrapper below attaches the structured metadata so this creates a
+// single Error Logs row instead of a generic duplicate console-error row.
+export function logClientError(error, options = {}) {
+  const normalizedError = error instanceof Error ? error : new Error(String(error || 'Unknown error'));
+  consoleErrorMetadata.set(normalizedError, options);
+  console.error(`[${options.errorType || 'Application error'}]`, normalizedError, options.context || {});
+  if (!installed) {
+    consoleErrorMetadata.delete(normalizedError);
+    reportClientError(normalizedError, options);
+  }
+}
+
 const summarizeConsoleArgument = (value) => {
   if (value instanceof Error) return `${value.name}: ${value.message}`;
   if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return String(value);
@@ -154,9 +168,13 @@ export function installGlobalErrorHandlers() {
   console.error = (...args) => {
     originalConsoleError(...args);
     const error = args.find((value) => value instanceof Error) || args.find((value) => value && typeof value === 'object' && (value.message || value.error)) || args[0];
+    const metadata = error instanceof Error ? consoleErrorMetadata.get(error) : null;
+    if (metadata) consoleErrorMetadata.delete(error);
     reportClientError(error, {
-      errorType: 'Console error',
+      ...metadata,
+      errorType: metadata?.errorType || 'Console error',
       context: {
+        ...(metadata?.context || {}),
         argument_count: args.length,
         argument_types: args.map((value) => value instanceof Error ? 'Error' : typeof value).join(',').slice(0, 200),
         summary: redact(args.map(summarizeConsoleArgument).join(' ').slice(0, 1000), 1000)

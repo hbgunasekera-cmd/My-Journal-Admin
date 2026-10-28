@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import { generateCleanSlug } from './utils.js';
+import { logClientError } from './errorLogger.js';
 import {
   clearLegacySeasonGuideBrowserStorage,
   getSeasonGuideCacheKey,
@@ -237,6 +238,42 @@ const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (character
 })[character]);
 
 const seasonGuideBatchRuns = new Map();
+const reportedSeasonGuideFailures = new Set();
+
+const logSeasonGuideFailure = (error, place = null, context = {}) => {
+  const message = error instanceof Error ? error.message : String(error || 'Unknown season-guide failure.');
+  const locationLabel = place
+    ? `${place.place_name || 'Unnamed location'} (${place.id || 'unknown id'}): `
+    : '';
+  const errorKey = `${place?.id || context.request_signature || context.operation_name || 'batch'}|${message}`;
+  if (reportedSeasonGuideFailures.has(errorKey)) return;
+  reportedSeasonGuideFailures.add(errorKey);
+  if (reportedSeasonGuideFailures.size > 1000) reportedSeasonGuideFailures.clear();
+
+  const reportedError = error instanceof Error && !locationLabel
+    ? error
+    : new Error(`${locationLabel}${message}`);
+  const readCoordinate = (value) => value !== null && value !== undefined && String(value).trim() !== ''
+    && Number.isFinite(Number(value))
+    ? Number(value)
+    : null;
+  logClientError(reportedError, {
+    errorType: 'Season Guide',
+    source: context.action === 'validate-location' ? 'Map Tab' : '/api/gemini-batch',
+    context: {
+      task: 'season-guide',
+      ...(place ? {
+        location_id: String(place.id || ''),
+        place_name: String(place.place_name || ''),
+        category: String(place.category || 'Location'),
+        locality: String(place.locality || ''),
+        latitude: readCoordinate(place.latitude),
+        longitude: readCoordinate(place.longitude)
+      } : {}),
+      ...context
+    }
+  });
+};
 
 const getSeasonGuideSignature = (places, forceIds = []) => JSON.stringify([
   [...new Set(places.map((place) => getSeasonGuideCacheKey(place)))].sort(),
@@ -291,6 +328,10 @@ const executeGeminiSeasonGuideBatch = async (places, publish, forceIds = []) => 
     const guide = item.success
       ? { ...item.guide, sources: item.sources || item.guide?.sources || [], researchedAt: item.researchedAt || item.guide?.researchedAt }
       : { error: item.error || item.guide?.error || 'Season research did not return a usable result.' };
+    if (guide.error) {
+      const place = places.find((candidate) => String(candidate.id) === String(item.key));
+      logSeasonGuideFailure(guide.error, place, { action: 'create', cached_result: Boolean(item.cached) });
+    }
     rememberGuide(item.key, guide);
   }
 
@@ -318,6 +359,13 @@ const executeGeminiSeasonGuideBatch = async (places, publish, forceIds = []) => 
       const detail = status.error?.message || status.error?.status || status.state;
       const errorGuide = { error: `Gemini season research ${String(status.state).toLowerCase().replace(/_/g, ' ')}${detail ? `: ${detail}` : ''}.` };
       const targetIds = operation.targetIds || [];
+      const targetPlaces = places.filter((place) => targetIds.map(String).includes(String(place.id)));
+      logSeasonGuideFailure(errorGuide.error, null, {
+        action: 'status',
+        operation_name: operationName,
+        location_count: targetPlaces.length,
+        location_names: targetPlaces.map((place) => place.place_name).filter(Boolean).slice(0, 20).join(', ')
+      });
       targetIds.forEach((id) => rememberGuide(id, errorGuide));
       completedBase += targetIds.length;
       failedBase += targetIds.length;
@@ -335,7 +383,12 @@ const executeGeminiSeasonGuideBatch = async (places, publish, forceIds = []) => 
         const guide = result.success
           ? { ...result.guide, sources: result.sources || [], researchedAt: result.researchedAt }
           : { error: result.error || 'Season research did not return a usable result.' };
-        rememberGuide(mapKey(result.key), guide);
+        const mappedKey = mapKey(result.key);
+        if (guide.error) {
+          const place = places.find((candidate) => String(candidate.id) === String(mappedKey));
+          logSeasonGuideFailure(guide.error, place, { action: 'status', operation_name: operationName });
+        }
+        rememberGuide(mappedKey, guide);
         operationCompleted += 1;
         if (guide.error) operationFailed += 1;
       }
@@ -350,6 +403,7 @@ const executeGeminiSeasonGuideBatch = async (places, publish, forceIds = []) => 
   for (const place of places) {
     if (results.has(String(place.id))) continue;
     const guide = { error: 'No saved or completed season guide was returned for this location.' };
+    logSeasonGuideFailure(guide.error, place, { action: 'complete' });
     rememberGuide(place.id, guide);
   }
   publish({ type: 'progress', completed: places.length, failed: [...results.values()].filter((guide) => guide.error).length, state: 'COMPLETE' });
@@ -712,6 +766,7 @@ function App() {
           error: 'Add this location’s name, locality, and saved map coordinates to research its season.',
           location: [place.place_name, place.locality, 'Sri Lanka'].filter(Boolean).join(' · ')
         };
+        logSeasonGuideFailure(error.error, place, { action: 'validate-location' });
         immediate[place.id] = error;
         completed += 1;
         failed += 1;
@@ -770,6 +825,12 @@ function App() {
     }).catch((error) => {
       if (JSON.stringify(seasonGuideRetryIdsRef.current) === JSON.stringify(forceIds)) seasonGuideRetryIdsRef.current = [];
       if (cancelled) return;
+      logSeasonGuideFailure(error, null, {
+        action: 'request',
+        request_signature: pendingSeasonGuideSignature.slice(0, 450),
+        location_count: targets.length,
+        location_names: targets.map((place) => place.place_name).filter(Boolean).slice(0, 20).join(', ')
+      });
       let batchFailed = 0;
       targets.forEach((place) => {
         const guide = { error: String(error?.message || 'The season research batch failed.') };
