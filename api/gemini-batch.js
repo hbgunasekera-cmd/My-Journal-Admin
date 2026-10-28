@@ -95,15 +95,31 @@ const getSeasonGuidePrompt = (route) => {
   ].join(' | ')).join('\n');
 
   return [
-    'Use Google Search to recommend the best season/month period for this saved Sri Lankan trip route.',
-    'Research the route main area as a whole, not separate stop-by-stop guides. The locations are nearby route stops; use their names, categories and coordinates to understand the route mix and confirm the correct area. Search the dominant locality and nearby climate context. Prefer Sri Lanka Department of Meteorology, government, tourism, conservation and reliable local climate sources. If exact feature-level climate data is unavailable, use a sourced nearby-area estimate and set location_match to AREA_CLIMATE_ONLY. Do not invent or name sources.',
+    'Use Google Search to recommend the best months or season to visit this saved Sri Lankan route.',
+    'Research only the supplied main area as a whole, not each stop separately. Use the nearby stops, categories and coordinates to understand the route mix. Prefer Sri Lanka Department of Meteorology, government, tourism, conservation and reliable local climate sources. If only nearby-area climate evidence is available, set location_match to AREA_CLIMATE_ONLY. Do not invent or name sources.',
     'Route: ' + route.routeName,
     'Main area: ' + route.mainArea,
     'Route centre: ' + Number(route.center.latitude).toFixed(5) + ',' + Number(route.center.longitude).toFixed(5),
     'Stops (' + route.stops.length + '):\n' + stopSummary,
-    'Consider the correct regional monsoon/inter-monsoon pattern, rain, sunshine, cloud, wind and terrain. Choose one overall best window for the trip and one alternative. For waterfall routes, separately mention likely fuller-flow months and the best photography compromise with a better chance of clear, calmer skies for phone/drone photography. Rainfall is only a flow clue, not measured discharge; never promise flyable weather or drone permission. For other categories, favor soft/charming light and avoid persistently wet or windy periods. Prefer sunrise to about 08:00 and late afternoon from about 16:30 to sunset for softer light, adjusted to local conditions.',
-    'Return month ranges, not exact dates. Keep each value concise. Do not write an article or return separate recommendations for each stop. Return one compact JSON object with these properties in this order: location_match, main_area, primary_window, secondary_window, route_summary, waterfall_flow_window, photo_window, rationale, rain_and_monsoon, sky_and_light, wind_and_drone, best_time_of_day, confidence. Use location_match CONFIRMED when the route area is supported or AREA_CLIMATE_ONLY for a nearby-area estimate; use UNCONFIRMED only if route coordinates and locality conflict. Do not invent exact flow, forecasts, safety or access rules.'
+    'Consider the area’s monsoon and inter-monsoon periods, rainfall, clearer skies and seasonal light. Choose one best month range and one alternative for the route as a whole. For waterfall routes, balance fuller seasonal flow with a reasonable chance of clearer skies; for other routes, favor pleasant conditions and soft light. This is seasonal guidance, not a forecast or a promise of safe drone conditions.',
+    'Return JSON only, with exactly these four short string fields: primary_window, secondary_window, location_match, rationale. Put primary_window first. Use month ranges, not exact dates. Keep primary_window and secondary_window under 12 words each and rationale under 25 words. Use the supplied main area; do not write an article, discuss every stop, include sources in the text, or add other fields. Set location_match to CONFIRMED when the main area is supported or AREA_CLIMATE_ONLY for a nearby-area climate estimate.'
   ].join('\n');
+};
+
+const getSeasonGuideCandidates = (response) => [
+    response?.candidates?.[0],
+    response?.response?.candidates?.[0],
+    response?.output?.candidates?.[0]
+  ].filter(Boolean);
+
+const getSeasonGuideText = (response) => {
+  const candidates = getSeasonGuideCandidates(response);
+  return candidates
+    .flatMap((candidate) => candidate?.content?.parts || [])
+    .map((part) => part?.text)
+    .filter((part) => typeof part === 'string')
+    .join('\n')
+    .trim() || readText(response);
 };
 
 const extractJsonObject = (value) => {
@@ -244,7 +260,7 @@ const normalizeSeasonGuideResults = (batch, offset, limit) => {
 
     const sources = getSeasonGuideGroundedSources(response);
     try {
-      const parsedResponse = parseSeasonGuideJson(readText(response));
+      const parsedResponse = parseSeasonGuideJson(getSeasonGuideText(response));
       const parsed = parsedResponse?.season_guide || parsedResponse?.seasonGuide || parsedResponse?.guide || parsedResponse;
       const readValue = (...keys) => {
         for (const field of keys) {
@@ -258,17 +274,10 @@ const normalizeSeasonGuideResults = (batch, offset, limit) => {
         mainArea: cleanText(readValue('main_area', 'mainArea', 'resolved_area', 'resolvedArea'), 180),
         primaryWindow: cleanText(readValue('primary_window', 'primaryWindow', 'best_season', 'bestSeason'), 100),
         secondaryWindow: cleanText(readValue('secondary_window', 'secondaryWindow', 'alternative_window', 'alternativeWindow'), 100),
-        routeSummary: cleanText(readValue('route_summary', 'routeSummary'), 400),
-        waterfallFlowWindow: cleanText(readValue('waterfall_flow_window', 'waterfallFlowWindow', 'flow_window', 'flowWindow'), 140),
-        photoWindow: cleanText(readValue('photo_window', 'photoWindow', 'photography_window', 'photographyWindow'), 140),
         rationale: cleanText(readValue('rationale', 'reason'), 400),
-        rainAndMonsoon: cleanText(readValue('rain_and_monsoon', 'rainAndMonsoon', 'rainfall'), 400),
-        skyAndLight: cleanText(readValue('sky_and_light', 'skyAndLight', 'light'), 400),
-        windAndDrone: cleanText(readValue('wind_and_drone', 'windAndDrone', 'wind'), 400),
-        bestTimeOfDay: cleanText(readValue('best_time_of_day', 'bestTimeOfDay'), 180),
         confidence: cleanText(readValue('confidence'), 20).toLowerCase()
       };
-      if (!guide.photoWindow) guide.photoWindow = guide.primaryWindow;
+      if (!guide.locationMatch) guide.locationMatch = 'AREA_CLIMATE_ONLY';
       if (!['CONFIRMED', 'AREA_CLIMATE_ONLY'].includes(guide.locationMatch)) {
         return { key, success: false, error: 'The saved route main area could not be matched to a reliable local climate source.' };
       }
@@ -287,10 +296,8 @@ const normalizeSeasonGuideResults = (batch, offset, limit) => {
       }
       return { key, success: true, guide, sources, researchedAt: finishedAt };
     } catch (error) {
-      const finishReason = response?.candidates?.[0]?.finishReason
-        || response?.candidates?.[0]?.finish_reason
-        || response?.response?.candidates?.[0]?.finishReason
-        || response?.response?.candidates?.[0]?.finish_reason;
+      const candidate = getSeasonGuideCandidates(response)[0];
+      const finishReason = candidate?.finishReason || candidate?.finish_reason;
       const truncated = error?.incomplete || /MAX_TOKENS|MAX_OUTPUT_TOKENS/i.test(String(finishReason || ''));
       return {
         key,
@@ -341,7 +348,9 @@ const createSeasonGuideBatch = async (apiKey, routes, displayName) => {
       tools: [{ google_search: {} }],
       generation_config: {
         temperature: 0.1,
-        max_output_tokens: 1_600,
+        // max_output_tokens includes any model thinking tokens. Keep enough
+        // headroom while the prompt itself requests only a compact result.
+        max_output_tokens: 2_048,
         thinking_config: { thinking_budget: 0 }
       }
     },

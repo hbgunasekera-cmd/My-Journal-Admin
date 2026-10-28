@@ -243,7 +243,7 @@ const reportedSeasonGuideFailures = new Set();
 
 const logSeasonGuideFailure = (error, route = null, context = {}) => {
   const message = error instanceof Error ? error.message : String(error || 'Unknown season-guide failure.');
-  const routeLabel = route ? (route.route_name || route.routeName || 'Saved route') + ' (' + route.id + '): ' : '';
+  const routeLabel = route ? (route.request?.routeName || route.route_name || route.routeName || 'Saved route') + ' (' + route.id + '): ' : '';
   const errorKey = String(route?.id || context.operation_name || 'route-batch') + '|' + message;
   if (reportedSeasonGuideFailures.has(errorKey)) return;
   reportedSeasonGuideFailures.add(errorKey);
@@ -256,8 +256,8 @@ const logSeasonGuideFailure = (error, route = null, context = {}) => {
       action: context.action || 'request',
       ...(route ? {
         route_id: String(route.id || ''),
-        route_name: String(route.route_name || route.routeName || ''),
-        main_area: String(route.mainArea || route.seasonal_guide?.mainArea || '')
+        route_name: String(route.request?.routeName || route.route_name || route.routeName || ''),
+        main_area: String(route.request?.mainArea || route.mainArea || route.seasonal_guide?.mainArea || '')
       } : {}),
       ...context
     }
@@ -327,6 +327,7 @@ const executeGeminiSeasonGuideBatch = async (routes, publish, persistGuides, isC
       ? {
         status: 'ready',
         ...result.guide,
+        mainArea: route.request?.mainArea || result.guide?.mainArea || '',
         sources: result.sources || [],
         researchedAt: result.researchedAt || new Date().toISOString(),
         ...(Array.isArray(route.savedGuide?.legacyStopGuides) ? { legacyStopGuides: route.savedGuide.legacyStopGuides } : {})
@@ -834,7 +835,15 @@ function App() {
     ));
     if (failedRoutes.length === 0) return;
     seasonGuideRetryIdsRef.current = failedRoutes.map((route) => String(route.id));
-    const updatedRoutes = failedRoutes.map((route) => ({ ...route, seasonal_guide: { status: 'pending' } }));
+    const updatedRoutes = failedRoutes.map((route) => ({
+      ...route,
+      seasonal_guide: {
+        ...(route.seasonal_guide || {}),
+        status: 'pending',
+        error: null,
+        operationName: null
+      }
+    }));
     const results = await Promise.all(updatedRoutes.map((route) => supabaseClient
       .from('saved_travel_routes')
       .update({ seasonal_guide: route.seasonal_guide })
@@ -886,6 +895,7 @@ function App() {
   const routeSeasonGuideContexts = savedRoutes
     .map((route) => getRouteSeasonGuideContext(route, places))
     .filter(Boolean);
+  const failedSeasonGuideCount = savedRoutes.filter((route) => route.seasonal_guide?.status === 'error').length;
   const seasonGuideResearchSignature = JSON.stringify(routeSeasonGuideContexts.map((context) => ({
     id: context.id,
     request: context.request
@@ -6163,6 +6173,16 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                 <p className="text-[9px] font-black uppercase text-slate-400 tracking-widest">
                   Saved Route Plans ({savedRoutes.length})
                 </p>
+                {failedSeasonGuideCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => retryFailedSeasonGuides()}
+                    disabled={seasonGuideProgress.running}
+                    className="rounded-lg bg-rose-50 px-2 py-1 text-[8px] font-black uppercase text-rose-700 hover:bg-rose-100 disabled:cursor-wait disabled:opacity-50"
+                  >
+                    Retry {failedSeasonGuideCount} failed guide{failedSeasonGuideCount === 1 ? '' : 's'}
+                  </button>
+                )}
               </div>
 
               {/* Saved Routes Scrollable Body */}
@@ -6190,14 +6210,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                             const guideDetails = seasonGuide?.status === 'ready'
                               ? [
                                 ['Alternative period', seasonGuide.secondaryWindow],
-                                ['Waterfall flow', seasonGuide.waterfallFlowWindow],
-                                ['Photography window', seasonGuide.photoWindow],
-                                ['Rain and monsoon', seasonGuide.rainAndMonsoon],
-                                ['Sky and light', seasonGuide.skyAndLight],
-                                ['Wind / drone note', seasonGuide.windAndDrone],
-                                ['Best time of day', seasonGuide.bestTimeOfDay],
-                                ['Why this period', seasonGuide.rationale],
-                                ['Route overview', seasonGuide.routeSummary]
+                                ['Why this period', seasonGuide.rationale]
                               ].filter(([, value]) => value)
                               : [];
                             return (
@@ -6276,9 +6289,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                                             <>
                                               <p className="text-[9px] leading-4 text-slate-600">
                                                 <b className="text-slate-700">Main area:</b> {seasonGuide.mainArea || mainArea || 'Route area'}
-                                                {seasonGuide.confidence ? ' · ' + seasonGuide.confidence + ' confidence' : ''}
                                               </p>
-                                              {seasonGuide.routeSummary && <p className="text-[9px] leading-4 text-slate-600">{seasonGuide.routeSummary}</p>}
                                               {guideDetails.map(([label, value]) => <p key={label} className="text-[9px] leading-4 text-slate-600"><b className="text-slate-700">{label}:</b> {value}</p>)}
                                               {Array.isArray(seasonGuide.sources) && seasonGuide.sources.length > 0 && (
                                                 <p className="flex flex-wrap gap-x-2 border-t border-slate-100 pt-1 text-[9px]">
