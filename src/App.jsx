@@ -2421,7 +2421,7 @@ function App() {
       const [
         placesData,
         sr,
-        v,
+        pageVisits,
         a,
         c,
         l,
@@ -2432,7 +2432,7 @@ function App() {
       ] = await Promise.all([
         fetchAllRecords('travel_bucket_list'),
         supabaseClient.from('saved_travel_routes').select('*').order('sort_order', { ascending: true }).order('created_at', { ascending: false }),
-        supabaseClient.from('page_visits').select('*').limit(20000),
+        fetchInteractionRecords('page_visits', '*'),
         supabaseClient.from('pending_approvals').select('*').order('created_at', { ascending: false }),
         supabaseClient.from('location_comments').select('*, travel_bucket_list(place_name)').order('created_at', { ascending: false }),
         fetchInteractionRecords('location_likes', '*, travel_bucket_list(place_name, category)'),
@@ -2448,7 +2448,7 @@ function App() {
       setPlaces(placesData || []);
       setSavedRoutes(sr.data || []);
       setMapDataLoaded(true);
-      setAnalyticsData(v.data || []);
+      setAnalyticsData(pageVisits || []);
       setPendingApprovals(a.data || []);
       setAllComments(c.data || []);
       setLikesData(l || []);
