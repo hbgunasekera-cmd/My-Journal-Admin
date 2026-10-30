@@ -3,11 +3,37 @@ import { createClient } from '@supabase/supabase-js';
 import { generateCleanSlug } from './utils.js';
 import { logClientError } from './errorLogger.js';
 
-// --- Leaflet & Routing ---
-import L from 'leaflet';
-import 'leaflet/dist/leaflet.css';
-import 'leaflet-routing-machine';
-import 'leaflet-routing-machine/dist/leaflet-routing-machine.css';
+// Load the mapping stack only when a map is opened. These libraries account
+// for a large part of the initial bundle and are not needed on other tabs.
+let loadedLeaflet = null;
+let leafletLoadPromise = null;
+const loadLeaflet = () => {
+  if (!leafletLoadPromise) {
+    leafletLoadPromise = (async () => {
+      const leafletModule = await import('leaflet');
+      await Promise.all([
+        import('leaflet/dist/leaflet.css'),
+        import('leaflet-routing-machine'),
+        import('leaflet-routing-machine/dist/leaflet-routing-machine.css')
+      ]);
+      const L = leafletModule.default || leafletModule;
+      if (typeof window !== 'undefined') {
+        delete L.Icon.Default.prototype._getIconUrl;
+        L.Icon.Default.mergeOptions({
+          iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
+          iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
+          shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+        });
+      }
+      loadedLeaflet = L;
+      return L;
+    })().catch((error) => {
+      leafletLoadPromise = null;
+      throw error;
+    });
+  }
+  return leafletLoadPromise;
+};
 
 // --- Drag and Drop Engine ---
 import { DragDropContext, Droppable, Draggable } from "@hello-pangea/dnd";
@@ -87,16 +113,6 @@ if (typeof window !== 'undefined') {
 }
 
 
-
-// --- Leaflet Marker Fix ---
-if (typeof window !== 'undefined') {
-  delete L.Icon.Default.prototype._getIconUrl;
-  L.Icon.Default.mergeOptions({
-    iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
-    iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
-    shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
-  });
-}
 
 const HomePoint = { lat: 7.0911, lng: 79.9161 };
 const VALID_CATEGORIES = [
@@ -189,6 +205,16 @@ const parseUATrafficSource = (v = {}) => {
 };
 
 const normalizeTrafficPagePath = (path = '') => String(path).toLowerCase().split('?')[0];
+
+const distanceMeters = (latitudeA, longitudeA, latitudeB, longitudeB) => {
+  const toRadians = (degrees) => degrees * Math.PI / 180;
+  const deltaLatitude = toRadians(latitudeB - latitudeA);
+  const deltaLongitude = toRadians(longitudeB - longitudeA);
+  const arc = Math.sin(deltaLatitude / 2) ** 2
+    + Math.cos(toRadians(latitudeA)) * Math.cos(toRadians(latitudeB))
+    * Math.sin(deltaLongitude / 2) ** 2;
+  return 6_371_000 * 2 * Math.atan2(Math.sqrt(arc), Math.sqrt(1 - arc));
+};
 
 const getErrorLogTrafficSource = (log = {}, analyticsVisits = []) => {
   const context = log.context && typeof log.context === 'object' && !Array.isArray(log.context)
@@ -866,6 +892,49 @@ const MetricColumn = ({ title, data, highlightValue }) => {
   );
 };
 
+const RefreshProgressCircle = React.memo(({ refreshAt, totalTime = 600 }) => {
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const timeLeft = Math.max(0, Math.ceil((refreshAt - now) / 1000));
+  const radius = 9;
+  const strokeWidth = 2;
+  const circumference = 2 * Math.PI * radius;
+  const progress = Math.max(0, Math.min(1, (totalTime - timeLeft) / totalTime));
+  const strokeDashoffset = circumference * (1 - progress);
+  const minutes = Math.floor(timeLeft / 60);
+  const seconds = timeLeft % 60;
+  const formattedTime = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+
+  return (
+    <div
+      className="relative flex items-center justify-center group cursor-pointer"
+      title={`Auto-refreshes in ${formattedTime}`}
+      aria-label={`Auto-refreshes in ${formattedTime}`}
+    >
+      <svg className="w-5 h-5 -rotate-90 transform" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r={radius} stroke="currentColor" strokeWidth={strokeWidth} className="text-slate-700/50 fill-none" />
+        <circle
+          cx="12"
+          cy="12"
+          r={radius}
+          stroke="currentColor"
+          strokeWidth={strokeWidth}
+          strokeDasharray={circumference}
+          strokeDashoffset={strokeDashoffset}
+          strokeLinecap="round"
+          className="text-orange-500 fill-none transition-all duration-1000 ease-linear"
+        />
+      </svg>
+      <span className="absolute h-1.5 w-1.5 rounded-full bg-orange-400 animate-pulse" />
+    </div>
+  );
+});
+
 
 // --- Main Application Component ---
 function App() {
@@ -1031,6 +1100,8 @@ function App() {
   const [activeRouteName, setActiveRouteName] = useState('');
   const [activeSavedRouteId, setActiveSavedRouteId] = useState(null);
   const [activeTripDialogOpen, setActiveTripDialogOpen] = useState(false);
+  const REFRESH_INTERVAL_SECONDS = 600;
+  const [nextAutoRefreshAt, setNextAutoRefreshAt] = useState(() => Date.now() + REFRESH_INTERVAL_SECONDS * 1000);
 
   // --- Location & Add Location Flow States ---
   const [userCoords, setUserCoords] = useState(null);
@@ -1043,11 +1114,14 @@ function App() {
 
   // --- DOM & Mutable Instance Refs ---
   const mapRef = useRef(null);
-  const markersLayer = useRef(L.layerGroup());
+  const markersLayer = useRef(null);
   const routingControl = useRef(null);
   const activeTripMiniMapContainerRef = useRef(null);
   const activeTripMiniMapRef = useRef(null);
   const activeTripMiniRoutingControlRef = useRef(null);
+  const [activeTripMiniMapReady, setActiveTripMiniMapReady] = useState(false);
+  const refreshAllDataInProgressRef = useRef(false);
+  const refreshDashboardDataInProgressRef = useRef(false);
   const autocompleteRef = useRef(null);
   const autocompleteInstanceRef = useRef(null);
   const autocompleteListenerRef = useRef(null);
@@ -1058,9 +1132,6 @@ function App() {
   const bulkFactCheckStopRef = useRef(false);
   const bulkGenerationHasShownLogRef = useRef(false);
   const seasonGuideRetryIdsRef = useRef([]);
-  const REFRESH_INTERVAL_SECONDS = 600;
-  const [timeLeft, setTimeLeft] = useState(REFRESH_INTERVAL_SECONDS);
-
   const routeSeasonGuideContexts = savedRoutes
     .map((route) => getRouteSeasonGuideContext(route, places))
     .filter(Boolean);
@@ -1091,44 +1162,56 @@ function App() {
 
   useEffect(() => {
     if (!activeTripDialogOpen || selectedTrip.length === 0 || !activeTripMiniMapContainerRef.current) return undefined;
+    let cancelled = false;
+    let map = null;
+    let resizeTimer = null;
+    const handleMapResize = () => map?.invalidateSize({ pan: false });
+    const initializeMap = async () => {
+      const L = await loadLeaflet();
+      if (cancelled || !activeTripMiniMapContainerRef.current) return;
 
-    const map = L.map(activeTripMiniMapContainerRef.current, {
-      zoomControl: true,
-      attributionControl: true,
-      scrollWheelZoom: true,
-      dragging: true,
-      fadeAnimation: true
-    }).setView([sortCenter.lat, sortCenter.lng], 8);
+      map = L.map(activeTripMiniMapContainerRef.current, {
+        zoomControl: true,
+        attributionControl: true,
+        scrollWheelZoom: true,
+        dragging: true,
+        fadeAnimation: true
+      }).setView([sortCenter.lat, sortCenter.lng], 8);
 
-    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
-      attribution: 'Tiles &copy; Esri',
-      maxZoom: 19
-    }).addTo(map);
+      L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
+        attribution: 'Tiles &copy; Esri',
+        maxZoom: 19
+      }).addTo(map);
 
-    activeTripMiniMapRef.current = map;
-    const handleMapResize = () => map.invalidateSize({ pan: false });
-    window.addEventListener('resize', handleMapResize);
-    const resizeTimer = window.setTimeout(() => map.invalidateSize(), 120);
+      activeTripMiniMapRef.current = map;
+      setActiveTripMiniMapReady(true);
+      window.addEventListener('resize', handleMapResize);
+      resizeTimer = window.setTimeout(() => map?.invalidateSize(), 120);
+    };
+    initializeMap().catch((error) => console.error('Active trip mini-map initialization failed:', error));
 
     return () => {
-      window.clearTimeout(resizeTimer);
+      cancelled = true;
+      if (resizeTimer) window.clearTimeout(resizeTimer);
       window.removeEventListener('resize', handleMapResize);
       if (activeTripMiniRoutingControlRef.current) {
         try {
-          map.removeControl(activeTripMiniRoutingControlRef.current);
+          map?.removeControl(activeTripMiniRoutingControlRef.current);
         } catch (error) {
           console.warn('Active trip mini-map routing cleanup error ignored:', error);
         }
         activeTripMiniRoutingControlRef.current = null;
       }
-      map.remove();
-      activeTripMiniMapRef.current = null;
+      map?.remove();
+      if (activeTripMiniMapRef.current === map) activeTripMiniMapRef.current = null;
+      setActiveTripMiniMapReady(false);
     };
   }, [activeTripDialogOpen, selectedTrip.length]);
 
   useEffect(() => {
     const map = activeTripMiniMapRef.current;
-    if (!activeTripDialogOpen || !map) return undefined;
+    const L = loadedLeaflet;
+    if (!activeTripDialogOpen || !activeTripMiniMapReady || !map || !L) return undefined;
 
     const routeWaypoints = [
       L.latLng(sortCenter.lat, sortCenter.lng),
@@ -1201,7 +1284,7 @@ function App() {
         }
       }
     };
-  }, [activeTripDialogOpen, selectedTrip, sortCenter]);
+  }, [activeTripDialogOpen, activeTripMiniMapReady, selectedTrip, sortCenter]);
 
   const seasonGuideResearchSignature = JSON.stringify(routeSeasonGuideContexts.map((context) => ({
     id: context.id,
@@ -1309,8 +1392,8 @@ function App() {
 
   // Optional Helper: Reset countdown when manual refresh occurs
   const handleManualRefresh = () => {
-    refreshAllData();
-    setTimeLeft(REFRESH_INTERVAL_SECONDS);
+    void refreshDashboardData();
+    setNextAutoRefreshAt(Date.now() + REFRESH_INTERVAL_SECONDS * 1000);
   };
 
   useEffect(() => {
@@ -1395,51 +1478,58 @@ function App() {
       return;
     }
 
-    const startPoint = L.latLng(sortCenter.lat, sortCenter.lng);
-    const waypoints = [
-      startPoint,
-      ...selectedTrip
-        .map((point) => getCoordinates(point))
-        .filter(Boolean)
-        .map(({ lat, lng }) => L.latLng(lat, lng))
-    ];
-
-    if (waypoints.length < 2) {
-      removeRoutingControl();
-      return;
-    }
-
-    // Debounce routing calculations (600ms) to prevent OSRM API rate-limiting
-    const routingTimeout = setTimeout(() => {
+    let cancelled = false;
+    let routingTimeout = null;
+    const drawRoute = async () => {
       try {
-        if (routingControl.current) {
-          if (routingControl.current._map) {
-            routingControl.current.setWaypoints(waypoints);
-          } else {
-            routingControl.current.addTo(mapRef.current);
-            routingControl.current.setWaypoints(waypoints);
-          }
-        } else {
-          routingControl.current = L.Routing.control({
-            waypoints: waypoints,
-            lineOptions: {
-              styles: [{ color: '#ef4444', weight: 5, opacity: 0.8 }]
-            },
-            router: L.Routing.osrmv1({
-              serviceUrl: 'https://router.project-osrm.org/route/v1'
-            }),
-            createMarker: () => null,
-            addWaypoints: false,
-            show: false
-          }).addTo(mapRef.current);
-        }
-      } catch (err) {
-        console.error("Routing calculation failed:", err);
-      }
-    }, 600);
+        const L = await loadLeaflet();
+        if (cancelled || activeTab !== 'map' || !mapReady || !mapRef.current) return;
+        const waypoints = [
+          L.latLng(sortCenter.lat, sortCenter.lng),
+          ...selectedTrip
+            .map((point) => getCoordinates(point))
+            .filter(Boolean)
+            .map(({ lat, lng }) => L.latLng(lat, lng))
+        ];
 
+        if (waypoints.length < 2) {
+          removeRoutingControl();
+          return;
+        }
+
+        // Debounce routing calculations to avoid excess routing requests while reordering stops.
+        routingTimeout = window.setTimeout(() => {
+          if (cancelled || !mapRef.current) return;
+          try {
+            if (routingControl.current) {
+              if (routingControl.current._map) {
+                routingControl.current.setWaypoints(waypoints);
+              } else {
+                routingControl.current.addTo(mapRef.current);
+                routingControl.current.setWaypoints(waypoints);
+              }
+            } else {
+              routingControl.current = L.Routing.control({
+                waypoints,
+                lineOptions: { styles: [{ color: '#ef4444', weight: 5, opacity: 0.8 }] },
+                router: L.Routing.osrmv1({ serviceUrl: 'https://router.project-osrm.org/route/v1' }),
+                createMarker: () => null,
+                addWaypoints: false,
+                show: false
+              }).addTo(mapRef.current);
+            }
+          } catch (err) {
+            console.error("Routing calculation failed:", err);
+          }
+        }, 600);
+      } catch (error) {
+        console.error('Map routing library failed to load:', error);
+      }
+    };
+    void drawRoute();
     return () => {
-      clearTimeout(routingTimeout);
+      cancelled = true;
+      if (routingTimeout) window.clearTimeout(routingTimeout);
       removeRoutingControl();
     };
   }, [selectedTrip, activeTab, mapReady, sortCenter]);
@@ -1488,7 +1578,8 @@ function App() {
   // --- 5. MARKER MANAGER EFFECT ---
   // Synchronizes dot markers, dynamic reservation statuses, tooltips, and popups.
   React.useEffect(() => {
-    if (!mapRef.current || !mapReady) return;
+    const L = loadedLeaflet;
+    if (activeTab !== 'map' || !L || !mapRef.current || !mapReady || !markersLayer.current) return;
 
     let resizeTimer;
     if (activeTab === 'map') {
@@ -2389,7 +2480,7 @@ function App() {
       if (error) throw error;
 
       if (data && data.length > 0) {
-        allData = [...allData, ...data];
+        allData.push(...data);
         from += step;
       }
 
@@ -2408,6 +2499,9 @@ function App() {
    * and concurrent requests for everything else to optimize loading time.
    */
   const refreshAllData = React.useCallback(async () => {
+    if (refreshAllDataInProgressRef.current) return;
+    refreshAllDataInProgressRef.current = true;
+
     try {
       const fetchInteractionRecords = async (tableName, selectColumns) => {
         try {
@@ -2418,20 +2512,19 @@ function App() {
         }
       };
 
-      const [
-        placesData,
-        sr,
-        pageVisits,
-        a,
-        c,
-        l,
-        sub,
-        sh,
-        videoLikes,
-        videoShares
-      ] = await Promise.all([
+      const [placesData, sr] = await Promise.all([
         fetchAllRecords('travel_bucket_list'),
-        supabaseClient.from('saved_travel_routes').select('*').order('sort_order', { ascending: true }).order('created_at', { ascending: false }),
+        supabaseClient.from('saved_travel_routes').select('*').order('sort_order', { ascending: true }).order('created_at', { ascending: false })
+      ]);
+
+      if (sr.error) console.error("Saved routes fetch error:", sr.error);
+      setPlaces(placesData || []);
+      setSavedRoutes(sr.data || []);
+      setMapDataLoaded(true);
+
+      // Load dashboard history after the core places/routes are visible so a large
+      // analytics table cannot hold the rest of the app behind one long request.
+      const [pageVisits, a, c, l, sub, sh, videoLikes, videoShares] = await Promise.all([
         fetchInteractionRecords('page_visits', '*'),
         supabaseClient.from('pending_approvals').select('*').order('created_at', { ascending: false }),
         supabaseClient.from('location_comments').select('*, travel_bucket_list(place_name)').order('created_at', { ascending: false }),
@@ -2443,11 +2536,7 @@ function App() {
       ]);
 
       if (sub.error) console.error("Subscribers fetch error:", sub.error);
-      if (sr.error) console.error("Saved routes fetch error:", sr.error);
 
-      setPlaces(placesData || []);
-      setSavedRoutes(sr.data || []);
-      setMapDataLoaded(true);
       setAnalyticsData(pageVisits || []);
       setPendingApprovals(a.data || []);
       setAllComments(c.data || []);
@@ -2460,6 +2549,53 @@ function App() {
     } catch (error) {
       console.error("Data sync error:", error);
       triggerToast("Failed to sync database.");
+    } finally {
+      refreshAllDataInProgressRef.current = false;
+    }
+  }, [fetchAllRecords, triggerToast]);
+
+  const refreshDashboardData = React.useCallback(async () => {
+    if (refreshDashboardDataInProgressRef.current || refreshAllDataInProgressRef.current) return;
+    refreshDashboardDataInProgressRef.current = true;
+
+    const fetchInteractionRecords = async (tableName, selectColumns) => {
+      try {
+        return await fetchAllRecords(tableName, 'created_at', false, selectColumns);
+      } catch (error) {
+        console.error(`${tableName} fetch error:`, error);
+        return [];
+      }
+    };
+
+    try {
+      const [pageVisits, approvals, comments, likes, subscribers, shares, videoLikes, videoShares] = await Promise.all([
+        fetchInteractionRecords('page_visits', '*'),
+        supabaseClient.from('pending_approvals').select('*').order('created_at', { ascending: false }),
+        supabaseClient.from('location_comments').select('*, travel_bucket_list(place_name)').order('created_at', { ascending: false }),
+        fetchInteractionRecords('location_likes', '*, travel_bucket_list(place_name, category)'),
+        supabaseClient.from('subscribers').select('*').order('subscribed_at', { ascending: false }),
+        fetchInteractionRecords('location_shares', '*, travel_bucket_list(place_name, category)'),
+        fetchInteractionRecords('video_likes', '*, hub_videos(title)'),
+        fetchInteractionRecords('video_shares', '*, hub_videos(title)')
+      ]);
+
+      if (approvals.error) console.error('Pending approvals fetch error:', approvals.error);
+      if (comments.error) console.error('Location comments fetch error:', comments.error);
+      if (subscribers.error) console.error('Subscribers fetch error:', subscribers.error);
+
+      setAnalyticsData(pageVisits);
+      setPendingApprovals(approvals.data || []);
+      setAllComments(comments.data || []);
+      setLikesData(likes);
+      setSubscribersData(subscribers.data || []);
+      setSharesData(shares);
+      setVideoLikesData(videoLikes);
+      setVideoSharesData(videoShares);
+    } catch (error) {
+      console.error('Dashboard data refresh error:', error);
+      triggerToast('Failed to refresh Dashboard data.');
+    } finally {
+      refreshDashboardDataInProgressRef.current = false;
     }
   }, [fetchAllRecords, triggerToast]);
 
@@ -2564,7 +2700,6 @@ function App() {
     if (!isLoggedIn) return undefined;
     const initializationTimer = window.setTimeout(() => {
       refreshAllData();
-      void initGoogle();
     }, 0);
 
     return () => {
@@ -2573,22 +2708,18 @@ function App() {
       autocompleteListenerRef.current = null;
       autocompleteInstanceRef.current = null;
     };
-  }, [isLoggedIn, initGoogle, refreshAllData]);
+  }, [isLoggedIn, refreshAllData]);
 
   useEffect(() => {
-    if (!isLoggedIn) return undefined;
-    let remainingSeconds = REFRESH_INTERVAL_SECONDS;
-    const timer = setInterval(() => {
-      remainingSeconds -= 1;
-      if (remainingSeconds <= 0) {
-        refreshAllData();
-        remainingSeconds = REFRESH_INTERVAL_SECONDS;
-      }
-      setTimeLeft(remainingSeconds);
-    }, 1000);
+    if (!isLoggedIn || activeTab !== 'dashboard') return undefined;
+    const delay = Math.max(0, nextAutoRefreshAt - Date.now());
+    const timer = window.setTimeout(() => {
+      void refreshDashboardData();
+      setNextAutoRefreshAt(Date.now() + REFRESH_INTERVAL_SECONDS * 1000);
+    }, delay);
 
-    return () => clearInterval(timer);
-  }, [isLoggedIn, refreshAllData]);
+    return () => window.clearTimeout(timer);
+  }, [isLoggedIn, activeTab, nextAutoRefreshAt, refreshDashboardData]);
 
 
 
@@ -2702,24 +2833,23 @@ function App() {
       return matchesSearch && matchesCat && matchesStatus;
     });
 
-    // 2. Sorting Logic 
+    // Cache distance calculations once per place instead of repeating trigonometry
+    // inside the array sort comparator (which can run many times per item).
+    const distanceById = sortBy === 'distance'
+      ? new Map(filtered.map((place) => {
+        const latitude = Number.parseFloat(place.latitude);
+        const longitude = Number.parseFloat(place.longitude);
+        const distance = Number.isFinite(latitude) && Number.isFinite(longitude)
+          ? distanceMeters(sortCenter.lat, sortCenter.lng, latitude, longitude)
+          : Infinity;
+        return [place.id, distance];
+      }))
+      : null;
+
+    // 2. Sorting Logic
     return [...filtered].sort((a, b) => {
       if (sortBy === 'distance') {
-        // Safe check for 'a' coordinates
-        const latA = parseFloat(a.latitude);
-        const lngA = parseFloat(a.longitude);
-        const distA = (!isNaN(latA) && !isNaN(lngA))
-          ? L.latLng(sortCenter.lat, sortCenter.lng).distanceTo(L.latLng(latA, lngA))
-          : Infinity; // Push invalid locations to the bottom
-
-        // Safe check for 'b' coordinates
-        const latB = parseFloat(b.latitude);
-        const lngB = parseFloat(b.longitude);
-        const distB = (!isNaN(latB) && !isNaN(lngB))
-          ? L.latLng(sortCenter.lat, sortCenter.lng).distanceTo(L.latLng(latB, lngB))
-          : Infinity; // Push invalid locations to the bottom
-
-        return distA - distB;
+        return (distanceById.get(a.id) ?? Infinity) - (distanceById.get(b.id) ?? Infinity);
       }
 
       // Default sort (Newest First)
@@ -4344,19 +4474,17 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
 
   React.useEffect(() => {
     let timer;
+    let cancelled = false;
 
     if (activeTab === 'map') {
-      // Use requestAnimationFrame or a short timeout to ensure React paints the DOM
-      timer = setTimeout(() => {
-        // 1. Target the element explicitly
+      timer = window.setTimeout(async () => {
+        try {
+          const L = await loadLeaflet();
+          if (cancelled) return;
         const container = document.getElementById('map-container');
-
-        // 2. Defensive guard: If React hasn't mounted it yet, safely abort
         if (!container) return;
 
-        // Initialize map instance if it doesn't already exist
         if (!mapRef.current) {
-          // 3. Pass the DOM element variable directly instead of the string ID
           const map = L.map(container, {
             zoomControl: false,
             attributionControl: false,
@@ -4367,6 +4495,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
             attribution: 'Tiles &copy; Esri'
           }).addTo(map);
 
+          markersLayer.current = L.layerGroup();
           markersLayer.current.addTo(map);
           mapRef.current = map;
           setMapReady(true);
@@ -4375,13 +4504,18 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
           mapRef.current.invalidateSize();
           setMapReady(true);
         }
+        } catch (error) {
+          console.error('Map library failed to load:', error);
+          triggerToast('The map could not be loaded. Please try opening the Map tab again.');
+        }
       }, 150);
     }
 
     return () => {
-      if (timer) clearTimeout(timer);
+      cancelled = true;
+      if (timer) window.clearTimeout(timer);
     };
-  }, [activeTab]);
+  }, [activeTab, triggerToast]);
 
 
 
@@ -4389,16 +4523,14 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
 
   // Calculates total route distance from origin (sortCenter) through selected waypoints
   const calculateRouteDistance = () => {
-    const startPoint = L.latLng(sortCenter.lat, sortCenter.lng);
     let totalDistance = 0;
-    let currentPos = startPoint;
+    let currentPos = sortCenter;
 
     selectedTrip.forEach((point) => {
       const coordinates = getCoordinates(point);
       if (!coordinates) return;
-      const destination = L.latLng(coordinates.lat, coordinates.lng);
-      totalDistance += currentPos.distanceTo(destination) / 1000; // Convert meters to KM
-      currentPos = destination;
+      totalDistance += distanceMeters(currentPos.lat, currentPos.lng, coordinates.lat, coordinates.lng) / 1000;
+      currentPos = coordinates;
     });
 
     return totalDistance.toFixed(1);
@@ -4856,57 +4988,6 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
     };
   }, [analyticsData, likesData, videoLikesData, videoSharesData, subscribersData, sharesData]);
 
-  /**
-   * Circular Progress Ring Indicator for Dashboard Refresh Countdown
-   */
-  const RefreshProgressCircle = React.memo(({ timeLeft, totalTime = 600 }) => {
-    const radius = 9;
-    const strokeWidth = 2;
-    const circumference = 2 * Math.PI * radius; // ~56.55px
-
-    // Calculate percentage elapsed
-    const progress = Math.max(0, Math.min(1, (totalTime - timeLeft) / totalTime));
-    const strokeDashoffset = circumference * (1 - progress);
-
-    // Format MM:SS for hover tooltip
-    const minutes = Math.floor(timeLeft / 60);
-    const seconds = timeLeft % 60;
-    const formattedTime = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-
-    return (
-      <div
-        className="relative flex items-center justify-center group cursor-pointer"
-        title={`Auto-refreshes in ${formattedTime}`}
-      >
-        <svg className="w-5 h-5 -rotate-90 transform" viewBox="0 0 24 24">
-          {/* Background Track Circle */}
-          <circle
-            cx="12"
-            cy="12"
-            r={radius}
-            stroke="currentColor"
-            strokeWidth={strokeWidth}
-            className="text-slate-700/50 fill-none"
-          />
-          {/* Animated Progress Circle */}
-          <circle
-            cx="12"
-            cy="12"
-            r={radius}
-            stroke="currentColor"
-            strokeWidth={strokeWidth}
-            strokeDasharray={circumference}
-            strokeDashoffset={strokeDashoffset}
-            strokeLinecap="round"
-            className="text-orange-500 fill-none transition-all duration-1000 ease-linear"
-          />
-        </svg>
-        {/* Dynamic pulse dot in the center */}
-        <span className="absolute h-1.5 w-1.5 rounded-full bg-orange-400 animate-pulse" />
-      </div>
-    );
-  });
-
   const handleClearDashboardData = async () => {
     if (window.confirm("⚠️ Are you sure you want to delete all analytics records (page_visits)? This operation cannot be undone.")) {
       try {
@@ -4920,7 +5001,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
 
         setAnalyticsData([]); // Clear local state instantly
         triggerToast("Dashboard page visits data cleared successfully.");
-        refreshAllData();
+        void refreshDashboardData();
       } catch (err) {
         console.error("Error clearing page_visits:", err);
         triggerToast("Failed to clear analytics data: " + err.message);
@@ -5396,6 +5477,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
             <div className="relative flex items-center">
               <input
                 ref={autocompleteRef}
+                onFocus={() => void initGoogle()}
                 placeholder="Search Maps"
                 className="w-48 sm:w-64 px-4 py-2 bg-slate-100 rounded-xl text-[10px] font-bold uppercase outline-none focus:ring-2 focus:ring-indigo-500/20"
               />
@@ -5578,7 +5660,9 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
             <div className="flex-1 overflow-y-auto p-8 no-scrollbar bg-slate-50/50">
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-6">
                 {(processedPlaces || []).map(p => {
-                  const dynamicDistance = (L.latLng(sortCenter.lat, sortCenter.lng).distanceTo(L.latLng(p.latitude, p.longitude)) / 1000).toFixed(1);
+                  const dynamicDistance = (
+                    distanceMeters(sortCenter.lat, sortCenter.lng, Number(p.latitude), Number(p.longitude)) / 1000
+                  ).toFixed(1);
                   const hasArticle = Boolean(p.ai_article?.story || p.ai_article?.description);
                   const factSources = Array.isArray(p.ai_article?.fact_sources)
                     ? p.ai_article.fact_sources.filter((source) => {
@@ -6682,7 +6766,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                   .map(p => {
                     const coordinates = getCoordinates(p);
                     const d = coordinates
-                      ? L.latLng(sortCenter.lat, sortCenter.lng).distanceTo(L.latLng(coordinates.lat, coordinates.lng))
+                      ? distanceMeters(sortCenter.lat, sortCenter.lng, coordinates.lat, coordinates.lng)
                       : null;
                     const km = d === null ? '—' : (d / 1000).toFixed(1);
                     const isDone = p.status === 'done';
@@ -6797,7 +6881,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                   {/* Verified Person & Progress Circle Badge */}
                   <div className="flex items-center gap-2.5 cursor-help group" title="Verified Persons">
                     <RefreshProgressCircle
-                      timeLeft={timeLeft}
+                      refreshAt={nextAutoRefreshAt}
                       totalTime={REFRESH_INTERVAL_SECONDS}
                     />
 
