@@ -216,6 +216,41 @@ const distanceMeters = (latitudeA, longitudeA, latitudeB, longitudeB) => {
   return 6_371_000 * 2 * Math.atan2(Math.sqrt(arc), Math.sqrt(1 - arc));
 };
 
+const getAdminCardImageUrl = (imageUrl) => {
+  if (typeof imageUrl !== 'string' || !imageUrl.trim()) return imageUrl;
+  try {
+    const url = new URL(imageUrl);
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') return imageUrl;
+
+    if (url.hostname === 'googleusercontent.com' || url.hostname.endsWith('.googleusercontent.com')) {
+      url.pathname = `${url.pathname.replace(/=[^/]*$/, '')}=w640-h360-c`;
+    } else if (url.hostname === 'images.unsplash.com') {
+      url.searchParams.set('auto', 'format');
+      url.searchParams.set('fit', 'crop');
+      url.searchParams.set('w', '640');
+      url.searchParams.set('h', '360');
+      url.searchParams.set('q', '75');
+    } else if (url.hostname === 'images.pexels.com') {
+      url.searchParams.set('auto', 'compress');
+      url.searchParams.set('cs', 'tinysrgb');
+      url.searchParams.set('w', '640');
+      url.searchParams.set('h', '360');
+      url.searchParams.set('fit', 'crop');
+    } else if (url.hostname === 'res.cloudinary.com' || url.hostname.endsWith('.res.cloudinary.com')) {
+      const uploadPath = '/image/upload/';
+      const uploadIndex = url.pathname.indexOf(uploadPath);
+      if (uploadIndex >= 0) {
+        const insertionIndex = uploadIndex + uploadPath.length;
+        url.pathname = `${url.pathname.slice(0, insertionIndex)}f_auto,q_auto,w_640,h_360,c_fill/${url.pathname.slice(insertionIndex)}`;
+      }
+    }
+
+    return url.toString();
+  } catch {
+    return imageUrl;
+  }
+};
+
 const getErrorLogTrafficSource = (log = {}, analyticsVisits = []) => {
   const context = log.context && typeof log.context === 'object' && !Array.isArray(log.context)
     ? log.context
@@ -5683,7 +5718,15 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                       {/* Image Cover Section */}
                       <div className="aspect-video bg-slate-100 relative shrink-0 overflow-hidden">
                         {p.cover_photo_url ? (
-                          <img src={p.cover_photo_url} alt="Cover" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                          <img
+                            src={getAdminCardImageUrl(p.cover_photo_url)}
+                            alt="Cover"
+                            loading="lazy"
+                            decoding="async"
+                            width="640"
+                            height="360"
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                          />
                         ) : (
                           <div className="w-full h-full flex flex-col items-center justify-center text-slate-300 gap-2">
                             <Icon name="image" className="w-6 h-6" />
@@ -5974,8 +6017,12 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                         <div className="aspect-video bg-slate-100 relative shrink-0 overflow-hidden">
                           {p.cover_photo_url ? (
                             <img
-                              src={p.cover_photo_url}
+                              src={getAdminCardImageUrl(p.cover_photo_url)}
                               alt={p.place_name || "Location Visual"}
+                              loading="lazy"
+                              decoding="async"
+                              width="640"
+                              height="360"
                               className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                             />
                           ) : (
