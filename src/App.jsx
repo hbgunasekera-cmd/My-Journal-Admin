@@ -274,14 +274,20 @@ const createLocationQrJpeg = async (place, destinationUrl, locationDescription =
   const qrSize = codeSize + quietZoneSize * 2;
   const padding = 44;
   const footerHeight = 190;
+  const logicalWidth = qrSize + padding * 2;
+  const logicalHeight = qrSize + padding * 2 + footerHeight;
+  // Some social platforms require uploads larger than 5 MP. Keep QR modules
+  // on whole-pixel boundaries while scaling the full design to at least 5.5 MP.
+  const renderScale = Math.max(1, Math.ceil(Math.sqrt(5_500_000 / (logicalWidth * logicalHeight)) * 4) / 4);
   const canvas = document.createElement('canvas');
-  canvas.width = qrSize + padding * 2;
-  canvas.height = qrSize + padding * 2 + footerHeight;
+  canvas.width = Math.ceil(logicalWidth * renderScale);
+  canvas.height = Math.ceil(logicalHeight * renderScale);
   const context = canvas.getContext('2d');
   if (!context) throw new Error('This browser could not create the QR image canvas.');
+  context.scale(renderScale, renderScale);
 
   context.fillStyle = '#f8fafc';
-  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.fillRect(0, 0, canvas.width / renderScale, canvas.height / renderScale);
   context.fillStyle = '#ffffff';
   context.fillRect(padding, padding, qrSize, qrSize);
 
@@ -400,6 +406,7 @@ const createLocationQrJpeg = async (place, destinationUrl, locationDescription =
 
   const jpeg = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.98));
   if (!jpeg || jpeg.type !== 'image/jpeg') throw new Error('The QR image could not be exported as JPEG.');
+  if (canvas.width * canvas.height <= 5_000_000) throw new Error('The QR JPEG must be larger than 5 megapixels for social uploads.');
   return jpeg;
 };
 
@@ -2081,11 +2088,12 @@ function App() {
     return url;
   };
 
-  const generateAndDownloadLocationQr = async (place) => {
+  const generateAndDownloadLocationQr = async (place, { allowExistingQr = false } = {}) => {
     const placeId = String(place?.id || '');
     if (!placeId) throw new Error('This location has no database ID.');
     if (place.status !== 'done') throw new Error('Complete this location before generating its gallery QR code.');
-    if (place.qr_code) throw new Error('A QR code is already marked as generated for this location.');
+    const alreadyTracked = Boolean(place.qr_code);
+    if (alreadyTracked && !allowExistingQr) throw new Error('A QR code is already marked as generated for this location.');
     if (!place.cover_photo_url) throw new Error('Add a cover image before generating this QR code.');
     if (qrGenerationInProgressRef.current.has(placeId)) return false;
 
@@ -2099,31 +2107,33 @@ function App() {
       const description = getSocialDescription(place);
       const jpeg = await createLocationQrJpeg(place, galleryUrl, description);
 
-      const { data, error } = await supabaseClient
-        .from('travel_bucket_list')
-        .update({ qr_code: true })
-        .eq('id', place.id)
-        .or('qr_code.eq.false,qr_code.is.null')
-        .select('id')
-        .maybeSingle();
-
-      if (error) throw error;
-      if (!data) {
-        const { data: currentRecord, error: lookupError } = await supabaseClient
+      if (!alreadyTracked) {
+        const { data, error } = await supabaseClient
           .from('travel_bucket_list')
-          .select('qr_code')
+          .update({ qr_code: true })
           .eq('id', place.id)
+          .or('qr_code.eq.false,qr_code.is.null')
+          .select('id')
           .maybeSingle();
-        if (lookupError) throw lookupError;
-        if (currentRecord?.qr_code === true) {
-          setPlaces((current) => current.map((item) => (
-            String(item.id) === placeId ? { ...item, qr_code: true } : item
-          )));
-          throw new Error('This location already has a QR code recorded.');
+
+        if (error) throw error;
+        if (!data) {
+          const { data: currentRecord, error: lookupError } = await supabaseClient
+            .from('travel_bucket_list')
+            .select('qr_code')
+            .eq('id', place.id)
+            .maybeSingle();
+          if (lookupError) throw lookupError;
+          if (currentRecord?.qr_code === true) {
+            setPlaces((current) => current.map((item) => (
+              String(item.id) === placeId ? { ...item, qr_code: true } : item
+            )));
+            throw new Error('This location already has a QR code recorded.');
+          }
+          throw new Error('Could not reserve this QR code in the database. Check the travel_bucket_list write permissions and retry.');
         }
-        throw new Error('Could not reserve this QR code in the database. Check the travel_bucket_list write permissions and retry.');
+        claimed = true;
       }
-      claimed = true;
 
       const objectUrl = URL.createObjectURL(jpeg);
       const link = document.createElement('a');
@@ -2163,7 +2173,9 @@ function App() {
 
   const handleGenerateLocationQr = async (place) => {
     try {
-      const generated = await generateAndDownloadLocationQr(place);
+      // Rebuild a tracked QR only when the user explicitly requests a fresh JPG;
+      // the database flag stays set and bulk generation still skips it.
+      const generated = await generateAndDownloadLocationQr(place, { allowExistingQr: Boolean(place.qr_code) });
       if (generated) {
         setQrSharePayload({ place: { ...place }, ...generated });
         triggerToast(`QR JPG downloaded for ${place.place_name}. Choose a platform to share it.`);
@@ -2264,6 +2276,35 @@ function App() {
         return;
     }
 
+    const copyWithDocumentCommand = () => {
+      const textarea = document.createElement('textarea');
+      textarea.value = caption;
+      textarea.setAttribute('readonly', '');
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      const copied = document.execCommand('copy');
+      textarea.remove();
+      if (!copied) throw new Error('Clipboard write was blocked.');
+      return true;
+    };
+
+    // Start the clipboard write while the click still has user activation, then
+    // open the platform synchronously so popup blockers also see the click.
+    let captionCopy;
+    try {
+      captionCopy = navigator.clipboard?.writeText
+        ? navigator.clipboard.writeText(caption).then(() => true).catch(() => copyWithDocumentCommand())
+        : Promise.resolve(copyWithDocumentCommand());
+    } catch {
+      try {
+        captionCopy = Promise.resolve(copyWithDocumentCommand());
+      } catch (error) {
+        captionCopy = Promise.reject(error);
+      }
+    }
+
     const popup = window.open(destination, '_blank', 'width=850,height=750,scrollbars=yes,resizable=yes');
     if (!popup) {
       const error = new Error(`The ${platform} sharing window was blocked by the browser.`);
@@ -2272,12 +2313,22 @@ function App() {
         source: '/qr-code-sharing',
         context: { task: 'location-qr-sharing', action: 'open-platform', platform, location_id: String(place.id || ''), place_name: placeName }
       });
-      triggerToast('Allow pop-ups for this site, then choose the platform again.');
+      try {
+        await captionCopy;
+        triggerToast(`Caption copied. Allow pop-ups for this site, then choose ${platform} again.`);
+      } catch (copyError) {
+        logClientError(copyError, {
+          errorType: 'Location QR sharing',
+          source: '/qr-code-sharing',
+          context: { task: 'location-qr-sharing', action: 'copy-caption', platform, location_id: String(place.id || ''), place_name: placeName }
+        });
+        triggerToast('Allow pop-ups for this site; the caption could not be copied.');
+      }
       return;
     }
 
     try {
-      await navigator.clipboard.writeText(caption);
+      await captionCopy;
       triggerToast(`${platform} opened. Caption copied; attach ${qrSharePayload.filename} before posting.`);
     } catch (error) {
       logClientError(error, {
@@ -6527,15 +6578,15 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                               event.stopPropagation();
                               void handleGenerateLocationQr(p);
                             }}
-                            disabled={!p.cover_photo_url || Boolean(p.qr_code) || qrGenerationInProgress || qrGeneratingPlaceId === String(p.id)}
-                            title={p.qr_code ? 'QR image already generated' : !p.cover_photo_url ? 'Add a cover image before generating a QR code' : 'Generate the QR JPG and open social sharing options'}
+                            disabled={!p.cover_photo_url || qrGenerationInProgress || qrGeneratingPlaceId === String(p.id)}
+                            title={p.qr_code ? 'Download a fresh high-resolution QR JPG; this location stays tracked as generated' : !p.cover_photo_url ? 'Add a cover image before generating a QR code' : 'Generate the QR JPG and open social sharing options'}
                             className="absolute right-2 top-2 z-10 flex items-center gap-1.5 rounded-lg border border-white/60 bg-white/95 px-2.5 py-1.5 text-[8px] font-black uppercase text-slate-800 shadow-md backdrop-blur transition-colors hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-70"
                           >
                             <Icon
-                              name={p.qr_code ? 'check-circle' : qrGeneratingPlaceId === String(p.id) ? 'refresh-cw' : 'qr-code'}
+                              name={qrGeneratingPlaceId === String(p.id) ? 'refresh-cw' : p.qr_code ? 'download' : 'qr-code'}
                               className={`h-3 w-3 ${qrGeneratingPlaceId === String(p.id) ? 'animate-spin' : ''}`}
                             />
-                            {p.qr_code ? 'QR saved' : qrGeneratingPlaceId === String(p.id) ? 'Working' : 'QR & Share'}
+                            {qrGeneratingPlaceId === String(p.id) ? 'Working' : p.qr_code ? 'Refresh QR JPG' : 'QR & Share'}
                           </button>
                         </div>
 
