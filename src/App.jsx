@@ -262,7 +262,7 @@ const getAdminCardImageUrl = (imageUrl) => {
   }
 };
 
-const createLocationQrPng = async (place, destinationUrl, locationDescription = '') => {
+const createLocationQrJpeg = async (place, destinationUrl, locationDescription = '') => {
   if (!place?.cover_photo_url) throw new Error('Add a cover image before generating this QR code.');
 
   const qr = QRCodeGenerator.create(destinationUrl, { errorCorrectionLevel: 'H' });
@@ -367,7 +367,8 @@ const createLocationQrPng = async (place, destinationUrl, locationDescription = 
   context.fillStyle = '#0f172a';
   context.font = '800 27px Arial, sans-serif';
   context.fillText(placeName, canvas.width / 2, footerY + 30, canvas.width - 64);
-  const description = String(locationDescription || '').replace(/\s+/g, ' ').trim().slice(0, 190);
+  const rawDescription = String(locationDescription || '').replace(/\s+/g, ' ').trim();
+  const description = rawDescription.length > 120 ? `${rawDescription.slice(0, 119).trimEnd()}…` : rawDescription;
   context.fillStyle = '#475569';
   context.font = '500 15px Arial, sans-serif';
   const descriptionLines = [];
@@ -397,9 +398,9 @@ const createLocationQrPng = async (place, destinationUrl, locationDescription = 
   context.font = '700 18px Arial, sans-serif';
   context.fillText('myjournalview.com', canvas.width / 2, footerY + 136);
 
-  const png = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
-  if (!png) throw new Error('The QR image could not be exported as PNG.');
-  return png;
+  const jpeg = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.98));
+  if (!jpeg || jpeg.type !== 'image/jpeg') throw new Error('The QR image could not be exported as JPEG.');
+  return jpeg;
 };
 
 const getErrorLogTrafficSource = (log = {}, analyticsVisits = []) => {
@@ -2096,7 +2097,7 @@ function App() {
       if (!slug) throw new Error('This location needs a valid gallery slug.');
       const galleryUrl = generateGalleryLink(slug, 'qrcode');
       const description = getSocialDescription(place);
-      const png = await createLocationQrPng(place, galleryUrl, description);
+      const jpeg = await createLocationQrJpeg(place, galleryUrl, description);
 
       const { data, error } = await supabaseClient
         .from('travel_bucket_list')
@@ -2124,10 +2125,10 @@ function App() {
       }
       claimed = true;
 
-      const objectUrl = URL.createObjectURL(png);
+      const objectUrl = URL.createObjectURL(jpeg);
       const link = document.createElement('a');
       link.href = objectUrl;
-      link.download = `${slug}-myjournalview-qr.png`;
+      link.download = `${slug}-myjournalview-qr.jpg`;
       link.style.display = 'none';
       document.body.appendChild(link);
       link.click();
@@ -2137,7 +2138,7 @@ function App() {
       setPlaces((current) => current.map((item) => (
         String(item.id) === placeId ? { ...item, qr_code: true } : item
       )));
-      return { png, filename: link.download, galleryUrl, description };
+      return { image: jpeg, filename: link.download, galleryUrl, description };
     } catch (error) {
       if (claimed) {
         const { error: rollbackError } = await supabaseClient
@@ -2165,7 +2166,7 @@ function App() {
       const generated = await generateAndDownloadLocationQr(place);
       if (generated) {
         setQrSharePayload({ place: { ...place }, ...generated });
-        triggerToast(`QR image downloaded for ${place.place_name}. Choose a platform to share it.`);
+        triggerToast(`QR JPG downloaded for ${place.place_name}. Choose a platform to share it.`);
       }
     } catch (error) {
       logClientError(new Error(`${place.place_name}: ${error.message || 'QR image generation failed.'}`), {
@@ -2184,11 +2185,53 @@ function App() {
     }
   };
 
+  const getQrShareCaption = (platform, payload = qrSharePayload) => {
+    if (!payload) return '';
+    const limits = {
+      instagram: 2200,
+      threads: 500,
+      mastodon: 500,
+      bluesky: 300,
+      pinterest: 500,
+      unsplash: 1000,
+      twitter: 280
+    };
+    const maxLength = limits[platform] || 280;
+    const splitCharacters = (value) => (typeof Intl.Segmenter === 'function'
+      ? Array.from(new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(String(value || '')), (item) => item.segment)
+      : Array.from(String(value || '')));
+    const countCharacters = (value) => splitCharacters(value).length;
+    const trimToLength = (value, maxLengthValue) => {
+      const characters = splitCharacters(String(value || '').trim());
+      if (characters.length <= maxLengthValue) return characters.join('');
+      if (maxLengthValue <= 1) return '…'.slice(0, maxLengthValue);
+      let prefix = characters.slice(0, maxLengthValue - 1).join('').trimEnd();
+      const lastSpace = prefix.lastIndexOf(' ');
+      if (lastSpace > prefix.length * 0.65) prefix = prefix.slice(0, lastSpace);
+      return `${prefix}…`;
+    };
+
+    const placeName = trimToLength(payload.place.place_name || 'MyJournalView location', 60);
+    let footer = `\n\nScan the QR to view the gallery:\n${payload.galleryUrl}\n\n#MyJournal #SriLanka`;
+    let header = `${placeName}\n\n`;
+    let descriptionBudget = maxLength - countCharacters(header + footer);
+    if (descriptionBudget < 0) {
+      footer = `\n\nGallery QR: ${payload.galleryUrl}`;
+      descriptionBudget = maxLength - countCharacters(header + footer);
+    }
+    if (descriptionBudget < 0) {
+      header = `${trimToLength(placeName, Math.max(8, maxLength - countCharacters(footer) - 2))}\n\n`;
+      descriptionBudget = Math.max(0, maxLength - countCharacters(header + footer));
+    }
+    const shortDescription = trimToLength(payload.description, descriptionBudget);
+    return `${header}${shortDescription}${footer}`;
+  };
+
   const openQrSocialComposer = async (platform) => {
     if (!qrSharePayload) return;
-    const { place, galleryUrl, description } = qrSharePayload;
+    const { place, galleryUrl } = qrSharePayload;
     const placeName = place.place_name || 'MyJournalView location';
-    const caption = `${placeName}\n\n${description}\n\n📲 Scan the QR code to open the ${placeName} gallery.\n${galleryUrl}\n\n#MyJournal #SriLanka #TravelSriLanka #TravelPhotography`;
+    const caption = getQrShareCaption(platform);
     const encodedCaption = encodeURIComponent(caption);
     let destination = '';
 
@@ -2247,8 +2290,8 @@ function App() {
   };
 
   const downloadCurrentQrAgain = () => {
-    if (!qrSharePayload?.png) return;
-    const objectUrl = URL.createObjectURL(qrSharePayload.png);
+    if (!qrSharePayload?.image) return;
+    const objectUrl = URL.createObjectURL(qrSharePayload.image);
     const link = document.createElement('a');
     link.href = objectUrl;
     link.download = qrSharePayload.filename;
@@ -2258,21 +2301,21 @@ function App() {
 
   const shareQrThroughDevice = async () => {
     if (!qrSharePayload) return;
-    const { place, png, filename, galleryUrl, description } = qrSharePayload;
+    const { place, image, filename, galleryUrl } = qrSharePayload;
     if (typeof navigator.share !== 'function' || typeof navigator.canShare !== 'function' || typeof File !== 'function') {
-      triggerToast('Direct image sharing is not available here. Choose a platform below and attach the downloaded PNG.');
+      triggerToast('Direct image sharing is not available here. Choose a platform below and attach the downloaded JPG.');
       return;
     }
     try {
-      const file = new File([png], filename, { type: 'image/png' });
+      const file = new File([image], filename, { type: 'image/jpeg' });
       if (!navigator.canShare({ files: [file] })) {
-        triggerToast('Direct image sharing is not available here. Choose a platform below and attach the downloaded PNG.');
+        triggerToast('Direct image sharing is not available here. Choose a platform below and attach the downloaded JPG.');
         return;
       }
       await navigator.share({
         files: [file],
         title: place.place_name || 'MyJournalView location',
-        text: `${description}\n\nScan the QR code to open the location gallery.`,
+        text: getQrShareCaption('bluesky'),
         url: galleryUrl
       });
     } catch (error) {
@@ -6432,10 +6475,10 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                   onClick={generateMissingLocationQrs}
                   disabled={qrGenerationInProgress || qrCodePendingCount === 0}
                   className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-[9px] font-black uppercase text-emerald-700 shadow-sm transition-colors hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
-                  title="Generate and download QR PNGs for completed locations that do not have one yet"
+                  title="Generate and download QR JPGs for completed locations that do not have one yet"
                 >
                   <Icon name={qrGenerationInProgress ? 'refresh-cw' : 'qr-code'} className={`h-3.5 w-3.5 ${qrGenerationInProgress ? 'animate-spin' : ''}`} />
-                  {qrGenerationInProgress ? 'Generating QR PNGs…' : `Generate QR PNGs (${qrCodePendingCount})`}
+                  {qrGenerationInProgress ? 'Generating QR JPGs…' : `Generate QR JPGs (${qrCodePendingCount})`}
                 </button>
               </div>
 
@@ -6485,7 +6528,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                               void handleGenerateLocationQr(p);
                             }}
                             disabled={!p.cover_photo_url || Boolean(p.qr_code) || qrGenerationInProgress || qrGeneratingPlaceId === String(p.id)}
-                            title={p.qr_code ? 'QR image already generated' : !p.cover_photo_url ? 'Add a cover image before generating a QR code' : 'Generate the QR PNG and open social sharing options'}
+                            title={p.qr_code ? 'QR image already generated' : !p.cover_photo_url ? 'Add a cover image before generating a QR code' : 'Generate the QR JPG and open social sharing options'}
                             className="absolute right-2 top-2 z-10 flex items-center gap-1.5 rounded-lg border border-white/60 bg-white/95 px-2.5 py-1.5 text-[8px] font-black uppercase text-slate-800 shadow-md backdrop-blur transition-colors hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-70"
                           >
                             <Icon
@@ -8811,7 +8854,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
 
               <div className="mt-4 flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
                 <div className="min-w-0">
-                  <p className="text-[9px] font-black uppercase tracking-wide text-slate-700">QR PNG downloaded</p>
+                  <p className="text-[9px] font-black uppercase tracking-wide text-slate-700">QR JPG downloaded</p>
                   <p className="truncate text-[10px] text-slate-500">{qrSharePayload.filename}</p>
                 </div>
                 <button
@@ -8824,7 +8867,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
               </div>
 
               <p className="mt-4 text-[10px] leading-relaxed text-slate-500">
-                Choose a platform to open its composer with the location caption copied. Attach the downloaded QR PNG before posting.
+                Choose a platform to open its composer with a caption sized for that platform. Attach the downloaded QR JPG before posting.
               </p>
 
               <button
