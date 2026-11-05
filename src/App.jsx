@@ -122,6 +122,15 @@ const VALID_CATEGORIES = [
   "Plateaus", "Reserved Forest", "Monastery", "Archaeology",
   "Reservoir", "Pool", "Stream", "Location"
 ];
+const QR_SOCIAL_PLATFORMS = [
+  { id: 'instagram', label: 'Instagram', icon: 'instagram', color: 'hover:border-fuchsia-300 hover:bg-fuchsia-50' },
+  { id: 'threads', label: 'Threads', icon: 'threads', color: 'hover:border-slate-400 hover:bg-slate-100' },
+  { id: 'mastodon', label: 'Mastodon', icon: 'share-2', color: 'hover:border-indigo-300 hover:bg-indigo-50' },
+  { id: 'bluesky', label: 'Bluesky', icon: 'share-2', color: 'hover:border-sky-300 hover:bg-sky-50' },
+  { id: 'pinterest', label: 'Pinterest', icon: 'heart', color: 'hover:border-rose-300 hover:bg-rose-50' },
+  { id: 'unsplash', label: 'Unsplash', icon: 'camera', color: 'hover:border-slate-400 hover:bg-slate-100' },
+  { id: 'twitter', label: 'Twitter / X', icon: 'twitter', color: 'hover:border-sky-300 hover:bg-sky-50' }
+];
 
 const TRAFFIC_BOT_RULES = [
   { source: 'Apple Bot', patterns: ['applebot'] },
@@ -253,7 +262,7 @@ const getAdminCardImageUrl = (imageUrl) => {
   }
 };
 
-const createLocationQrPng = async (place, destinationUrl) => {
+const createLocationQrPng = async (place, destinationUrl, locationDescription = '') => {
   if (!place?.cover_photo_url) throw new Error('Add a cover image before generating this QR code.');
 
   const qr = QRCodeGenerator.create(destinationUrl, { errorCorrectionLevel: 'H' });
@@ -264,7 +273,7 @@ const createLocationQrPng = async (place, destinationUrl) => {
   const quietZoneSize = quietZoneModules * moduleSize;
   const qrSize = codeSize + quietZoneSize * 2;
   const padding = 44;
-  const footerHeight = 132;
+  const footerHeight = 190;
   const canvas = document.createElement('canvas');
   canvas.width = qrSize + padding * 2;
   canvas.height = qrSize + padding * 2 + footerHeight;
@@ -348,7 +357,7 @@ const createLocationQrPng = async (place, destinationUrl) => {
   context.lineWidth = 8;
   context.stroke();
 
-  const footerY = padding + qrSize + 43;
+  const footerY = padding + qrSize + 32;
   const placeName = String(place.place_name || 'MyJournalView').trim();
   context.textAlign = 'center';
   context.textBaseline = 'middle';
@@ -357,10 +366,36 @@ const createLocationQrPng = async (place, destinationUrl) => {
   context.fillText('SCAN TO DISCOVER', canvas.width / 2, footerY, canvas.width - 64);
   context.fillStyle = '#0f172a';
   context.font = '800 27px Arial, sans-serif';
-  context.fillText(placeName, canvas.width / 2, footerY + 35, canvas.width - 64);
+  context.fillText(placeName, canvas.width / 2, footerY + 30, canvas.width - 64);
+  const description = String(locationDescription || '').replace(/\s+/g, ' ').trim().slice(0, 190);
+  context.fillStyle = '#475569';
+  context.font = '500 15px Arial, sans-serif';
+  const descriptionLines = [];
+  const maxDescriptionWidth = canvas.width - 96;
+  let descriptionLine = '';
+  for (const word of description.split(' ')) {
+    const nextLine = `${descriptionLine} ${word}`.trim();
+    if (descriptionLine && context.measureText(nextLine).width > maxDescriptionWidth) {
+      descriptionLines.push(descriptionLine);
+      descriptionLine = word;
+      if (descriptionLines.length === 2) break;
+    } else {
+      descriptionLine = nextLine;
+    }
+  }
+  if (descriptionLine && descriptionLines.length < 2) descriptionLines.push(descriptionLine);
+  if (descriptionLines.length === 2 && description.length > descriptionLines.join(' ').length) {
+    descriptionLines[1] = `${descriptionLines[1].replace(/[.,;:]?$/, '')}…`;
+  }
+  descriptionLines.forEach((line, index) => {
+    context.fillText(line, canvas.width / 2, footerY + 56 + index * 20, maxDescriptionWidth);
+  });
+  context.fillStyle = '#0e7490';
+  context.font = '800 15px Arial, sans-serif';
+  context.fillText('SCAN THE CODE TO OPEN THE GALLERY', canvas.width / 2, footerY + 105, canvas.width - 64);
   context.fillStyle = '#0e7490';
   context.font = '700 18px Arial, sans-serif';
-  context.fillText('myjournalview.com', canvas.width / 2, footerY + 72);
+  context.fillText('myjournalview.com', canvas.width / 2, footerY + 136);
 
   const png = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
   if (!png) throw new Error('The QR image could not be exported as PNG.');
@@ -1152,6 +1187,7 @@ function App() {
   const [bulkGenerationLogDialogOpen, setBulkGenerationLogDialogOpen] = useState(false);
   const [qrGenerationInProgress, setQrGenerationInProgress] = useState(false);
   const [qrGeneratingPlaceId, setQrGeneratingPlaceId] = useState(null);
+  const [qrSharePayload, setQrSharePayload] = useState(null);
   const [adminErrorLogs, setAdminErrorLogs] = useState([]);
   const [adminErrorLogsTotal, setAdminErrorLogsTotal] = useState(0);
   const [adminErrorLogsHasMore, setAdminErrorLogsHasMore] = useState(false);
@@ -2059,7 +2095,8 @@ function App() {
       const slug = place.slug || generateCleanSlug(place.place_name);
       if (!slug) throw new Error('This location needs a valid gallery slug.');
       const galleryUrl = generateGalleryLink(slug, 'qrcode');
-      const png = await createLocationQrPng(place, galleryUrl);
+      const description = getSocialDescription(place);
+      const png = await createLocationQrPng(place, galleryUrl, description);
 
       const { data, error } = await supabaseClient
         .from('travel_bucket_list')
@@ -2100,7 +2137,7 @@ function App() {
       setPlaces((current) => current.map((item) => (
         String(item.id) === placeId ? { ...item, qr_code: true } : item
       )));
-      return true;
+      return { png, filename: link.download, galleryUrl, description };
     } catch (error) {
       if (claimed) {
         const { error: rollbackError } = await supabaseClient
@@ -2125,8 +2162,11 @@ function App() {
 
   const handleGenerateLocationQr = async (place) => {
     try {
-      const downloaded = await generateAndDownloadLocationQr(place);
-      if (downloaded) triggerToast(`QR image downloaded for ${place.place_name}.`);
+      const generated = await generateAndDownloadLocationQr(place);
+      if (generated) {
+        setQrSharePayload({ place: { ...place }, ...generated });
+        triggerToast(`QR image downloaded for ${place.place_name}. Choose a platform to share it.`);
+      }
     } catch (error) {
       logClientError(new Error(`${place.place_name}: ${error.message || 'QR image generation failed.'}`), {
         errorType: 'Location QR generation',
@@ -2141,6 +2181,108 @@ function App() {
         'No QR image was downloaded; the location remains available to retry.'
       );
       triggerToast(error.message || 'Could not generate the QR image.');
+    }
+  };
+
+  const openQrSocialComposer = async (platform) => {
+    if (!qrSharePayload) return;
+    const { place, galleryUrl, description } = qrSharePayload;
+    const placeName = place.place_name || 'MyJournalView location';
+    const caption = `${placeName}\n\n${description}\n\n📲 Scan the QR code to open the ${placeName} gallery.\n${galleryUrl}\n\n#MyJournal #SriLanka #TravelSriLanka #TravelPhotography`;
+    const encodedCaption = encodeURIComponent(caption);
+    let destination = '';
+
+    switch (platform) {
+      case 'instagram':
+        destination = 'https://www.instagram.com/';
+        break;
+      case 'threads':
+        destination = `https://www.threads.net/intent/post?text=${encodedCaption}`;
+        break;
+      case 'mastodon':
+        destination = `https://mastodon.social/share?text=${encodedCaption}`;
+        break;
+      case 'bluesky':
+        destination = `https://bsky.app/intent/compose?text=${encodedCaption}`;
+        break;
+      case 'pinterest':
+        destination = `https://www.pinterest.com/pin-creation-tool/?url=${encodeURIComponent(galleryUrl)}&description=${encodedCaption}`;
+        break;
+      case 'unsplash': {
+        const natureCategories = ['Waterfall', 'Mountain', 'Trail', 'Viewpoint', 'Beach', 'Park', 'Plateaus', 'Reserved Forest', 'Reservoir', 'Pool', 'Stream'];
+        const topic = natureCategories.includes(place.category) ? 'nature' : 'travel';
+        destination = `https://unsplash.com/t/${topic}?modal=%5B%22Uploader%22%2C%5B%22Publish%22%2C%7B%22value%22%3A%22${topic}%22%7D%5D%5D`;
+        break;
+      }
+      case 'twitter':
+        destination = `https://twitter.com/intent/tweet?text=${encodedCaption}`;
+        break;
+      default:
+        return;
+    }
+
+    const popup = window.open(destination, '_blank', 'width=850,height=750,scrollbars=yes,resizable=yes');
+    if (!popup) {
+      const error = new Error(`The ${platform} sharing window was blocked by the browser.`);
+      logClientError(error, {
+        errorType: 'Location QR sharing',
+        source: '/qr-code-sharing',
+        context: { task: 'location-qr-sharing', action: 'open-platform', platform, location_id: String(place.id || ''), place_name: placeName }
+      });
+      triggerToast('Allow pop-ups for this site, then choose the platform again.');
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(caption);
+      triggerToast(`${platform} opened. Caption copied; attach ${qrSharePayload.filename} before posting.`);
+    } catch (error) {
+      logClientError(error, {
+        errorType: 'Location QR sharing',
+        source: '/qr-code-sharing',
+        context: { task: 'location-qr-sharing', action: 'copy-caption', platform, location_id: String(place.id || ''), place_name: placeName }
+      });
+      triggerToast(`${platform} opened. Attach ${qrSharePayload.filename} and copy the caption from this window.`);
+    }
+  };
+
+  const downloadCurrentQrAgain = () => {
+    if (!qrSharePayload?.png) return;
+    const objectUrl = URL.createObjectURL(qrSharePayload.png);
+    const link = document.createElement('a');
+    link.href = objectUrl;
+    link.download = qrSharePayload.filename;
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 30_000);
+  };
+
+  const shareQrThroughDevice = async () => {
+    if (!qrSharePayload) return;
+    const { place, png, filename, galleryUrl, description } = qrSharePayload;
+    if (typeof navigator.share !== 'function' || typeof navigator.canShare !== 'function' || typeof File !== 'function') {
+      triggerToast('Direct image sharing is not available here. Choose a platform below and attach the downloaded PNG.');
+      return;
+    }
+    try {
+      const file = new File([png], filename, { type: 'image/png' });
+      if (!navigator.canShare({ files: [file] })) {
+        triggerToast('Direct image sharing is not available here. Choose a platform below and attach the downloaded PNG.');
+        return;
+      }
+      await navigator.share({
+        files: [file],
+        title: place.place_name || 'MyJournalView location',
+        text: `${description}\n\nScan the QR code to open the location gallery.`,
+        url: galleryUrl
+      });
+    } catch (error) {
+      if (error?.name === 'AbortError') return;
+      logClientError(error, {
+        errorType: 'Location QR sharing',
+        source: '/qr-code-sharing',
+        context: { task: 'location-qr-sharing', action: 'device-share', location_id: String(place.id || ''), place_name: place.place_name || '' }
+      });
+      triggerToast('Could not open the device share sheet. Choose a platform below instead.');
     }
   };
 
@@ -6343,14 +6485,14 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                               void handleGenerateLocationQr(p);
                             }}
                             disabled={!p.cover_photo_url || Boolean(p.qr_code) || qrGenerationInProgress || qrGeneratingPlaceId === String(p.id)}
-                            title={p.qr_code ? 'QR image already generated' : !p.cover_photo_url ? 'Add a cover image before generating a QR code' : 'Generate and download this location’s QR PNG'}
+                            title={p.qr_code ? 'QR image already generated' : !p.cover_photo_url ? 'Add a cover image before generating a QR code' : 'Generate the QR PNG and open social sharing options'}
                             className="absolute right-2 top-2 z-10 flex items-center gap-1.5 rounded-lg border border-white/60 bg-white/95 px-2.5 py-1.5 text-[8px] font-black uppercase text-slate-800 shadow-md backdrop-blur transition-colors hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-70"
                           >
                             <Icon
                               name={p.qr_code ? 'check-circle' : qrGeneratingPlaceId === String(p.id) ? 'refresh-cw' : 'qr-code'}
                               className={`h-3 w-3 ${qrGeneratingPlaceId === String(p.id) ? 'animate-spin' : ''}`}
                             />
-                            {p.qr_code ? 'QR saved' : qrGeneratingPlaceId === String(p.id) ? 'Working' : 'QR PNG'}
+                            {p.qr_code ? 'QR saved' : qrGeneratingPlaceId === String(p.id) ? 'Working' : 'QR & Share'}
                           </button>
                         </div>
 
@@ -8624,6 +8766,104 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {qrSharePayload && (
+        <div
+          className="fixed inset-0 z-[6300] flex items-center justify-center bg-slate-950/65 p-4 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="location-qr-share-title"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) setQrSharePayload(null);
+          }}
+        >
+          <section className="flex max-h-[88vh] w-full max-w-xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl">
+            <header className="flex items-start justify-between gap-4 border-b border-slate-100 p-5">
+              <div>
+                <div className="flex items-center gap-2 text-emerald-700">
+                  <Icon name="qr-code" className="h-4 w-4" />
+                  <span className="text-[9px] font-black uppercase tracking-[0.18em]">Location QR</span>
+                </div>
+                <h2 id="location-qr-share-title" className="mt-1 text-base font-black uppercase text-slate-900">
+                  Share {qrSharePayload.place.place_name}
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setQrSharePayload(null)}
+                className="rounded-xl p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                aria-label="Close QR sharing window"
+              >
+                <Icon name="x" className="h-4 w-4" />
+              </button>
+            </header>
+
+            <div className="min-h-0 flex-1 overflow-y-auto p-5">
+              <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-4">
+                <p className="text-xs font-bold leading-relaxed text-slate-700">{qrSharePayload.description}</p>
+                <p className="mt-2 text-[10px] font-black uppercase tracking-wide text-emerald-800">
+                  Scan the QR code to open this location’s photo gallery.
+                </p>
+                <p className="mt-2 break-all text-[10px] font-semibold text-emerald-700">{qrSharePayload.galleryUrl}</p>
+              </div>
+
+              <div className="mt-4 flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                <div className="min-w-0">
+                  <p className="text-[9px] font-black uppercase tracking-wide text-slate-700">QR PNG downloaded</p>
+                  <p className="truncate text-[10px] text-slate-500">{qrSharePayload.filename}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={downloadCurrentQrAgain}
+                  className="shrink-0 rounded-lg border border-slate-200 bg-white px-3 py-2 text-[9px] font-black uppercase text-slate-700 hover:bg-slate-100"
+                >
+                  Download again
+                </button>
+              </div>
+
+              <p className="mt-4 text-[10px] leading-relaxed text-slate-500">
+                Choose a platform to open its composer with the location caption copied. Attach the downloaded QR PNG before posting.
+              </p>
+
+              <button
+                type="button"
+                onClick={() => void shareQrThroughDevice()}
+                className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-3 text-[9px] font-black uppercase tracking-wide text-white hover:bg-slate-700"
+              >
+                <Icon name="share-2" className="h-3.5 w-3.5" />
+                Share QR image with device apps
+              </button>
+              <p className="mt-2 text-center text-[9px] text-slate-400">
+                On supported phones, choose Instagram, Threads, or another installed app from the system share sheet.
+              </p>
+
+              <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
+                {QR_SOCIAL_PLATFORMS.map((platform) => (
+                  <button
+                    key={platform.id}
+                    type="button"
+                    onClick={() => void openQrSocialComposer(platform.id)}
+                    className={`flex min-h-16 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-3 text-left transition-colors ${platform.color}`}
+                  >
+                    <Icon name={platform.icon} className="h-4 w-4 shrink-0 text-slate-700" />
+                    <span className="text-[9px] font-black uppercase tracking-wide text-slate-800">{platform.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <footer className="flex justify-end border-t border-slate-100 p-4">
+              <button
+                type="button"
+                onClick={() => setQrSharePayload(null)}
+                className="rounded-xl bg-slate-900 px-4 py-2 text-[10px] font-black uppercase text-white hover:bg-slate-700"
+              >
+                Done
+              </button>
+            </footer>
+          </section>
         </div>
       )}
 
