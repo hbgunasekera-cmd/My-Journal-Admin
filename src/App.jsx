@@ -273,8 +273,46 @@ const createLocationQrJpeg = async (place, destinationUrl, locationDescription =
   const quietZoneSize = quietZoneModules * moduleSize;
   const qrSize = codeSize + quietZoneSize * 2;
   const padding = 44;
-  const footerHeight = 190;
   const logicalWidth = qrSize + padding * 2;
+  const rawDescription = String(locationDescription || '').replace(/\s+/g, ' ').trim();
+  const descriptionMeasureCanvas = document.createElement('canvas');
+  const descriptionMeasureContext = descriptionMeasureCanvas.getContext('2d');
+  if (!descriptionMeasureContext) throw new Error('This browser could not measure the QR description text.');
+  descriptionMeasureContext.font = '500 15px Arial, sans-serif';
+  const maxDescriptionWidth = logicalWidth - 96;
+  const descriptionLines = [];
+  let descriptionLine = '';
+  const appendLongWord = (word) => {
+    let chunk = '';
+    for (const character of Array.from(word)) {
+      const nextChunk = `${chunk}${character}`;
+      if (chunk && descriptionMeasureContext.measureText(nextChunk).width > maxDescriptionWidth) {
+        descriptionLines.push(chunk);
+        chunk = character;
+      } else {
+        chunk = nextChunk;
+      }
+    }
+    descriptionLine = chunk;
+  };
+
+  for (const word of rawDescription ? rawDescription.split(' ') : []) {
+    const nextLine = `${descriptionLine} ${word}`.trim();
+    if (descriptionLine && descriptionMeasureContext.measureText(nextLine).width > maxDescriptionWidth) {
+      descriptionLines.push(descriptionLine);
+      descriptionLine = '';
+    }
+    if (descriptionMeasureContext.measureText(word).width > maxDescriptionWidth) {
+      appendLongWord(word);
+    } else {
+      descriptionLine = `${descriptionLine} ${word}`.trim();
+    }
+  }
+  if (descriptionLine) descriptionLines.push(descriptionLine);
+
+  const footerCtaY = 56 + descriptionLines.length * 20 + 18;
+  const footerWebsiteY = footerCtaY + 31;
+  const footerHeight = Math.max(190, 56 + footerWebsiteY - padding + 24);
   const logicalHeight = qrSize + padding * 2 + footerHeight;
   // Some social platforms require uploads larger than 5 MP. Keep QR modules
   // on whole-pixel boundaries while scaling the full design to at least 5.5 MP.
@@ -375,36 +413,17 @@ const createLocationQrJpeg = async (place, destinationUrl, locationDescription =
   context.fillStyle = '#0f172a';
   context.font = '800 27px Arial, sans-serif';
   context.fillText(placeName, contentCenterX, footerY + 30, footerTextWidth);
-  const rawDescription = String(locationDescription || '').replace(/\s+/g, ' ').trim();
-  const description = rawDescription.length > 120 ? `${rawDescription.slice(0, 119).trimEnd()}…` : rawDescription;
   context.fillStyle = '#475569';
   context.font = '500 15px Arial, sans-serif';
-  const descriptionLines = [];
-  const maxDescriptionWidth = logicalWidth - 96;
-  let descriptionLine = '';
-  for (const word of description.split(' ')) {
-    const nextLine = `${descriptionLine} ${word}`.trim();
-    if (descriptionLine && context.measureText(nextLine).width > maxDescriptionWidth) {
-      descriptionLines.push(descriptionLine);
-      descriptionLine = word;
-      if (descriptionLines.length === 2) break;
-    } else {
-      descriptionLine = nextLine;
-    }
-  }
-  if (descriptionLine && descriptionLines.length < 2) descriptionLines.push(descriptionLine);
-  if (descriptionLines.length === 2 && description.length > descriptionLines.join(' ').length) {
-    descriptionLines[1] = `${descriptionLines[1].replace(/[.,;:]?$/, '')}…`;
-  }
   descriptionLines.forEach((line, index) => {
     context.fillText(line, contentCenterX, footerY + 56 + index * 20, maxDescriptionWidth);
   });
   context.fillStyle = '#0e7490';
   context.font = '800 15px Arial, sans-serif';
-  context.fillText('SCAN THE CODE TO OPEN THE GALLERY', contentCenterX, footerY + 105, footerTextWidth);
+  context.fillText('SCAN THE CODE TO OPEN THE GALLERY', contentCenterX, footerY + footerCtaY, footerTextWidth);
   context.fillStyle = '#0e7490';
   context.font = '700 18px Arial, sans-serif';
-  context.fillText('myjournalview.com', contentCenterX, footerY + 136);
+  context.fillText('myjournalview.com', contentCenterX, footerY + footerWebsiteY);
 
   const jpeg = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.98));
   if (!jpeg || jpeg.type !== 'image/jpeg') throw new Error('The QR image could not be exported as JPEG.');
