@@ -19,13 +19,22 @@ async function handler(req, res) {
 
     const { buffer, contentType } = await fetchTrustedImage(parsedUrl.toString());
     const shouldConvertToJpeg = req.query?.format === 'jpeg';
+    const requestedWidth = Number.parseInt(req.query?.width, 10);
+    const requestedHeight = Number.parseInt(req.query?.height, 10);
+    const width = Number.isInteger(requestedWidth) && requestedWidth >= 128 && requestedWidth <= 1600
+      ? requestedWidth
+      : 1080;
+    const height = Number.isInteger(requestedHeight) && requestedHeight >= 128 && requestedHeight <= 1600
+      ? requestedHeight
+      : 1080;
+    const fit = req.query?.fit === 'cover' ? 'cover' : 'contain';
     const outputBuffer = shouldConvertToJpeg
       ? await sharp(buffer)
         .rotate()
         .resize({
-          width: 1080,
-          height: 1080,
-          fit: 'contain',
+          width,
+          height,
+          fit,
           background: '#fff'
         })
         .flatten({ background: '#fff' })

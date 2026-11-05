@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createClient } from '@supabase/supabase-js';
+import QRCodeGenerator from 'qrcode';
 import { generateCleanSlug } from './utils.js';
 import { logClientError } from './errorLogger.js';
 
@@ -63,6 +64,7 @@ import {
   Navigation,
   Navigation2,
   PlusCircle,
+  QrCode,
   RefreshCw,
   Search,
   Share2,
@@ -251,6 +253,120 @@ const getAdminCardImageUrl = (imageUrl) => {
   }
 };
 
+const createLocationQrPng = async (place, destinationUrl) => {
+  if (!place?.cover_photo_url) throw new Error('Add a cover image before generating this QR code.');
+
+  const qr = QRCodeGenerator.create(destinationUrl, { errorCorrectionLevel: 'H' });
+  const matrixSize = qr.modules.size;
+  const moduleSize = 16;
+  const quietZoneModules = 4;
+  const codeSize = matrixSize * moduleSize;
+  const quietZoneSize = quietZoneModules * moduleSize;
+  const qrSize = codeSize + quietZoneSize * 2;
+  const padding = 44;
+  const footerHeight = 132;
+  const canvas = document.createElement('canvas');
+  canvas.width = qrSize + padding * 2;
+  canvas.height = qrSize + padding * 2 + footerHeight;
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('This browser could not create the QR image canvas.');
+
+  context.fillStyle = '#f8fafc';
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.fillStyle = '#ffffff';
+  context.fillRect(padding, padding, qrSize, qrSize);
+
+  const imageUrl = `/api/cover-image-proxy?format=jpeg&width=640&height=640&fit=cover&url=${encodeURIComponent(place.cover_photo_url)}`;
+  const imageResponse = await fetch(imageUrl);
+  if (!imageResponse.ok) {
+    let errorMessage = 'Could not load the location cover image.';
+    try {
+      const errorDetails = await imageResponse.json();
+      errorMessage = errorDetails.error || errorMessage;
+    } catch {
+      // Keep a concise fallback for non-JSON proxy errors.
+    }
+    throw new Error(errorMessage);
+  }
+
+  const cover = await createImageBitmap(await imageResponse.blob());
+  const patternX = padding + quietZoneSize;
+  const patternY = padding + quietZoneSize;
+  const coverSide = Math.min(cover.width, cover.height);
+  const sourceX = Math.floor((cover.width - coverSide) / 2);
+  const sourceY = Math.floor((cover.height - coverSide) / 2);
+  context.drawImage(cover, sourceX, sourceY, coverSide, coverSide, patternX, patternY, codeSize, codeSize);
+
+  const moduleGradient = context.createLinearGradient(patternX, patternY, patternX + codeSize, patternY + codeSize);
+  moduleGradient.addColorStop(0, '#075985');
+  moduleGradient.addColorStop(0.52, '#0e7490');
+  moduleGradient.addColorStop(1, '#047857');
+
+  const isProtectedPatternArea = (row, column) => (
+    (row <= 8 && column <= 8)
+    || (row <= 8 && column >= matrixSize - 8)
+    || (row >= matrixSize - 8 && column <= 8)
+    || row === 6
+    || column === 6
+  );
+
+  for (let row = 0; row < matrixSize; row += 1) {
+    for (let column = 0; column < matrixSize; column += 1) {
+      const isDark = qr.modules.data[row * matrixSize + column] === 1;
+      context.fillStyle = isDark
+        ? (isProtectedPatternArea(row, column) ? '#064e3b' : moduleGradient)
+        : '#ffffff';
+      if (isDark && !isProtectedPatternArea(row, column)) context.globalAlpha = 0.86;
+      context.fillRect(
+        patternX + column * moduleSize,
+        patternY + row * moduleSize,
+        moduleSize,
+        moduleSize
+      );
+      context.globalAlpha = 1;
+    }
+  }
+
+  const centerX = patternX + codeSize / 2;
+  const centerY = patternY + codeSize / 2;
+  const portraitSize = Math.round(codeSize * 0.18);
+  const portraitRadius = portraitSize / 2;
+  context.beginPath();
+  context.arc(centerX, centerY, portraitRadius + 12, 0, Math.PI * 2);
+  context.fillStyle = '#ffffff';
+  context.fill();
+  context.save();
+  context.beginPath();
+  context.arc(centerX, centerY, portraitRadius, 0, Math.PI * 2);
+  context.clip();
+  context.drawImage(cover, centerX - portraitRadius, centerY - portraitRadius, portraitSize, portraitSize);
+  context.restore();
+  cover.close?.();
+  context.beginPath();
+  context.arc(centerX, centerY, portraitRadius + 5, 0, Math.PI * 2);
+  context.strokeStyle = '#ffffff';
+  context.lineWidth = 8;
+  context.stroke();
+
+  const footerY = padding + qrSize + 43;
+  const placeName = String(place.place_name || 'MyJournalView').trim();
+  context.textAlign = 'center';
+  context.textBaseline = 'middle';
+  context.fillStyle = '#64748b';
+  context.font = '700 16px Arial, sans-serif';
+  context.fillText('SCAN TO DISCOVER', canvas.width / 2, footerY, canvas.width - 64);
+  context.fillStyle = '#0f172a';
+  context.font = '800 27px Arial, sans-serif';
+  context.fillText(placeName, canvas.width / 2, footerY + 35, canvas.width - 64);
+  context.fillStyle = '#0e7490';
+  context.font = '700 18px Arial, sans-serif';
+  context.fillText('myjournalview.com', canvas.width / 2, footerY + 72);
+
+  const png = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+  if (!png) throw new Error('The QR image could not be exported as PNG.');
+  return png;
+};
+
 const getErrorLogTrafficSource = (log = {}, analyticsVisits = []) => {
   const context = log.context && typeof log.context === 'object' && !Array.isArray(log.context)
     ? log.context
@@ -404,6 +520,7 @@ const Icon = React.memo(({ name, className = "w-4 h-4" }) => {
     'navigation': Navigation,
     'navigation-2': Navigation2,
     'plus-circle': PlusCircle,
+    'qr-code': QrCode,
     'refresh-cw': RefreshCw,
     'search': Search,
     'share-2': Share2,
@@ -1033,6 +1150,8 @@ function App() {
   const [bulkGenerationProgress, setBulkGenerationProgress] = useState(null);
   const [bulkGenerationLogs, setBulkGenerationLogs] = useState([]);
   const [bulkGenerationLogDialogOpen, setBulkGenerationLogDialogOpen] = useState(false);
+  const [qrGenerationInProgress, setQrGenerationInProgress] = useState(false);
+  const [qrGeneratingPlaceId, setQrGeneratingPlaceId] = useState(null);
   const [adminErrorLogs, setAdminErrorLogs] = useState([]);
   const [adminErrorLogsTotal, setAdminErrorLogsTotal] = useState(0);
   const [adminErrorLogsHasMore, setAdminErrorLogsHasMore] = useState(false);
@@ -1162,6 +1281,8 @@ function App() {
   const autocompleteListenerRef = useRef(null);
   const downloadedImagesRef = useRef(new Set());
   const activeSharesRef = useRef(new Set());
+  const qrGenerationInProgressRef = useRef(new Set());
+  const qrBulkInProgressRef = useRef(false);
   const youtubeSyncInProgressRef = useRef(false);
   const bulkFactCheckInProgressRef = useRef(false);
   const bulkFactCheckStopRef = useRef(false);
@@ -1180,6 +1301,10 @@ function App() {
   const activeSeasonGuideArea = activeSeasonGuide?.mainArea
     || getRouteSeasonGuideContext(activeSavedRoute, places)?.request.mainArea
     || '';
+  const qrCodePendingCount = places.filter((place) => (
+    place.status === 'done' && !place.qr_code && Boolean(place.cover_photo_url)
+  )).length;
+  const qrCodeGeneratedCount = places.filter((place) => place.qr_code).length;
 
   useEffect(() => {
     if (!activeTripDialogOpen) return undefined;
@@ -1917,6 +2042,163 @@ function App() {
       url += `?utm_source=${utmSource}`;
     }
     return url;
+  };
+
+  const generateAndDownloadLocationQr = async (place) => {
+    const placeId = String(place?.id || '');
+    if (!placeId) throw new Error('This location has no database ID.');
+    if (place.status !== 'done') throw new Error('Complete this location before generating its gallery QR code.');
+    if (place.qr_code) throw new Error('A QR code is already marked as generated for this location.');
+    if (!place.cover_photo_url) throw new Error('Add a cover image before generating this QR code.');
+    if (qrGenerationInProgressRef.current.has(placeId)) return false;
+
+    qrGenerationInProgressRef.current.add(placeId);
+    setQrGeneratingPlaceId(placeId);
+    let claimed = false;
+    try {
+      const slug = place.slug || generateCleanSlug(place.place_name);
+      if (!slug) throw new Error('This location needs a valid gallery slug.');
+      const galleryUrl = generateGalleryLink(slug, 'qrcode');
+      const png = await createLocationQrPng(place, galleryUrl);
+
+      const { data, error } = await supabaseClient
+        .from('travel_bucket_list')
+        .update({ qr_code: true })
+        .eq('id', place.id)
+        .or('qr_code.eq.false,qr_code.is.null')
+        .select('id')
+        .maybeSingle();
+
+      if (error) throw error;
+      if (!data) {
+        const { data: currentRecord, error: lookupError } = await supabaseClient
+          .from('travel_bucket_list')
+          .select('qr_code')
+          .eq('id', place.id)
+          .maybeSingle();
+        if (lookupError) throw lookupError;
+        if (currentRecord?.qr_code === true) {
+          setPlaces((current) => current.map((item) => (
+            String(item.id) === placeId ? { ...item, qr_code: true } : item
+          )));
+          throw new Error('This location already has a QR code recorded.');
+        }
+        throw new Error('Could not reserve this QR code in the database. Check the travel_bucket_list write permissions and retry.');
+      }
+      claimed = true;
+
+      const objectUrl = URL.createObjectURL(png);
+      const link = document.createElement('a');
+      link.href = objectUrl;
+      link.download = `${slug}-myjournalview-qr.png`;
+      link.style.display = 'none';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 30_000);
+
+      setPlaces((current) => current.map((item) => (
+        String(item.id) === placeId ? { ...item, qr_code: true } : item
+      )));
+      return true;
+    } catch (error) {
+      if (claimed) {
+        const { error: rollbackError } = await supabaseClient
+          .from('travel_bucket_list')
+          .update({ qr_code: false })
+          .eq('id', place.id)
+          .eq('qr_code', true);
+        if (rollbackError) {
+          logClientError(new Error(`Could not reset QR tracking for ${place.place_name}: ${rollbackError.message}`), {
+            errorType: 'Location QR tracking',
+            source: 'travel_bucket_list',
+            context: { task: 'location-qr-generation', action: 'rollback', location_id: placeId, place_name: place.place_name || '' }
+          });
+        }
+      }
+      throw error;
+    } finally {
+      qrGenerationInProgressRef.current.delete(placeId);
+      setQrGeneratingPlaceId((current) => (current === placeId ? null : current));
+    }
+  };
+
+  const handleGenerateLocationQr = async (place) => {
+    try {
+      const downloaded = await generateAndDownloadLocationQr(place);
+      if (downloaded) triggerToast(`QR image downloaded for ${place.place_name}.`);
+    } catch (error) {
+      logClientError(new Error(`${place.place_name}: ${error.message || 'QR image generation failed.'}`), {
+        errorType: 'Location QR generation',
+        source: '/qr-code-generator',
+        context: { task: 'location-qr-generation', action: 'single', location_id: String(place.id || ''), place_name: place.place_name || '' }
+      });
+      recordBulkGenerationError(
+        'Location QR image',
+        place.place_name,
+        1,
+        error,
+        'No QR image was downloaded; the location remains available to retry.'
+      );
+      triggerToast(error.message || 'Could not generate the QR image.');
+    }
+  };
+
+  const generateMissingLocationQrs = async () => {
+    if (qrBulkInProgressRef.current) return;
+    const targets = places.filter((place) => (
+      place.status === 'done'
+      && !place.qr_code
+      && Boolean(place.cover_photo_url)
+    ));
+    if (targets.length === 0) {
+      triggerToast('No completed locations with cover images need QR codes.');
+      return;
+    }
+
+    qrBulkInProgressRef.current = true;
+    setQrGenerationInProgress(true);
+    startBulkGenerationProgress('Location QR image generation', targets.length);
+    let completed = 0;
+    let failed = 0;
+
+    try {
+      for (let index = 0; index < targets.length; index += 1) {
+        const place = targets[index];
+        setQrGeneratingPlaceId(String(place.id));
+        try {
+          const downloaded = await generateAndDownloadLocationQr(place);
+          if (downloaded) {
+            completed += 1;
+            clearBulkGenerationErrorsForPlace('Location QR image generation', place.place_name);
+          }
+        } catch (error) {
+          failed += 1;
+          logClientError(new Error(`${place.place_name}: ${error.message || 'QR image generation failed.'}`), {
+            errorType: 'Location QR generation',
+            source: '/qr-code-generator',
+            context: { task: 'location-qr-generation', action: 'bulk', location_id: String(place.id || ''), place_name: place.place_name || '', item_number: index + 1, item_total: targets.length }
+          });
+          recordBulkGenerationError(
+            'Location QR image generation',
+            place.place_name,
+            1,
+            error,
+            'This location was skipped; retry after correcting the image or database issue.'
+          );
+        }
+        updateBulkGenerationProgress({ completed, failed, current: index + 1 });
+        if (index < targets.length - 1) {
+          await new Promise((resolve) => window.setTimeout(resolve, 250));
+        }
+      }
+      updateBulkGenerationProgress({ completed, failed, running: false });
+      triggerToast(`Downloaded ${completed} QR image${completed === 1 ? '' : 's'}${failed ? `; ${failed} failed` : ''}. Allow multiple downloads if your browser asks.`);
+    } finally {
+      qrBulkInProgressRef.current = false;
+      setQrGenerationInProgress(false);
+      setQrGeneratingPlaceId(null);
+    }
   };
 
   // ==========================================
@@ -4782,20 +5064,22 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
     overlay.appendChild(modal);
     document.body.appendChild(overlay);
 
-    // Render QR Code canvas safely
+    // Render the route QR without relying on a separate CDN-loaded QR library.
     setTimeout(() => {
       const qrContainer = document.getElementById("qrcode-canvas");
-      const QRCodeConstructor = window.QRCode;
-      if (qrContainer && QRCodeConstructor) {
-        new QRCodeConstructor(qrContainer, {
-          text: universalUrl,
-          width: 160,
-          height: 160,
-          colorDark: "#0f172a",
-          colorLight: "#f8fafc",
-          correctLevel: QRCodeConstructor.CorrectLevel.H
-        });
-      }
+      if (!qrContainer) return;
+      const canvas = document.createElement('canvas');
+      QRCodeGenerator.toCanvas(canvas, universalUrl, {
+        width: 160,
+        margin: 2,
+        errorCorrectionLevel: 'H',
+        color: { dark: '#0f172a', light: '#f8fafc' }
+      }).then(() => {
+        if (qrContainer.isConnected) qrContainer.replaceChildren(canvas);
+      }).catch((error) => {
+        console.error('Route QR generation failed:', error);
+        triggerToast('Could not generate the route QR code.');
+      });
     }, 50);
 
     // Modal Event Listeners
@@ -5687,6 +5971,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                   <Icon name="video" className="w-3.5 h-3.5 text-rose-500" />
                   <span>Sync YouTube</span>
                 </button>
+
               </div>
 
             </div>
@@ -5995,6 +6280,23 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                 <Icon name="sparkles" className="w-3.5 h-3.5" />
                 <span className="text-[10px] font-black uppercase tracking-widest">Verified Feed</span>
               </div>
+
+              <div className="ml-auto flex flex-wrap items-center gap-2">
+                <span className="px-3 py-2 text-[9px] font-black uppercase tracking-wide text-slate-500">
+                  {qrCodeGeneratedCount} QR ready
+                </span>
+                <button
+                  type="button"
+                  onClick={generateMissingLocationQrs}
+                  disabled={qrGenerationInProgress || qrCodePendingCount === 0}
+                  className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-[9px] font-black uppercase text-emerald-700 shadow-sm transition-colors hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  title="Generate and download QR PNGs for completed locations that do not have one yet"
+                >
+                  <Icon name={qrGenerationInProgress ? 'refresh-cw' : 'qr-code'} className={`h-3.5 w-3.5 ${qrGenerationInProgress ? 'animate-spin' : ''}`} />
+                  {qrGenerationInProgress ? 'Generating QR PNGs…' : `Generate QR PNGs (${qrCodePendingCount})`}
+                </button>
+              </div>
+
             </div>
 
             {/* Social Grid Container */}
@@ -6033,6 +6335,23 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                               </span>
                             </div>
                           )}
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              void handleGenerateLocationQr(p);
+                            }}
+                            disabled={!p.cover_photo_url || Boolean(p.qr_code) || qrGenerationInProgress || qrGeneratingPlaceId === String(p.id)}
+                            title={p.qr_code ? 'QR image already generated' : !p.cover_photo_url ? 'Add a cover image before generating a QR code' : 'Generate and download this location’s QR PNG'}
+                            className="absolute right-2 top-2 z-10 flex items-center gap-1.5 rounded-lg border border-white/60 bg-white/95 px-2.5 py-1.5 text-[8px] font-black uppercase text-slate-800 shadow-md backdrop-blur transition-colors hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-70"
+                          >
+                            <Icon
+                              name={p.qr_code ? 'check-circle' : qrGeneratingPlaceId === String(p.id) ? 'refresh-cw' : 'qr-code'}
+                              className={`h-3 w-3 ${qrGeneratingPlaceId === String(p.id) ? 'animate-spin' : ''}`}
+                            />
+                            {p.qr_code ? 'QR saved' : qrGeneratingPlaceId === String(p.id) ? 'Working' : 'QR PNG'}
+                          </button>
                         </div>
 
                         {/* Body: Artistic Details */}
