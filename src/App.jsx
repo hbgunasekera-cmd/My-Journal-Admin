@@ -365,20 +365,22 @@ const createLocationQrJpeg = async (place, destinationUrl, locationDescription =
 
   const footerY = padding + qrSize + 32;
   const placeName = String(place.place_name || 'MyJournalView').trim();
+  const contentCenterX = logicalWidth / 2;
+  const footerTextWidth = logicalWidth - 64;
   context.textAlign = 'center';
   context.textBaseline = 'middle';
   context.fillStyle = '#64748b';
   context.font = '700 16px Arial, sans-serif';
-  context.fillText('SCAN TO DISCOVER', canvas.width / 2, footerY, canvas.width - 64);
+  context.fillText('SCAN TO DISCOVER', contentCenterX, footerY, footerTextWidth);
   context.fillStyle = '#0f172a';
   context.font = '800 27px Arial, sans-serif';
-  context.fillText(placeName, canvas.width / 2, footerY + 30, canvas.width - 64);
+  context.fillText(placeName, contentCenterX, footerY + 30, footerTextWidth);
   const rawDescription = String(locationDescription || '').replace(/\s+/g, ' ').trim();
   const description = rawDescription.length > 120 ? `${rawDescription.slice(0, 119).trimEnd()}…` : rawDescription;
   context.fillStyle = '#475569';
   context.font = '500 15px Arial, sans-serif';
   const descriptionLines = [];
-  const maxDescriptionWidth = canvas.width - 96;
+  const maxDescriptionWidth = logicalWidth - 96;
   let descriptionLine = '';
   for (const word of description.split(' ')) {
     const nextLine = `${descriptionLine} ${word}`.trim();
@@ -395,14 +397,14 @@ const createLocationQrJpeg = async (place, destinationUrl, locationDescription =
     descriptionLines[1] = `${descriptionLines[1].replace(/[.,;:]?$/, '')}…`;
   }
   descriptionLines.forEach((line, index) => {
-    context.fillText(line, canvas.width / 2, footerY + 56 + index * 20, maxDescriptionWidth);
+    context.fillText(line, contentCenterX, footerY + 56 + index * 20, maxDescriptionWidth);
   });
   context.fillStyle = '#0e7490';
   context.font = '800 15px Arial, sans-serif';
-  context.fillText('SCAN THE CODE TO OPEN THE GALLERY', canvas.width / 2, footerY + 105, canvas.width - 64);
+  context.fillText('SCAN THE CODE TO OPEN THE GALLERY', contentCenterX, footerY + 105, footerTextWidth);
   context.fillStyle = '#0e7490';
   context.font = '700 18px Arial, sans-serif';
-  context.fillText('myjournalview.com', canvas.width / 2, footerY + 136);
+  context.fillText('myjournalview.com', contentCenterX, footerY + 136);
 
   const jpeg = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.98));
   if (!jpeg || jpeg.type !== 'image/jpeg') throw new Error('The QR image could not be exported as JPEG.');
