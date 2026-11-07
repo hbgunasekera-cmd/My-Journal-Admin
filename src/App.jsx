@@ -6246,16 +6246,6 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                     distanceMeters(sortCenter.lat, sortCenter.lng, Number(p.latitude), Number(p.longitude)) / 1000
                   ).toFixed(1);
                   const hasArticle = Boolean(p.ai_article?.story || p.ai_article?.description);
-                  const factSources = Array.isArray(p.ai_article?.fact_sources)
-                    ? p.ai_article.fact_sources.filter((source) => {
-                      if (typeof source?.url !== 'string') return false;
-                      try {
-                        return ['http:', 'https:'].includes(new URL(source.url).protocol);
-                      } catch {
-                        return false;
-                      }
-                    })
-                    : [];
                   const hasFactCheck = isArticleFactCheckedForPlace(p.ai_article, p);
                   const hasAiOnlyFallback = p.ai_article?.fact_check_mode === 'ai_only_fallback';
 
@@ -6290,7 +6280,20 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                         </button>
 
                         {/* ACTION 1: MANUAL STATUS TOGGLE SWITCH */}
-                        <button
+                        <div className="absolute top-2 right-2 z-10 flex items-center gap-1.5">
+                          {hasArticle && (
+                            <span
+                              role="img"
+                              aria-label={hasFactCheck ? 'Web fact-check complete' : 'Article not web fact-checked'}
+                              title={hasFactCheck
+                                ? 'Web fact-check complete'
+                                : hasAiOnlyFallback
+                                  ? 'AI-only article; no web fact-check'
+                                  : 'Article not web fact-checked'}
+                              className={`h-2.5 w-2.5 rounded-full border border-white shadow ${hasFactCheck ? 'bg-emerald-500' : 'bg-amber-400'}`}
+                            />
+                          )}
+                          <button
                           onClick={async () => {
                             const updatedStatus = p.status === 'done' ? 'pending' : 'done';
 
@@ -6315,12 +6318,13 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                               await notifySubscribersOnCompletion({ ...p, status: 'done' });
                             }
                           }}
-                          className={`absolute top-2 right-2 px-3 py-1 rounded-full text-[8px] font-black uppercase shadow-md transition-all active:scale-95 z-10 ${p.status === 'done' ? 'bg-emerald-500 text-white' : 'bg-white/90 text-orange-500'}`}
-                        >
-                          <div className="flex items-center gap-1">
-                            <Icon name={p.status === 'done' ? 'check-circle' : 'circle'} className="w-2.5 h-2.5" /> {p.status}
-                          </div>
-                        </button>
+                            className={`px-3 py-1 rounded-full text-[8px] font-black uppercase shadow-md transition-all active:scale-95 ${p.status === 'done' ? 'bg-emerald-500 text-white' : 'bg-white/90 text-orange-500'}`}
+                          >
+                            <div className="flex items-center gap-1">
+                              <Icon name={p.status === 'done' ? 'check-circle' : 'circle'} className="w-2.5 h-2.5" /> {p.status}
+                            </div>
+                          </button>
+                        </div>
 
                       </div>
 
@@ -6395,41 +6399,6 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                             </select>
                           </div>
                         </div>
-
-                        {hasArticle && (
-                          <details className={`rounded-lg px-2.5 py-2 text-[8px] ${hasFactCheck ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
-                            <summary className="cursor-pointer font-black uppercase tracking-wide">
-                              {hasFactCheck
-                                ? `Core sections fact-checked · ${factSources.length} web sources`
-                                : hasAiOnlyFallback
-                                  ? 'AI-only fallback · not web fact-checked'
-                                  : 'Core article sections have not been fact-checked'}
-                            </summary>
-                            {hasFactCheck ? (
-                              <ul className="mt-2 space-y-1.5">
-                                {factSources.map((source, index) => (
-                                  <li key={`${source.url}-${index}`}>
-                                    <a
-                                      href={source.url}
-                                      target="_blank"
-                                      rel="noreferrer"
-                                      className="underline underline-offset-2 hover:text-emerald-900"
-                                    >
-                                      {source.title || source.url}
-                                    </a>
-                                  </li>
-                                ))}
-                              </ul>
-                            ) : hasAiOnlyFallback ? (
-                              <p className="mt-1.5 leading-relaxed">
-                                Generated from model knowledge using the saved location name, locality, category, and coordinates. Review its facts and AI-estimated figures before publishing.
-                                {p.ai_article?.fact_check_fallback_reason ? ` Web fact-check issue: ${p.ai_article.fact_check_fallback_reason}` : ''}
-                              </p>
-                            ) : (
-                              <p className="mt-1.5 leading-relaxed">Fact-check the summary, highlights, journal, history, and quick answers before sharing their specific claims.</p>
-                            )}
-                          </details>
-                        )}
 
                       </div>
 
