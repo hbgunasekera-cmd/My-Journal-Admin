@@ -2293,7 +2293,7 @@ function App() {
         destination = `https://www.pinterest.com/pin-creation-tool/?url=${encodeURIComponent(galleryUrl)}&description=${encodedCaption}`;
         break;
       case 'youtube':
-        destination = 'https://www.youtube.com/@myjournalview';
+        destination = 'https://www.youtube.com/@myjournalview/posts';
         break;
       case 'twitter':
         destination = `https://twitter.com/intent/tweet?text=${encodedCaption}`;
