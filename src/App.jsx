@@ -128,7 +128,7 @@ const QR_SOCIAL_PLATFORMS = [
   { id: 'mastodon', label: 'Mastodon', icon: 'share-2', color: 'hover:border-indigo-300 hover:bg-indigo-50' },
   { id: 'bluesky', label: 'Bluesky', icon: 'share-2', color: 'hover:border-sky-300 hover:bg-sky-50' },
   { id: 'pinterest', label: 'Pinterest', icon: 'heart', color: 'hover:border-rose-300 hover:bg-rose-50' },
-  { id: 'unsplash', label: 'Unsplash', icon: 'camera', color: 'hover:border-slate-400 hover:bg-slate-100' },
+  { id: 'youtube', label: 'YouTube Post', icon: 'youtube', color: 'hover:border-red-300 hover:bg-red-50' },
   { id: 'twitter', label: 'Twitter / X', icon: 'twitter', color: 'hover:border-sky-300 hover:bg-sky-50' }
 ];
 
@@ -555,6 +555,13 @@ const TwitterIcon = ({ className }) => (
   </svg>
 );
 
+const YouTubeIcon = ({ className }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" className={className} aria-hidden="true">
+    <path fill="#ff0033" d="M23.5 6.2a3 3 0 0 0-2.1-2.1C19.6 3.6 12 3.6 12 3.6s-7.6 0-9.4.5A3 3 0 0 0 .5 6.2 31 31 0 0 0 0 12a31 31 0 0 0 .5 5.8 3 3 0 0 0 2.1 2.1c1.8.5 9.4.5 9.4.5s7.6 0 9.4-.5a3 3 0 0 0 2.1-2.1A31 31 0 0 0 24 12a31 31 0 0 0-.5-5.8Z" />
+    <path fill="#fff" d="m9.6 15.6 6.3-3.6-6.3-3.6v7.2Z" />
+  </svg>
+);
+
 /**
  * Optimized Icon Wrapper.
  * Maps Lucide components and local SVGs to a consistent internal naming system.
@@ -598,6 +605,7 @@ const Icon = React.memo(({ name, className = "w-4 h-4" }) => {
     'trash-2': Trash2,
     'twitter': TwitterIcon,
     'video': Video,
+    'youtube': YouTubeIcon,
     'wind': Wind,
     'x': X,
   };
@@ -2226,7 +2234,7 @@ function App() {
       mastodon: 500,
       bluesky: 300,
       pinterest: 500,
-      unsplash: 1000,
+      youtube: 500,
       twitter: 280
     };
     const maxLength = limits[platform] || 280;
@@ -2284,12 +2292,9 @@ function App() {
       case 'pinterest':
         destination = `https://www.pinterest.com/pin-creation-tool/?url=${encodeURIComponent(galleryUrl)}&description=${encodedCaption}`;
         break;
-      case 'unsplash': {
-        const natureCategories = ['Waterfall', 'Mountain', 'Trail', 'Viewpoint', 'Beach', 'Park', 'Plateaus', 'Reserved Forest', 'Reservoir', 'Pool', 'Stream'];
-        const topic = natureCategories.includes(place.category) ? 'nature' : 'travel';
-        destination = `https://unsplash.com/t/${topic}?modal=%5B%22Uploader%22%2C%5B%22Publish%22%2C%7B%22value%22%3A%22${topic}%22%7D%5D%5D`;
+      case 'youtube':
+        destination = 'https://www.youtube.com/@myjournalview';
         break;
-      }
       case 'twitter':
         destination = `https://twitter.com/intent/tweet?text=${encodedCaption}`;
         break;
@@ -8939,7 +8944,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
               </div>
 
               <p className="mt-4 text-[10px] leading-relaxed text-slate-500">
-                Choose a platform to open its composer with a caption sized for that platform. Attach the downloaded QR JPG before posting.
+                Choose a platform to copy its caption, then attach the downloaded QR JPG before posting.
               </p>
 
               <button
