@@ -49,6 +49,7 @@ import {
   CloudFog,
   CloudLightning,
   CloudRain,
+  Download,
   FileText,
   FileX,
   Heart,
@@ -576,6 +577,7 @@ const Icon = React.memo(({ name, className = "w-4 h-4" }) => {
     'cloud-fog': CloudFog,
     'cloud-lightning': CloudLightning,
     'cloud-rain': CloudRain,
+    'download': Download,
     'file-text': FileText,
     'file-x': FileX,
     'heart': Heart,
@@ -1225,6 +1227,9 @@ function App() {
   const [qrGenerationInProgress, setQrGenerationInProgress] = useState(false);
   const [qrGeneratingPlaceId, setQrGeneratingPlaceId] = useState(null);
   const [qrSharePayload, setQrSharePayload] = useState(null);
+  const [mapsPhotoContributionPlace, setMapsPhotoContributionPlace] = useState(null);
+  const [mapsPhotoDownloadProgress, setMapsPhotoDownloadProgress] = useState(null);
+  const mapsPhotoDownloadInProgressRef = useRef(new Set());
   const [adminErrorLogs, setAdminErrorLogs] = useState([]);
   const [adminErrorLogsTotal, setAdminErrorLogsTotal] = useState(0);
   const [adminErrorLogsHasMore, setAdminErrorLogsHasMore] = useState(false);
@@ -2115,6 +2120,263 @@ function App() {
       url += `?utm_source=${utmSource}`;
     }
     return url;
+  };
+
+  const getGoogleMapsPlaceUrl = (place) => {
+    const savedUrl = String(place?.google_maps_url || '').trim();
+    if (savedUrl) {
+      try {
+        const parsedUrl = new URL(savedUrl);
+        const isGoogleMapsHost = parsedUrl.hostname === 'maps.app.goo.gl'
+          || parsedUrl.hostname === 'google.com'
+          || parsedUrl.hostname.endsWith('.google.com')
+          || parsedUrl.hostname === 'google.lk'
+          || parsedUrl.hostname.endsWith('.google.lk');
+        if (parsedUrl.protocol === 'https:' && isGoogleMapsHost) return parsedUrl.href;
+      } catch {
+        // Fall back to a name-and-locality Maps search if the saved link is malformed.
+      }
+    }
+
+    const searchLabel = [place?.place_name, place?.locality, 'Sri Lanka']
+      .map((value) => String(value || '').trim())
+      .filter(Boolean)
+      .join(', ');
+    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(searchLabel)}`;
+  };
+
+  const getMapsPhotoCaption = (place) => {
+    const placeName = String(place?.place_name || 'Sri Lanka location').trim();
+    const description = getSocialDescription(place);
+    return `${description}\n\n© My Journal — ${placeName}\nFull gallery: ${generateGalleryLink(placeName)}`;
+  };
+
+  const getMapsPhotoAssets = (place) => {
+    const candidates = [
+      ...(typeof place?.cover_photo_url === 'string' && place.cover_photo_url.trim()
+        ? [{ url: place.cover_photo_url.trim(), kind: 'cover', photoNumber: null }]
+        : []),
+      ...(Array.isArray(place?.album_photos)
+        ? place.album_photos.map((url, index) => ({ url: String(url || '').trim(), kind: 'gallery', photoNumber: index + 1 }))
+        : [])
+    ].filter((photo) => /^https?:\/\//i.test(photo.url));
+    const seen = new Set();
+
+    const uniquePhotos = candidates.filter((photo) => {
+      try {
+        const normalized = new URL(photo.url);
+        normalized.hash = '';
+        if (normalized.hostname === 'googleusercontent.com' || normalized.hostname.endsWith('.googleusercontent.com')) {
+          normalized.pathname = normalized.pathname.replace(/=[^/]*$/, '');
+        }
+        const key = normalized.href;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      } catch {
+        return false;
+      }
+    });
+
+    // Keep the Maps contribution set compact: the cover plus at most seven gallery photos.
+    return uniquePhotos.slice(0, 8);
+  };
+
+  const downloadMapsPhotoSet = async (place) => {
+    const photos = getMapsPhotoAssets(place);
+    const placeId = String(place?.id || '');
+    const placeSlug = generateCleanSlug(place?.place_name || 'location') || 'location';
+    if (!photos.length) {
+      triggerToast('No valid cover or gallery photo URLs are saved for this location.');
+      return;
+    }
+    if (!placeId) {
+      triggerToast('This location has no database ID, so its Maps photo set cannot be tracked.');
+      return;
+    }
+    if (mapsPhotoDownloadInProgressRef.current.has(placeId)) return;
+
+    mapsPhotoDownloadInProgressRef.current.add(placeId);
+    const alreadyTracked = Boolean(place?.google_maps);
+    let claimed = false;
+
+    setMapsPhotoDownloadProgress({ placeId, completed: 0, failed: 0, total: photos.length, running: true });
+    let completed = 0;
+    let failed = 0;
+
+    try {
+      if (!alreadyTracked) {
+        const { data, error } = await supabaseClient
+          .from('travel_bucket_list')
+          .update({ google_maps: true })
+          .eq('id', place.id)
+          .or('google_maps.eq.false,google_maps.is.null')
+          .select('id')
+          .maybeSingle();
+        if (error) throw error;
+        if (!data) {
+          const { data: currentRecord, error: lookupError } = await supabaseClient
+            .from('travel_bucket_list')
+            .select('google_maps')
+            .eq('id', place.id)
+            .maybeSingle();
+          if (lookupError) throw lookupError;
+          if (currentRecord?.google_maps === true) {
+            setPlaces((current) => current.map((item) => (
+              String(item.id) === placeId ? { ...item, google_maps: true } : item
+            )));
+            throw new Error('This location’s Maps photo set is already tracked. Reopen the helper and choose Download again to create another local copy.');
+          }
+          throw new Error('Could not reserve this Maps photo set in the database. Check travel_bucket_list write permissions and retry.');
+        }
+        claimed = true;
+        setPlaces((current) => current.map((item) => (
+          String(item.id) === placeId ? { ...item, google_maps: true } : item
+        )));
+      }
+
+      for (let index = 0; index < photos.length; index += 1) {
+        const photo = photos[index];
+        try {
+          const response = await fetch(`/api/cover-image-proxy?url=${encodeURIComponent(photo.url)}`);
+          if (!response.ok) {
+            let reason = `Image download failed with HTTP ${response.status}.`;
+            try {
+              const data = await response.json();
+              if (data?.error) reason = data.error;
+            } catch {
+              // Keep the HTTP status fallback for non-JSON responses.
+            }
+            throw new Error(reason);
+          }
+
+          const imageBlob = await response.blob();
+          if (!imageBlob.type.startsWith('image/')) throw new Error('The saved URL did not return an image.');
+          const extension = ({
+            'image/jpeg': 'jpg',
+            'image/png': 'png',
+            'image/webp': 'webp',
+            'image/gif': 'gif',
+            'image/avif': 'avif'
+          })[imageBlob.type.split(';')[0].toLowerCase()] || 'jpg';
+          const suffix = photo.kind === 'cover' ? '-cover' : `-photo-${String(photo.photoNumber).padStart(2, '0')}`;
+          const objectUrl = URL.createObjectURL(imageBlob);
+          const link = document.createElement('a');
+          link.href = objectUrl;
+          link.download = `${placeSlug}${suffix}.${extension}`;
+          document.body.appendChild(link);
+          link.click();
+          link.remove();
+          window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+          completed += 1;
+        } catch (error) {
+          failed += 1;
+          logClientError(error, {
+            errorType: 'Google Maps photo download',
+            source: '/google-maps-photo-download',
+            context: {
+              task: 'maps-photo-contribution',
+              action: 'download-photo',
+              location_id: placeId,
+              place_name: String(place?.place_name || ''),
+              photo_number: index + 1,
+              photo_kind: photo.kind
+            }
+          });
+        }
+        setMapsPhotoDownloadProgress({ placeId, completed, failed, total: photos.length, running: true });
+        if (index < photos.length - 1) await new Promise((resolve) => window.setTimeout(resolve, 350));
+      }
+
+      if (failed && claimed) {
+        const { error } = await supabaseClient
+          .from('travel_bucket_list')
+          .update({ google_maps: false })
+          .eq('id', place.id)
+          .eq('google_maps', true);
+        if (error) throw new Error(`Some photos failed and the tracking flag could not be reset: ${error.message}`);
+        claimed = false;
+        setPlaces((current) => current.map((item) => (
+          String(item.id) === placeId ? { ...item, google_maps: false } : item
+        )));
+      }
+
+      setMapsPhotoDownloadProgress({ placeId, completed, failed, total: photos.length, running: false });
+      triggerToast(failed
+        ? alreadyTracked
+          ? `Downloaded ${completed} of ${photos.length} photos; ${failed} failed. The previous successful set remains tracked.`
+          : `Downloaded ${completed} of ${photos.length} photos; ${failed} failed. This set is not marked complete.`
+        : `Downloaded all ${completed} photos. This location is now tracked as Maps-ready.`);
+    } catch (error) {
+      if (claimed) {
+        const { error: rollbackError } = await supabaseClient
+          .from('travel_bucket_list')
+          .update({ google_maps: false })
+          .eq('id', place.id)
+          .eq('google_maps', true);
+        if (rollbackError) {
+          logClientError(new Error(`Could not reset Google Maps photo tracking for ${place.place_name}: ${rollbackError.message}`), {
+            errorType: 'Google Maps photo tracking',
+            source: 'travel_bucket_list',
+            context: { task: 'maps-photo-contribution', action: 'rollback', location_id: placeId, place_name: place.place_name || '' }
+          });
+        } else {
+          setPlaces((current) => current.map((item) => (
+            String(item.id) === placeId ? { ...item, google_maps: false } : item
+          )));
+        }
+      }
+      logClientError(error, {
+        errorType: 'Google Maps photo tracking',
+        source: 'travel_bucket_list',
+        context: { task: 'maps-photo-contribution', action: 'track-download-set', location_id: placeId, place_name: place.place_name || '' }
+      });
+      setMapsPhotoDownloadProgress({ placeId, completed, failed: Math.max(failed, photos.length - completed), total: photos.length, running: false });
+      triggerToast(error.message || 'Could not track the Google Maps photo download.');
+    } finally {
+      mapsPhotoDownloadInProgressRef.current.delete(placeId);
+    }
+  };
+
+  const copyMapsPhotoCaption = async (place) => {
+    const caption = getMapsPhotoCaption(place);
+    const copyWithDocumentCommand = () => {
+      const textarea = document.createElement('textarea');
+      textarea.value = caption;
+      textarea.setAttribute('readonly', '');
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      const copied = document.execCommand('copy');
+      textarea.remove();
+      if (!copied) throw new Error('Clipboard write was blocked.');
+    };
+
+    try {
+      if (navigator.clipboard?.writeText) {
+        try {
+          await navigator.clipboard.writeText(caption);
+        } catch {
+          copyWithDocumentCommand();
+        }
+      } else {
+        copyWithDocumentCommand();
+      }
+      triggerToast('Description, My Journal credit, and gallery link copied.');
+    } catch (error) {
+      logClientError(error, {
+        errorType: 'Google Maps photo contribution',
+        source: '/google-maps-photo-contribution',
+        context: {
+          task: 'maps-photo-contribution',
+          action: 'copy-photo-caption',
+          location_id: String(place?.id || ''),
+          place_name: String(place?.place_name || '')
+        }
+      });
+      triggerToast('Could not copy the photo credit.');
+    }
   };
 
   const generateAndDownloadLocationQr = async (place, { allowExistingQr = false } = {}) => {
@@ -6009,7 +6271,12 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
   }
 
   //---------- Rendering Starts Here ----------
-
+  const mapsPhotoAssets = mapsPhotoContributionPlace
+    ? getMapsPhotoAssets(mapsPhotoContributionPlace)
+    : [];
+  const mapsPhotoDownloadForPlace = mapsPhotoDownloadProgress?.placeId === String(mapsPhotoContributionPlace?.id || '')
+    ? mapsPhotoDownloadProgress
+    : null;
 
   return (
     <div className="flex flex-col h-screen bg-slate-50">
@@ -6822,6 +7089,22 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                             </span>
                           </button>
 
+                          <button
+                            type="button"
+                            onClick={() => setMapsPhotoContributionPlace(p)}
+                            className={`col-span-4 flex items-center justify-center gap-2 rounded-xl border px-3 py-2.5 shadow-sm transition-colors ${p.google_maps
+                              ? 'border-emerald-300 bg-emerald-50 text-emerald-900 hover:bg-emerald-100'
+                              : 'border-emerald-200 bg-white text-emerald-800 hover:border-emerald-300 hover:bg-emerald-50'
+                              }`}
+                            title={p.google_maps
+                              ? 'The selected cover and gallery photo set has been downloaded and tracked for Google Maps'
+                              : 'Open the Google Maps photo contribution helper for this location'}
+                          >
+                            <Icon name={p.google_maps ? 'check-circle' : 'map-pin'} className="h-3.5 w-3.5" />
+                            <span className="text-[8px] font-black uppercase tracking-wide">
+                              {p.google_maps ? 'Maps Photos Downloaded' : 'My Journal · Google Maps Photos'}
+                            </span>
+                          </button>
                         </div>
                       </div>
                     );
@@ -8855,6 +9138,161 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {mapsPhotoContributionPlace && (
+        <div
+          className="fixed inset-0 z-[6350] flex items-center justify-center bg-slate-950/65 p-4 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="maps-photo-contribution-title"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) setMapsPhotoContributionPlace(null);
+          }}
+        >
+          <section className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-3xl border border-emerald-100 bg-white shadow-2xl">
+            <header className="flex items-start justify-between gap-4 border-b border-slate-100 p-5">
+              <div>
+                <div className="flex items-center gap-2 text-emerald-700">
+                  <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-100 text-[8px] font-black tracking-tight">MJ</span>
+                  <span className="text-[9px] font-black uppercase tracking-[0.18em]">My Journal · Google Maps</span>
+                </div>
+                <h2 id="maps-photo-contribution-title" className="mt-2 text-base font-black text-slate-900">
+                  Add photos for {mapsPhotoContributionPlace.place_name}
+                </h2>
+                <p className="mt-1 text-[10px] text-slate-500">
+                  {mapsPhotoContributionPlace.locality || 'Sri Lanka'} · {mapsPhotoContributionPlace.category || 'Location'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setMapsPhotoContributionPlace(null)}
+                className="rounded-xl p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                aria-label="Close Google Maps photo contribution helper"
+              >
+                <Icon name="x" className="h-4 w-4" />
+              </button>
+            </header>
+
+            <div className="min-h-0 flex-1 overflow-y-auto p-5">
+              <div className="flex flex-col gap-3 rounded-2xl border border-emerald-100 bg-emerald-50/70 p-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-wide text-emerald-900">Photo description + My Journal credit</p>
+                  <p className="mt-1 whitespace-pre-line break-words text-[10px] leading-relaxed text-slate-700">
+                    {getMapsPhotoCaption(mapsPhotoContributionPlace)}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void copyMapsPhotoCaption(mapsPhotoContributionPlace)}
+                  className="shrink-0 rounded-xl bg-emerald-700 px-3 py-2.5 text-[9px] font-black uppercase tracking-wide text-white hover:bg-emerald-800"
+                >
+                  Copy description + credit + link
+                </button>
+              </div>
+
+              <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-wide text-slate-700">Selected photos ({mapsPhotoAssets.length}/8 max, cover included)</p>
+                  <p className="mt-1 text-[9px] text-slate-500">Cover first, then up to seven unique gallery photos. Remaining album photos are excluded.</p>
+                  {mapsPhotoContributionPlace.google_maps && (
+                    <p className="mt-1 text-[9px] font-bold text-emerald-700">Previously downloaded and tracked for this location. You can download another local copy.</p>
+                  )}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void downloadMapsPhotoSet(mapsPhotoContributionPlace)}
+                    disabled={!mapsPhotoAssets.length || Boolean(mapsPhotoDownloadForPlace?.running)}
+                    className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-700 px-3 py-2.5 text-[9px] font-black uppercase tracking-wide text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <Icon name={mapsPhotoDownloadForPlace?.running ? 'refresh-cw' : 'download'} className={`h-3.5 w-3.5 ${mapsPhotoDownloadForPlace?.running ? 'animate-spin' : ''}`} />
+                    {mapsPhotoDownloadForPlace?.running
+                      ? `Downloading ${mapsPhotoDownloadForPlace.completed + mapsPhotoDownloadForPlace.failed}/${mapsPhotoDownloadForPlace.total}`
+                      : mapsPhotoDownloadForPlace && !mapsPhotoDownloadForPlace.failed
+                        ? `Download again (${mapsPhotoAssets.length})`
+                        : mapsPhotoContributionPlace.google_maps
+                          ? `Download again (${mapsPhotoAssets.length})`
+                          : `Download all (${mapsPhotoAssets.length})`}
+                  </button>
+                  <a
+                    href={getGoogleMapsPlaceUrl(mapsPhotoContributionPlace)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-3 py-2.5 text-[9px] font-black uppercase tracking-wide text-white hover:bg-slate-700"
+                  >
+                    <Icon name="map-pin" className="h-3.5 w-3.5" />
+                    Open Maps
+                  </a>
+                </div>
+              </div>
+
+              {mapsPhotoDownloadForPlace && !mapsPhotoDownloadForPlace.running && (
+                <p className={`mt-2 text-[9px] font-semibold ${mapsPhotoDownloadForPlace.failed ? 'text-rose-600' : 'text-emerald-700'}`}>
+                  {mapsPhotoDownloadForPlace.completed} of {mapsPhotoDownloadForPlace.total} downloaded
+                  {mapsPhotoDownloadForPlace.failed ? ` · ${mapsPhotoDownloadForPlace.failed} failed; details logged` : ''}
+                </p>
+              )}
+
+              {mapsPhotoAssets.length ? (
+                <div className="mt-3 grid max-h-64 grid-cols-3 gap-2 overflow-y-auto pr-1 sm:grid-cols-4">
+                  {mapsPhotoAssets.map((photo) => (
+                      <div key={photo.url} className="relative aspect-square overflow-hidden rounded-xl border border-slate-200 bg-slate-100">
+                        <img
+                          src={getAdminCardImageUrl(photo.url)}
+                          alt={`${mapsPhotoContributionPlace.place_name} ${photo.kind === 'cover' ? 'cover' : `gallery photo ${photo.photoNumber}`}`}
+                          loading="lazy"
+                          decoding="async"
+                          className="h-full w-full object-cover"
+                        />
+                        {photo.kind === 'cover' && (
+                          <span className="absolute bottom-1 left-1 rounded bg-slate-950/75 px-1.5 py-1 text-[7px] font-black uppercase tracking-wide text-white">Cover</span>
+                        )}
+                      </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="mt-3 rounded-xl border border-dashed border-slate-200 px-4 py-6 text-center text-[10px] text-slate-500">
+                  No valid cover or gallery photo URLs are saved on this location yet.
+                </div>
+              )}
+
+              <div className="mt-4 rounded-2xl border border-sky-100 bg-sky-50 p-4">
+                <p className="text-[10px] font-black uppercase tracking-wide text-sky-900">Desktop Maps photo flow</p>
+                <ol className="mt-2 space-y-2 text-[10px] leading-relaxed text-slate-700">
+                  <li><span className="font-black">1.</span> Open the place page’s <span className="font-bold">Photos</span> section and use <span className="font-bold">Add photos &amp; videos</span>. Do not use <span className="font-bold">Write a review → Add photo</span> for a standalone photo contribution.</li>
+                  <li><span className="font-black">2.</span> If Maps offers a <span className="font-bold">Google Photos</span> source, select the originals there and confirm the {mapsPhotoContributionPlace.place_name} listing.</li>
+                  <li><span className="font-black">3.</span> If Maps only opens the computer’s file picker, that desktop path requires a local image file. The saved Google Photos share URL cannot be submitted as the image.</li>
+                  <li><span className="font-black">4.</span> If Maps offers a caption field, paste the copied location description, My Journal credit, and gallery URL.</li>
+                </ol>
+                <a
+                  href="https://support.google.com/maps/answer/2622947?hl=en"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-2 inline-block text-[9px] font-bold text-sky-800 underline underline-offset-2"
+                >
+                  Google Maps computer photo instructions
+                </a>
+              </div>
+              <p className="mt-3 rounded-xl border border-amber-100 bg-amber-50 p-3 text-[9px] leading-relaxed text-amber-900">
+                This portal can prepare the caption and show the saved photo references, but Google Maps provides no supported desktop upload control that accepts these stored share URLs. If the Google Photos picker is absent in your Maps session, uploading from this computer requires choosing a local file.
+              </p>
+              <p className="mt-3 text-[9px] leading-relaxed text-slate-500">
+                Google shows the signed-in Maps contributor profile as the photo contributor. Captions may not be available for every account or device, and Google may filter promotional text or external links.
+              </p>
+            </div>
+
+            <footer className="flex justify-end border-t border-slate-100 p-4">
+              <button
+                type="button"
+                onClick={() => setMapsPhotoContributionPlace(null)}
+                className="rounded-xl bg-slate-900 px-4 py-2 text-[10px] font-black uppercase text-white hover:bg-slate-700"
+              >
+                Done
+              </button>
+            </footer>
+          </section>
         </div>
       )}
 
