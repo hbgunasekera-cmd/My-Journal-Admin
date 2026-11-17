@@ -1184,6 +1184,7 @@ function App() {
   // --- Core Data States ---
   const [places, setPlaces] = useState([]);
   const [mapDataLoaded, setMapDataLoaded] = useState(false);
+  const [savedReferenceArticles, setSavedReferenceArticles] = useState([]);
 
   // --- Core Data States ---
   const [savedRoutes, setSavedRoutes] = useState([]);
@@ -1206,6 +1207,13 @@ function App() {
   // --- UI, Search & Filter States ---
   const [activeTab, setActiveTab] = useState('places');
   const [searchTerm, setSearchTerm] = useState('');
+  const [referenceArticleSearch, setReferenceArticleSearch] = useState('');
+  const [referenceArticlesLoading, setReferenceArticlesLoading] = useState(false);
+  const [referenceArticlesError, setReferenceArticlesError] = useState('');
+  const [referenceArticleEditor, setReferenceArticleEditor] = useState(null);
+  const [selectedReferenceArticle, setSelectedReferenceArticle] = useState(null);
+  const [referenceArticleSaving, setReferenceArticleSaving] = useState(false);
+  const [referenceArticleDeletingId, setReferenceArticleDeletingId] = useState(null);
   const filteredPlaces = useMemo(() => {
     const query = searchTerm.trim().toLowerCase();
     if (!query) return places;
@@ -1213,6 +1221,14 @@ function App() {
     return places.filter((place) => [place?.place_name, place?.category, place?.locality]
       .some((value) => String(value || '').toLowerCase().includes(query)));
   }, [places, searchTerm]);
+  const filteredReferenceArticles = useMemo(() => {
+    const query = referenceArticleSearch.trim().toLowerCase();
+    if (!query) return savedReferenceArticles;
+    return savedReferenceArticles.filter((article) => (
+      [article?.title, article?.content, article?.source_url]
+        .some((value) => String(value || '').toLowerCase().includes(query))
+    ));
+  }, [savedReferenceArticles, referenceArticleSearch]);
 
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [filterCategory, setFilterCategory] = useState('All');
@@ -3395,6 +3411,143 @@ function App() {
     }
   }, [fetchAllRecords, triggerToast]);
 
+  const loadSavedReferenceArticles = React.useCallback(async () => {
+    setReferenceArticlesLoading(true);
+    setReferenceArticlesError('');
+    try {
+      const { data, error } = await supabaseClient
+        .from('saved_reference_articles')
+        .select('*')
+        .order('updated_at', { ascending: false })
+        .limit(1000);
+      if (error) throw error;
+      setSavedReferenceArticles(data || []);
+    } catch (error) {
+      setReferenceArticlesError(error.message || 'Could not load saved reference articles.');
+      logClientError(error, {
+        errorType: 'Reference article library',
+        source: 'saved_reference_articles',
+        context: { task: 'reference-article-library', action: 'load' }
+      });
+    } finally {
+      setReferenceArticlesLoading(false);
+    }
+  }, []);
+
+  const getSafeReferenceArticleUrl = (value) => {
+    try {
+      const parsedUrl = new URL(String(value || '').trim());
+      return ['http:', 'https:'].includes(parsedUrl.protocol) ? parsedUrl.href : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const saveReferenceArticle = async (event) => {
+    event.preventDefault();
+    if (!referenceArticleEditor || referenceArticleSaving) return;
+
+    const title = String(referenceArticleEditor.title || '').trim();
+    const content = String(referenceArticleEditor.content || '').trim();
+    const rawSourceUrl = String(referenceArticleEditor.source_url || '').trim();
+    if (!title || !content) {
+      triggerToast('Add an article title and the full article text.');
+      return;
+    }
+
+    let sourceUrl = null;
+    if (rawSourceUrl) {
+      try {
+        const parsedUrl = new URL(rawSourceUrl);
+        if (!['http:', 'https:'].includes(parsedUrl.protocol)) throw new Error('Use an http or https source link.');
+        sourceUrl = parsedUrl.href;
+      } catch (error) {
+        triggerToast(error.message === 'Use an http or https source link.' ? error.message : 'Enter a valid source URL.');
+        return;
+      }
+    }
+
+    setReferenceArticleSaving(true);
+    const payload = {
+      title,
+      content,
+      source_url: sourceUrl,
+      updated_at: new Date().toISOString()
+    };
+    try {
+      const query = referenceArticleEditor.id
+        ? supabaseClient.from('saved_reference_articles').update(payload).eq('id', referenceArticleEditor.id)
+        : supabaseClient.from('saved_reference_articles').insert(payload);
+      const { data, error } = await query.select('*').single();
+      if (error) throw error;
+      setSavedReferenceArticles((current) => {
+        const exists = current.some((article) => String(article.id) === String(data.id));
+        return exists
+          ? current.map((article) => String(article.id) === String(data.id) ? data : article)
+          : [data, ...current];
+      });
+      setReferenceArticleEditor(null);
+      triggerToast(referenceArticleEditor.id ? 'Reference article updated.' : 'Reference article saved.');
+    } catch (error) {
+      logClientError(error, {
+        errorType: 'Reference article library',
+        source: 'saved_reference_articles',
+        context: {
+          task: 'reference-article-library',
+          action: referenceArticleEditor.id ? 'update' : 'create',
+          article_id: String(referenceArticleEditor.id || ''),
+          title
+        }
+      });
+      triggerToast(`Could not save the reference article: ${error.message || 'Database request failed.'}`);
+    } finally {
+      setReferenceArticleSaving(false);
+    }
+  };
+
+  const deleteReferenceArticle = async (article) => {
+    if (!article?.id || referenceArticleDeletingId) return;
+    if (!window.confirm(`Delete “${article.title}” from your reference library?`)) return;
+
+    setReferenceArticleDeletingId(String(article.id));
+    try {
+      const { error } = await supabaseClient
+        .from('saved_reference_articles')
+        .delete()
+        .eq('id', article.id);
+      if (error) throw error;
+      setSavedReferenceArticles((current) => current.filter((item) => String(item.id) !== String(article.id)));
+      setSelectedReferenceArticle((current) => (
+        String(current?.id || '') === String(article.id) ? null : current
+      ));
+      triggerToast('Reference article deleted.');
+    } catch (error) {
+      logClientError(error, {
+        errorType: 'Reference article library',
+        source: 'saved_reference_articles',
+        context: { task: 'reference-article-library', action: 'delete', article_id: String(article.id), title: article.title || '' }
+      });
+      triggerToast(`Could not delete the reference article: ${error.message || 'Database request failed.'}`);
+    } finally {
+      setReferenceArticleDeletingId(null);
+    }
+  };
+
+  const copyReferenceArticle = async (article) => {
+    const text = `${article?.title || ''}\n\n${article?.content || ''}${article?.source_url ? `\n\nSource: ${article.source_url}` : ''}`;
+    try {
+      await navigator.clipboard.writeText(text);
+      triggerToast('Article copied to clipboard.');
+    } catch (error) {
+      logClientError(error, {
+        errorType: 'Reference article library',
+        source: 'saved_reference_articles',
+        context: { task: 'reference-article-library', action: 'copy', article_id: String(article?.id || '') }
+      });
+      triggerToast('Could not copy this article.');
+    }
+  };
+
   const refreshDashboardData = React.useCallback(async () => {
     if (refreshDashboardDataInProgressRef.current || refreshAllDataInProgressRef.current) return;
     refreshDashboardDataInProgressRef.current = true;
@@ -3550,6 +3703,12 @@ function App() {
       autocompleteInstanceRef.current = null;
     };
   }, [isLoggedIn, refreshAllData]);
+
+  useEffect(() => {
+    if (!isLoggedIn || activeTab !== 'articles') return undefined;
+    void loadSavedReferenceArticles();
+    return undefined;
+  }, [isLoggedIn, activeTab, loadSavedReferenceArticles]);
 
   useEffect(() => {
     if (!isLoggedIn || activeTab !== 'dashboard') return undefined;
@@ -6287,7 +6446,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
             My Journal Admin
           </h1>
           <nav className="flex bg-slate-100 p-1 rounded-xl gap-1">
-            {['places', 'social', 'map', 'dashboard', 'error-logs'].map(t => (
+            {['places', 'social', 'articles', 'map', 'dashboard', 'error-logs'].map(t => (
               <button
                 key={t}
                 onClick={() => {
@@ -6308,6 +6467,11 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                   />
                 )}
                 {t === 'error-logs' ? 'Error Logs' : t}
+                {t === 'articles' && savedReferenceArticles.length > 0 && (
+                  <span className={`rounded-full px-1.5 py-0.5 text-[8px] ${activeTab === t ? 'bg-violet-100 text-violet-700' : 'bg-slate-200 text-slate-500'}`}>
+                    {savedReferenceArticles.length}
+                  </span>
+                )}
                 {t === 'error-logs' && adminErrorLogsTotal > 0 && (
                   <span className={`rounded-full px-1.5 py-0.5 text-[8px] ${activeTab === t ? 'bg-rose-100 text-rose-700' : 'bg-slate-200 text-slate-500'}`}>
                     {adminErrorLogsTotal}
@@ -7114,6 +7278,141 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
           </div>
         )}
 
+        {/* TAB: INDEPENDENT REFERENCE ARTICLES */}
+        {activeTab === 'articles' && (
+          <section className="flex h-full flex-col overflow-hidden bg-slate-50">
+            <header className="flex shrink-0 flex-wrap items-center gap-4 border-b border-slate-100 bg-white px-6 py-4 sm:px-8">
+              <div className="min-w-0">
+                <h2 className="text-lg font-black text-slate-900">Reference Articles</h2>
+                <p className="mt-1 text-[10px] text-slate-500">
+                  Your independent research library for route planning. These entries are separate from saved locations and generated location articles.
+                </p>
+              </div>
+              <div className="ml-auto flex flex-wrap items-center gap-2">
+                <div className="relative">
+                  <Icon name="search" className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+                  <input
+                    value={referenceArticleSearch}
+                    onChange={(event) => setReferenceArticleSearch(event.target.value)}
+                    placeholder="Search title, article, source"
+                    aria-label="Search reference articles"
+                    className="w-56 rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-9 pr-3 text-[10px] font-semibold outline-none focus:border-violet-400"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void loadSavedReferenceArticles()}
+                  disabled={referenceArticlesLoading}
+                  className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-[9px] font-black uppercase text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  <Icon name="refresh-cw" className={`h-3.5 w-3.5 ${referenceArticlesLoading ? 'animate-spin' : ''}`} />
+                  Refresh
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setReferenceArticleEditor({ id: null, title: '', content: '', source_url: '' })}
+                  className="inline-flex items-center gap-2 rounded-xl bg-violet-700 px-4 py-2.5 text-[9px] font-black uppercase text-white shadow-sm hover:bg-violet-800"
+                >
+                  <Icon name="plus-circle" className="h-3.5 w-3.5" />
+                  Save an article
+                </button>
+              </div>
+            </header>
+
+            <div className="min-h-0 flex-1 overflow-y-auto p-5 sm:p-8">
+              <div className="mx-auto max-w-6xl">
+                <div className="mb-4 flex items-center justify-between gap-3">
+                  <p className="text-[10px] font-black uppercase tracking-wide text-slate-500">
+                    {filteredReferenceArticles.length} saved {filteredReferenceArticles.length === 1 ? 'article' : 'articles'}
+                  </p>
+                  <p className="text-[9px] text-slate-400">Open an entry to read the complete article.</p>
+                </div>
+
+                {referenceArticlesError && (
+                  <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs font-semibold text-rose-800">
+                    {referenceArticlesError}
+                  </div>
+                )}
+
+                {referenceArticlesLoading && savedReferenceArticles.length === 0 && (
+                  <div className="rounded-2xl border border-slate-200 bg-white p-10 text-center text-sm font-semibold text-slate-500">
+                    Loading your reference articles…
+                  </div>
+                )}
+
+                {!referenceArticlesLoading && filteredReferenceArticles.length === 0 && (
+                  <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center">
+                    <Icon name="file-text" className="mx-auto h-8 w-8 text-violet-400" />
+                    <p className="mt-3 text-sm font-black text-slate-800">
+                      {referenceArticleSearch ? 'No matching articles' : 'Your reference library is empty'}
+                    </p>
+                    <p className="mx-auto mt-1 max-w-lg text-xs leading-relaxed text-slate-500">
+                      {referenceArticleSearch
+                        ? 'Try another search term.'
+                        : 'Save articles you find with a title, the full article text, and an optional source link. They will be available here whenever you plan a route.'}
+                    </p>
+                    {!referenceArticleSearch && (
+                      <button
+                        type="button"
+                        onClick={() => setReferenceArticleEditor({ id: null, title: '', content: '', source_url: '' })}
+                        className="mt-5 rounded-xl bg-violet-700 px-4 py-2.5 text-[9px] font-black uppercase text-white hover:bg-violet-800"
+                      >
+                        Add your first article
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+                  {filteredReferenceArticles.map((article) => (
+                    <article key={article.id} className="flex min-h-44 flex-col rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                      <div className="flex items-start justify-between gap-3">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedReferenceArticle(article)}
+                          className="min-w-0 flex-1 text-left"
+                        >
+                          <h3 className="line-clamp-2 text-sm font-black leading-snug text-slate-900 hover:text-violet-700">{article.title}</h3>
+                        </button>
+                        <span className="shrink-0 rounded-full bg-violet-50 px-2.5 py-1 text-[8px] font-black uppercase tracking-wide text-violet-700">
+                          Reference
+                        </span>
+                      </div>
+                      <p className="mt-3 line-clamp-4 flex-1 whitespace-pre-wrap break-words text-xs leading-relaxed text-slate-600">
+                        {article.content}
+                      </p>
+                      <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-3">
+                        <span className="text-[9px] font-medium text-slate-400">
+                          Updated {article.updated_at ? new Date(article.updated_at).toLocaleDateString() : 'recently'}
+                        </span>
+                        <div className="flex items-center gap-2">
+                          {getSafeReferenceArticleUrl(article.source_url) && (
+                            <a
+                              href={getSafeReferenceArticleUrl(article.source_url)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-[8px] font-black uppercase text-slate-600 hover:bg-slate-50"
+                              onClick={(event) => event.stopPropagation()}
+                            >
+                              Source
+                            </a>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => setSelectedReferenceArticle(article)}
+                            className="rounded-lg bg-slate-900 px-3 py-1.5 text-[8px] font-black uppercase text-white hover:bg-slate-700"
+                          >
+                            Open article
+                          </button>
+                        </div>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </section>
+        )}
 
         {/* TAB 3: MAP */}
         <div className={`flex h-full w-full ${activeTab === 'map' ? 'flex' : 'hidden'} flex-col md:flex-row overflow-hidden`}>
@@ -8714,6 +9013,186 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
 
       </main>
 
+      {referenceArticleEditor && (
+        <div className="fixed inset-0 z-[8500] flex items-center justify-center bg-slate-950/65 p-3 backdrop-blur-sm sm:p-6">
+          <form
+            onSubmit={saveReferenceArticle}
+            className="flex max-h-[94vh] w-full max-w-3xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="reference-article-editor-title"
+          >
+            <header className="flex items-start justify-between gap-4 border-b border-slate-100 bg-violet-50/70 px-5 py-4 sm:px-7">
+              <div>
+                <p className="text-[9px] font-black uppercase tracking-[0.18em] text-violet-700">Independent reference library</p>
+                <h2 id="reference-article-editor-title" className="mt-1 text-lg font-black text-slate-900">
+                  {referenceArticleEditor.id ? 'Edit saved article' : 'Save an article'}
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setReferenceArticleEditor(null)}
+                disabled={referenceArticleSaving}
+                className="rounded-xl p-2 text-slate-400 hover:bg-white hover:text-slate-700 disabled:opacity-50"
+                aria-label="Close article editor"
+              >
+                <Icon name="x" className="h-4 w-4" />
+              </button>
+            </header>
+            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-5 sm:p-7">
+              <label className="block">
+                <span className="text-[9px] font-black uppercase tracking-wide text-slate-500">Article title</span>
+                <input
+                  required
+                  autoFocus
+                  maxLength={500}
+                  value={referenceArticleEditor.title}
+                  onChange={(event) => setReferenceArticleEditor((current) => ({ ...current, title: event.target.value }))}
+                  placeholder="Give this reference a clear title"
+                  className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900 outline-none focus:border-violet-400 focus:bg-white"
+                />
+              </label>
+              <label className="block">
+                <span className="text-[9px] font-black uppercase tracking-wide text-slate-500">Full article / details</span>
+                <textarea
+                  required
+                  maxLength={200000}
+                  rows={16}
+                  value={referenceArticleEditor.content}
+                  onChange={(event) => setReferenceArticleEditor((current) => ({ ...current, content: event.target.value }))}
+                  placeholder="Paste or write the complete article here…"
+                  className="mt-1.5 min-h-[280px] w-full resize-y rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-relaxed text-slate-800 outline-none focus:border-violet-400 focus:bg-white"
+                />
+                <span className="mt-1 block text-right text-[9px] text-slate-400">{referenceArticleEditor.content.length.toLocaleString()} / 200,000</span>
+              </label>
+              <label className="block">
+                <span className="text-[9px] font-black uppercase tracking-wide text-slate-500">Source link <span className="font-medium normal-case text-slate-400">(optional)</span></span>
+                <input
+                  type="url"
+                  maxLength={2048}
+                  value={referenceArticleEditor.source_url}
+                  onChange={(event) => setReferenceArticleEditor((current) => ({ ...current, source_url: event.target.value }))}
+                  placeholder="https://…"
+                  className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-800 outline-none focus:border-violet-400 focus:bg-white"
+                />
+              </label>
+              <p className="text-[10px] leading-relaxed text-slate-400">This reference is saved independently. It will not be attached to a location or alter any generated location article.</p>
+            </div>
+            <footer className="flex justify-end gap-2 border-t border-slate-100 bg-white px-5 py-4 sm:px-7">
+              <button
+                type="button"
+                onClick={() => setReferenceArticleEditor(null)}
+                disabled={referenceArticleSaving}
+                className="rounded-xl border border-slate-200 px-4 py-2.5 text-[9px] font-black uppercase text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={referenceArticleSaving}
+                className="inline-flex items-center gap-2 rounded-xl bg-violet-700 px-5 py-2.5 text-[9px] font-black uppercase text-white hover:bg-violet-800 disabled:cursor-wait disabled:opacity-60"
+              >
+                {referenceArticleSaving && <Icon name="refresh-cw" className="h-3.5 w-3.5 animate-spin" />}
+                {referenceArticleSaving ? 'Saving…' : 'Save to database'}
+              </button>
+            </footer>
+          </form>
+        </div>
+      )}
+
+      {selectedReferenceArticle && !referenceArticleEditor && (
+        <div
+          className="fixed inset-0 z-[8400] flex items-center justify-center bg-slate-950/65 p-3 backdrop-blur-sm sm:p-6"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="saved-reference-article-title"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setSelectedReferenceArticle(null);
+          }}
+        >
+          <article className="flex max-h-[94vh] w-full max-w-4xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl">
+            <header className="flex items-start justify-between gap-4 border-b border-slate-100 bg-white px-5 py-4 sm:px-7">
+              <div className="min-w-0">
+                <p className="text-[9px] font-black uppercase tracking-[0.18em] text-violet-700">Saved reference · for your route planning</p>
+                <h2 id="saved-reference-article-title" className="mt-1 break-words text-lg font-black text-slate-900 sm:text-xl">
+                  {selectedReferenceArticle.title}
+                </h2>
+                <p className="mt-1 text-[9px] font-medium text-slate-400">
+                  Updated {selectedReferenceArticle.updated_at ? new Date(selectedReferenceArticle.updated_at).toLocaleString() : 'recently'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedReferenceArticle(null)}
+                className="rounded-xl p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                aria-label="Close article"
+              >
+                <Icon name="x" className="h-4 w-4" />
+              </button>
+            </header>
+            {getSafeReferenceArticleUrl(selectedReferenceArticle.source_url) && (
+              <div className="border-b border-slate-100 bg-slate-50 px-5 py-3 sm:px-7">
+                <a
+                  href={getSafeReferenceArticleUrl(selectedReferenceArticle.source_url)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="break-all text-xs font-bold text-indigo-700 underline"
+                >
+                  {selectedReferenceArticle.source_url}
+                </a>
+              </div>
+            )}
+            <div className="min-h-0 flex-1 overflow-y-auto px-5 py-6 sm:px-8 sm:py-8">
+              <div className="mx-auto max-w-3xl whitespace-pre-wrap break-words text-sm leading-7 text-slate-800">
+                {selectedReferenceArticle.content}
+              </div>
+            </div>
+            <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 bg-white px-5 py-4 sm:px-7">
+              <button
+                type="button"
+                onClick={() => void deleteReferenceArticle(selectedReferenceArticle)}
+                disabled={Boolean(referenceArticleDeletingId)}
+                className="inline-flex items-center gap-2 rounded-xl border border-rose-200 px-3 py-2.5 text-[9px] font-black uppercase text-rose-700 hover:bg-rose-50 disabled:opacity-50"
+              >
+                <Icon name="trash-2" className="h-3.5 w-3.5" />
+                {referenceArticleDeletingId ? 'Deleting…' : 'Delete'}
+              </button>
+              <div className="ml-auto flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => void copyReferenceArticle(selectedReferenceArticle)}
+                  className="rounded-xl border border-slate-200 px-3 py-2.5 text-[9px] font-black uppercase text-slate-600 hover:bg-slate-50"
+                >
+                  Copy article
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setReferenceArticleEditor({
+                      id: selectedReferenceArticle.id,
+                      title: selectedReferenceArticle.title || '',
+                      content: selectedReferenceArticle.content || '',
+                      source_url: selectedReferenceArticle.source_url || ''
+                    });
+                    setSelectedReferenceArticle(null);
+                  }}
+                  className="rounded-xl bg-violet-700 px-4 py-2.5 text-[9px] font-black uppercase text-white hover:bg-violet-800"
+                >
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedReferenceArticle(null)}
+                  className="rounded-xl border border-slate-200 px-4 py-2.5 text-[9px] font-black uppercase text-slate-600 hover:bg-slate-50"
+                >
+                  Close
+                </button>
+              </div>
+            </footer>
+          </article>
+        </div>
+      )}
+
       {activeTripDialogOpen && selectedTrip.length > 0 && (
         <div
           className="fixed inset-0 z-[7000] flex items-center justify-center bg-slate-950/65 p-3 backdrop-blur-sm sm:p-6"
@@ -8735,14 +9214,28 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                   {selectedTrip.length} stop{selectedTrip.length === 1 ? '' : 's'} · Estimated route distance {calculateRouteDistance()} km
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={() => setActiveTripDialogOpen(false)}
-                className="rounded-xl p-2 text-slate-500 hover:bg-slate-200 hover:text-slate-900"
-                aria-label="Close active trip details"
-              >
-                <Icon name="x" className="h-5 w-5" />
-              </button>
+              <div className="flex shrink-0 items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveTripDialogOpen(false);
+                    setActiveTab('articles');
+                  }}
+                  className="inline-flex items-center gap-2 rounded-xl border border-violet-200 bg-white px-3 py-2 text-[8px] font-black uppercase tracking-wide text-violet-700 hover:bg-violet-50"
+                  title="Open your standalone reference library; the active route remains loaded"
+                >
+                  <Icon name="file-text" className="h-3.5 w-3.5" />
+                  Reference articles
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTripDialogOpen(false)}
+                  className="rounded-xl p-2 text-slate-500 hover:bg-slate-200 hover:text-slate-900"
+                  aria-label="Close active trip details"
+                >
+                  <Icon name="x" className="h-5 w-5" />
+                </button>
+              </div>
             </header>
 
             <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)_minmax(0,0.8fr)_minmax(0,1.4fr)] gap-4 overflow-hidden p-4 sm:p-6 lg:grid-cols-[minmax(280px,0.8fr)_minmax(0,1.5fr)] lg:grid-rows-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
