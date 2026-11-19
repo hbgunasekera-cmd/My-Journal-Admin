@@ -36,6 +36,25 @@ const loadLeaflet = () => {
   return leafletLoadPromise;
 };
 
+// Leaflet Routing Machine does not abort its active OSRM request when its
+// control is removed. Invalidate the pending callback before aborting so a
+// late XHR response cannot call _clearLines() after the map reference is gone.
+const removeRoutingControlSafely = (map, control) => {
+  if (!control) return;
+  const pendingRequest = control._pendingRequest;
+  if (pendingRequest?.abort) {
+    control._requestCount = (Number(control._requestCount) || 0) + 1;
+    control._pendingRequest = null;
+    try {
+      pendingRequest.abort();
+    } catch {
+      // Continue removing the control even if the browser cannot abort the XHR.
+    }
+  }
+  const attachedMap = control._map || map;
+  if (attachedMap) attachedMap.removeControl(control);
+};
+
 // --- Drag and Drop Engine ---
 import { DragDropContext, Droppable, Draggable } from "@hello-pangea/dnd";
 
@@ -1450,7 +1469,7 @@ function App() {
       window.removeEventListener('resize', handleMapResize);
       if (activeTripMiniRoutingControlRef.current) {
         try {
-          map?.removeControl(activeTripMiniRoutingControlRef.current);
+          removeRoutingControlSafely(map, activeTripMiniRoutingControlRef.current);
         } catch (error) {
           console.warn('Active trip mini-map routing cleanup error ignored:', error);
         }
@@ -1477,7 +1496,7 @@ function App() {
 
     if (activeTripMiniRoutingControlRef.current) {
       try {
-        map.removeControl(activeTripMiniRoutingControlRef.current);
+        removeRoutingControlSafely(map, activeTripMiniRoutingControlRef.current);
       } catch (error) {
         console.warn('Active trip mini-map route update cleanup error ignored:', error);
       }
@@ -1529,7 +1548,7 @@ function App() {
       window.clearTimeout(routingTimer);
       if (routingControlInstance && activeTripMiniMapRef.current) {
         try {
-          activeTripMiniMapRef.current.removeControl(routingControlInstance);
+          removeRoutingControlSafely(activeTripMiniMapRef.current, routingControlInstance);
         } catch (error) {
           console.warn('Active trip mini-map route cleanup error ignored:', error);
         }
@@ -1717,9 +1736,9 @@ function App() {
   // Draws directional routing polyline lines between origin and selected waypoints.
   React.useEffect(() => {
     const removeRoutingControl = () => {
-      if (routingControl.current && mapRef.current) {
+      if (routingControl.current) {
         try {
-          mapRef.current.removeControl(routingControl.current);
+          removeRoutingControlSafely(mapRef.current, routingControl.current);
         } catch (error) {
           console.warn("Routing control cleanup error ignored:", error);
         }
@@ -6679,12 +6698,6 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                   const hasArticle = Boolean(p.ai_article?.story || p.ai_article?.description);
                   const hasFactCheck = isArticleFactCheckedForPlace(p.ai_article, p);
                   const hasAiOnlyFallback = p.ai_article?.fact_check_mode === 'ai_only_fallback';
-                  const mapsPhotoProgress = mapsPhotoDownloadProgress?.placeId === String(p.id)
-                    ? mapsPhotoDownloadProgress
-                    : null;
-                  const mapsPhotoComplete = Boolean(p.google_maps) && !(
-                    mapsPhotoProgress?.running && !mapsPhotoProgress.wasAlreadyTracked
-                  );
 
                   return (
                     <div key={p.id} className="bg-white rounded-[1.5rem] border border-slate-200 shadow-sm overflow-hidden flex flex-col group relative hover:shadow-md transition-all">
@@ -6977,6 +6990,12 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                     const hasArticle = Boolean(p.ai_article?.story || p.ai_article?.description);
                     const artisticTitle = `✨ ${p.place_name} — Island Vignettes: A Sri Lankan Journal`;
                     const description = getSocialDescription(p);
+                    const mapsPhotoProgress = mapsPhotoDownloadProgress?.placeId === String(p.id)
+                      ? mapsPhotoDownloadProgress
+                      : null;
+                    const mapsPhotoComplete = Boolean(p.google_maps) && !(
+                      mapsPhotoProgress?.running && !mapsPhotoProgress.wasAlreadyTracked
+                    );
 
                     return (
                       <div
@@ -7546,7 +7565,12 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                       setActiveRouteName('');
                       setActiveSavedRouteId(null);
                       if (routingControl?.current && mapRef?.current) {
-                        mapRef.current.removeControl(routingControl.current);
+                        try {
+                          removeRoutingControlSafely(mapRef.current, routingControl.current);
+                        } catch (error) {
+                          console.warn('Route clear cleanup error ignored:', error);
+                        }
+                        routingControl.current = null;
                       }
                       triggerToast('Route Cleared');
                     }}
