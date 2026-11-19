@@ -2216,7 +2216,7 @@ function App() {
     const alreadyTracked = Boolean(place?.google_maps);
     let claimed = false;
 
-    setMapsPhotoDownloadProgress({ placeId, completed: 0, failed: 0, total: photos.length, running: true });
+    setMapsPhotoDownloadProgress({ placeId, completed: 0, failed: 0, total: photos.length, running: true, wasAlreadyTracked: alreadyTracked });
     let completed = 0;
     let failed = 0;
 
@@ -2300,7 +2300,7 @@ function App() {
             }
           });
         }
-        setMapsPhotoDownloadProgress({ placeId, completed, failed, total: photos.length, running: true });
+        setMapsPhotoDownloadProgress({ placeId, completed, failed, total: photos.length, running: true, wasAlreadyTracked: alreadyTracked });
         if (index < photos.length - 1) await new Promise((resolve) => window.setTimeout(resolve, 350));
       }
 
@@ -2317,7 +2317,7 @@ function App() {
         )));
       }
 
-      setMapsPhotoDownloadProgress({ placeId, completed, failed, total: photos.length, running: false });
+      setMapsPhotoDownloadProgress({ placeId, completed, failed, total: photos.length, running: false, wasAlreadyTracked: alreadyTracked });
       triggerToast(failed
         ? alreadyTracked
           ? `Downloaded ${completed} of ${photos.length} photos; ${failed} failed. The previous successful set remains tracked.`
@@ -2347,7 +2347,7 @@ function App() {
         source: 'travel_bucket_list',
         context: { task: 'maps-photo-contribution', action: 'track-download-set', location_id: placeId, place_name: place.place_name || '' }
       });
-      setMapsPhotoDownloadProgress({ placeId, completed, failed: Math.max(failed, photos.length - completed), total: photos.length, running: false });
+      setMapsPhotoDownloadProgress({ placeId, completed, failed: Math.max(failed, photos.length - completed), total: photos.length, running: false, wasAlreadyTracked: alreadyTracked });
       triggerToast(error.message || 'Could not track the Google Maps photo download.');
     } finally {
       mapsPhotoDownloadInProgressRef.current.delete(placeId);
@@ -6679,6 +6679,12 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                   const hasArticle = Boolean(p.ai_article?.story || p.ai_article?.description);
                   const hasFactCheck = isArticleFactCheckedForPlace(p.ai_article, p);
                   const hasAiOnlyFallback = p.ai_article?.fact_check_mode === 'ai_only_fallback';
+                  const mapsPhotoProgress = mapsPhotoDownloadProgress?.placeId === String(p.id)
+                    ? mapsPhotoDownloadProgress
+                    : null;
+                  const mapsPhotoComplete = Boolean(p.google_maps) && !(
+                    mapsPhotoProgress?.running && !mapsPhotoProgress.wasAlreadyTracked
+                  );
 
                   return (
                     <div key={p.id} className="bg-white rounded-[1.5rem] border border-slate-200 shadow-sm overflow-hidden flex flex-col group relative hover:shadow-md transition-all">
@@ -7256,17 +7262,17 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                           <button
                             type="button"
                             onClick={() => setMapsPhotoContributionPlace(p)}
-                            className={`col-span-4 flex items-center justify-center gap-2 rounded-xl border px-3 py-2.5 shadow-sm transition-colors ${p.google_maps
+                            className={`col-span-4 flex items-center justify-center gap-2 rounded-xl border px-3 py-2.5 shadow-sm transition-colors ${mapsPhotoComplete
                               ? 'border-emerald-300 bg-emerald-50 text-emerald-900 hover:bg-emerald-100'
-                              : 'border-emerald-200 bg-white text-emerald-800 hover:border-emerald-300 hover:bg-emerald-50'
+                              : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50'
                               }`}
-                            title={p.google_maps
+                            title={mapsPhotoComplete
                               ? 'The selected cover and gallery photo set has been downloaded and tracked for Google Maps'
                               : 'Open the Google Maps photo contribution helper for this location'}
                           >
-                            <Icon name={p.google_maps ? 'check-circle' : 'map-pin'} className="h-3.5 w-3.5" />
+                            <Icon name={mapsPhotoComplete ? 'check-circle' : 'map-pin'} className="h-3.5 w-3.5" />
                             <span className="text-[8px] font-black uppercase tracking-wide">
-                              {p.google_maps ? 'Maps Photos Downloaded' : 'My Journal · Google Maps Photos'}
+                              {mapsPhotoComplete ? 'Maps Photos Downloaded' : 'My Journal · Google Maps Photos'}
                             </span>
                           </button>
                         </div>
