@@ -137,6 +137,128 @@ if (typeof window !== 'undefined') {
 
 
 const HomePoint = { lat: 7.0911, lng: 79.9161 };
+const TRAFFIC_COUNTRY_CENTROIDS = {
+  'afghanistan': [33.9, 67.7], 'albania': [41.2, 20.2], 'algeria': [28.0, 1.7],
+  'andorra': [42.5, 1.5], 'angola': [-12.3, 17.5], 'argentina': [-38.4, -63.6],
+  'armenia': [40.1, 45.0], 'australia': [-25.3, 133.8], 'austria': [47.5, 14.6],
+  'azerbaijan': [40.1, 47.6], 'bahamas': [24.3, -76.0], 'bahrain': [26.1, 50.6],
+  'bangladesh': [23.7, 90.4], 'barbados': [13.2, -59.5], 'belarus': [53.7, 27.9],
+  'belgium': [50.5, 4.5], 'belize': [17.2, -88.5], 'benin': [9.3, 2.3],
+  'bhutan': [27.5, 90.4], 'bolivia': [-16.3, -63.6], 'bosnia and herzegovina': [44.0, 17.7],
+  'botswana': [-22.0, 24.0], 'brazil': [-10.8, -52.9], 'brunei': [4.5, 114.7],
+  'bulgaria': [42.7, 25.5], 'burkina faso': [12.3, -1.6], 'burundi': [-3.4, 29.9],
+  'cambodia': [12.6, 104.9], 'cameroon': [5.7, 12.7], 'canada': [56.1, -106.3],
+  'chad': [15.5, 18.7], 'chile': [-35.7, -71.5], 'china': [35.9, 104.2],
+  'colombia': [4.6, -74.1], 'congo': [-0.7, 15.3], 'costa rica': [9.7, -84.2],
+  'cote divoire': [7.5, -5.5], 'cote d ivoire': [7.5, -5.5], 'cuba': [21.5, -78.0],
+  'croatia': [45.1, 15.2], 'cyprus': [35.1, 33.4], 'czechia': [49.8, 15.5],
+  'czech republic': [49.8, 15.5], 'denmark': [56.3, 9.5], 'democratic republic of the congo': [-2.9, 23.7],
+  'dominican republic': [18.7, -70.2], 'ecuador': [-1.8, -78.2], 'egypt': [26.8, 30.8],
+  'el salvador': [13.8, -88.9], 'estonia': [58.6, 25.0], 'ethiopia': [9.1, 40.5],
+  'fiji': [-17.8, 178.1], 'finland': [64.0, 26.0], 'france': [46.2, 2.2],
+  'georgia': [42.3, 43.4], 'germany': [51.2, 10.5], 'ghana': [7.9, -1.0],
+  'greece': [39.1, 21.8], 'guatemala': [15.8, -90.2], 'guinea': [10.4, -10.8],
+  'haiti': [19.0, -72.3], 'honduras': [15.2, -86.2], 'hong kong': [22.3, 114.2],
+  'hungary': [47.2, 19.5], 'iceland': [64.9, -19.0],
+  'india': [22.6, 79.0], 'indonesia': [-2.5, 118.0], 'iran': [32.4, 53.7],
+  'iraq': [33.2, 43.7], 'ireland': [53.1, -8.0], 'israel': [31.0, 34.9],
+  'italy': [42.8, 12.8], 'jamaica': [18.1, -77.3], 'japan': [36.2, 138.3],
+  'jordan': [31.2, 36.2],
+  'kazakhstan': [48.0, 67.0], 'kenya': [0.2, 37.9], 'kuwait': [29.3, 47.5],
+  'laos': [19.9, 102.5], 'latvia': [56.9, 24.6], 'lebanon': [33.9, 35.9],
+  'libya': [26.3, 17.2], 'lithuania': [55.2, 23.9], 'luxembourg': [49.8, 6.1],
+  'macau': [22.2, 113.5], 'madagascar': [-19.0, 46.7], 'malawi': [-13.3, 34.3],
+  'malaysia': [4.2, 102.0], 'maldives': [3.2, 73.2], 'mali': [17.6, -3.9],
+  'malta': [35.9, 14.4], 'mauritania': [21.0, -10.9], 'mauritius': [-20.2, 57.5],
+  'mexico': [23.6, -102.6], 'moldova': [47.0, 28.5], 'mongolia': [46.9, 103.8],
+  'montenegro': [42.7, 19.4], 'morocco': [31.8, -7.1], 'mozambique': [-18.7, 35.5],
+  'myanmar': [21.9, 95.9], 'namibia': [-22.1, 17.2], 'nepal': [28.4, 84.1],
+  'netherlands': [52.1, 5.3], 'new zealand': [-40.9, 174.9], 'nigeria': [9.1, 8.7],
+  'nicaragua': [12.9, -85.0], 'niger': [17.6, 8.1], 'north korea': [40.3, 127.5],
+  'norway': [60.5, 8.5], 'oman': [21.5, 55.9], 'pakistan': [30.4, 69.3],
+  'palestine': [31.9, 35.2], 'panama': [8.5, -80.8], 'paraguay': [-23.4, -58.4],
+  'peru': [-9.2, -75.0], 'philippines': [12.9, 122.0], 'poland': [52.0, 19.1],
+  'portugal': [39.4, -8.2], 'qatar': [25.4, 51.2], 'romania': [45.9, 24.9],
+  'russia': [61.5, 105.3], 'rwanda': [-1.9, 29.9], 'saudi arabia': [23.9, 45.1],
+  'senegal': [14.4, -14.5], 'serbia': [44.0, 21.0], 'singapore': [1.35, 103.8],
+  'slovakia': [48.7, 19.7],
+  'slovenia': [46.2, 14.8], 'south africa': [-30.6, 22.9], 'south korea': [36.0, 128.0],
+  'spain': [40.0, -4.0], 'sri lanka': [7.9, 80.7], 'sudan': [12.9, 30.2],
+  'sweden': [60.1, 18.6], 'switzerland': [46.8, 8.2], 'syria': [35.0, 38.5],
+  'taiwan': [23.7, 121.0], 'tanzania': [-6.4, 34.9], 'thailand': [15.9, 100.9],
+  'tunisia': [34.0, 9.0], 'turkey': [39.0, 35.2], 'uganda': [1.4, 32.3],
+  'ukraine': [48.4, 31.2], 'united arab emirates': [24.0, 54.0],
+  'united kingdom': [55.4, -3.4], 'united states': [39.8, -98.6],
+  'united states of america': [39.8, -98.6], 'usa': [39.8, -98.6], 'us': [39.8, -98.6],
+  'uruguay': [-32.5, -55.8], 'uzbekistan': [41.4, 64.6], 'venezuela': [8.0, -66.0],
+  'vietnam': [16.0, 106.0], 'viet nam': [16.0, 106.0], 'yemen': [15.6, 48.5],
+  'zambia': [-13.1, 27.8], 'zimbabwe': [-19.0, 29.2]
+};
+
+const normalizeTrafficCountryName = (country) => {
+  const normalized = String(country || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[’‘]/g, "'")
+    .replace(/[.']/g, '')
+    .replace(/\s+/g, ' ');
+  const aliases = {
+    'us': 'united states',
+    'usa': 'united states',
+    'united states of america': 'united states',
+    'uk': 'united kingdom',
+    'great britain': 'united kingdom',
+    'britain': 'united kingdom',
+    'the netherlands': 'netherlands',
+    'czech republic': 'czechia',
+    'russian federation': 'russia',
+    'viet nam': 'vietnam',
+    'republic of korea': 'south korea',
+    'lao peoples democratic republic': 'laos',
+    'iran, islamic republic of': 'iran',
+    'tanzania, united republic of': 'tanzania',
+    'moldova, republic of': 'moldova',
+    'syrian arab republic': 'syria'
+  };
+  return aliases[normalized] || normalized;
+};
+
+const getTrafficCountryCentroid = (country) => TRAFFIC_COUNTRY_CENTROIDS[normalizeTrafficCountryName(country)] || null;
+
+const GOVERNING_ORG_OPTIONS = [
+  { value: 'Open', label: 'No Authority', aliases: ['Open', 'None', 'No Authority'] },
+  { value: 'Department of Wildlife Conservation', label: 'Wildlife Conservation Department', aliases: ['DWC', 'Wildlife Dept', 'Wildlife Conservation'] },
+  { value: 'Department of Forest Conservation', label: 'Forest Conservation Department', aliases: ['DFC', 'Forest Dept', 'Forestry Dept', 'Forest Conservation'] },
+  { value: 'Central Cultural Fund', label: 'Central Cultural Fund', aliases: ['CCF'] },
+  { value: 'Department of Archaeology', label: 'Archaeology Department', aliases: ['Archaeology', 'DArch'] },
+  { value: 'Coast Conservation Department', label: 'Coast Conservation Department', aliases: ['CCD', 'Coast Conservation Dept'] },
+  { value: 'State Timber Corporation', label: 'State Timber Corporation', aliases: ['STC', 'State Timber Corp'] },
+  { value: 'Galle Heritage Foundation', label: 'Galle Heritage Foundation', aliases: ['GHF', 'Galle Heritage Fdn'] },
+  { value: 'Urban Development Authority (UDA)', label: 'Urban Development Authority', aliases: ['UDA', 'Urban Development Authority'] },
+  { value: 'Department of National Botanic Gardens', label: 'National Botanic Gardens Department', aliases: ['DNBG', 'Botanic Gardens Dept', 'National Botanic Gardens'] },
+  { value: 'National Livestock Development Board', label: 'Livestock Development Board', aliases: ['NLDB', 'Livestock Development Board'] },
+  { value: 'Local Authorities', label: 'Local Authority', aliases: ['Local Authority', 'Local Gov PS', 'Local Government'] }
+];
+
+const normalizeGoverningOrgName = (name) => String(name || '')
+  .toLowerCase()
+  .normalize('NFKD')
+  .replace(/[\u0300-\u036f]/g, '')
+  .replace(/[^a-z0-9]+/g, ' ')
+  .trim();
+
+const resolveGoverningOrgValue = (name) => {
+  const value = String(name || '').trim();
+  if (!value) return 'Open';
+  const normalized = normalizeGoverningOrgName(value);
+  return GOVERNING_ORG_OPTIONS.find((option) => (
+    [option.value, option.label, ...option.aliases]
+      .some((candidate) => normalizeGoverningOrgName(candidate) === normalized)
+  ))?.value || value;
+};
+
 const VALID_CATEGORIES = [
   "Waterfall", "Mountain", "Trail", "Viewpoint", "Beach", "Park",
   "Plateaus", "Reserved Forest", "Monastery", "Archaeology",
@@ -1387,6 +1509,18 @@ function App() {
   const activeTripMiniMapRef = useRef(null);
   const activeTripMiniRoutingControlRef = useRef(null);
   const [activeTripMiniMapReady, setActiveTripMiniMapReady] = useState(false);
+  const dashboardTrafficMapContainerRef = useRef(null);
+  const dashboardTrafficMapRef = useRef(null);
+  const dashboardTrafficMapMarkersRef = useRef(null);
+  const dashboardTrafficCityMarkersRef = useRef(null);
+  const dashboardTrafficCityMarkerIndexRef = useRef(new Map());
+  const dashboardCityCoordinateCacheRef = useRef(new Map());
+  const dashboardReverseGeocodeCacheRef = useRef(new Map());
+  const dashboardTrafficFocusedCountryRef = useRef('');
+  const dashboardTrafficGeocoderRef = useRef(null);
+  const [dashboardTrafficMapReady, setDashboardTrafficMapReady] = useState(false);
+  const [dashboardTrafficMapError, setDashboardTrafficMapError] = useState('');
+  const [dashboardTrafficCityPinStatus, setDashboardTrafficCityPinStatus] = useState(null);
   const refreshAllDataInProgressRef = useRef(false);
   const refreshDashboardDataInProgressRef = useRef(false);
   const autocompleteRef = useRef(null);
@@ -5895,6 +6029,33 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
       .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
       .map(v => ({ ...v, ...parseUA(v) }));
 
+    const countryVisitGroups = new Map();
+    const cityVisitGroups = new Map();
+    parsedData.forEach((visit) => {
+      const country = String(visit.country || 'Unknown').trim() || 'Unknown';
+      const city = String(visit.city || '').trim();
+      countryVisitGroups.set(country, (countryVisitGroups.get(country) || 0) + 1);
+      if (!city) return;
+      const key = `${country}\u0000${city}`;
+      const summary = cityVisitGroups.get(key) || { city, country, visits: 0 };
+      summary.visits += 1;
+      cityVisitGroups.set(key, summary);
+    });
+
+    const visitMapCities = [...cityVisitGroups.values()].sort((a, b) => b.visits - a.visits || a.city.localeCompare(b.city));
+    const countryCities = new Map();
+    visitMapCities.forEach((city) => {
+      if (!countryCities.has(city.country)) countryCities.set(city.country, []);
+      countryCities.get(city.country).push(city);
+    });
+    const visitMapCountries = [...countryVisitGroups.entries()]
+      .map(([country, visits]) => ({
+        country,
+        visits,
+        cities: (countryCities.get(country) || []).slice(0, 5)
+      }))
+      .sort((a, b) => b.visits - a.visits || a.country.localeCompare(b.country));
+
     const latestMetrics = parsedData.length > 0 ? parsedData[parsedData.length - 1] : null;
 
     const getSortedMetrics = (data, keyOrFn) => {
@@ -5985,6 +6146,8 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
     return {
       latest: latestMetrics,
       totalVisits: parsedData.length,
+      visitMapCountries,
+      visitMapCities,
       totalSubscribers: safeSubscribers.length,
       locationLikesCount: safeLikes.length,
       videoLikesCount: safeVideoLikes.length,
@@ -6008,6 +6171,311 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
       videoSharesSummary: aggregateVideoData(safeVideoShares)
     };
   }, [analyticsData, likesData, videoLikesData, videoSharesData, subscribersData, sharesData]);
+
+  useEffect(() => {
+    if (activeTab !== 'dashboard' || !dashboardTrafficMapContainerRef.current) return undefined;
+    let cancelled = false;
+    let map = null;
+    let resizeTimer = null;
+
+    const initializeTrafficMap = async () => {
+      const L = await loadLeaflet();
+      if (cancelled || !dashboardTrafficMapContainerRef.current) return;
+      map = L.map(dashboardTrafficMapContainerRef.current, {
+        center: [20, 0],
+        zoom: 2,
+        minZoom: 2,
+        maxZoom: 10,
+        zoomControl: true,
+        attributionControl: true,
+        scrollWheelZoom: true,
+        dragging: true,
+        worldCopyJump: true
+      });
+      L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
+        attribution: 'Tiles &copy; Esri',
+        maxZoom: 19
+      }).addTo(map);
+      dashboardTrafficMapMarkersRef.current = L.layerGroup().addTo(map);
+      dashboardTrafficCityMarkersRef.current = L.layerGroup().addTo(map);
+      dashboardTrafficCityMarkerIndexRef.current.clear();
+      dashboardTrafficMapRef.current = map;
+      setDashboardTrafficMapError('');
+      setDashboardTrafficMapReady(true);
+      resizeTimer = window.setTimeout(() => map?.invalidateSize({ pan: false }), 120);
+    };
+
+    initializeTrafficMap().catch((error) => {
+      if (cancelled) return;
+      setDashboardTrafficMapError(error?.message || 'The traffic map could not be loaded.');
+      logClientError(error, {
+        errorType: 'Dashboard traffic map',
+        source: 'dashboard-traffic-map',
+        context: { task: 'dashboard-traffic-map', action: 'initialize' }
+      });
+    });
+
+    return () => {
+      cancelled = true;
+      if (resizeTimer) window.clearTimeout(resizeTimer);
+      map?.remove();
+      if (dashboardTrafficMapRef.current === map) dashboardTrafficMapRef.current = null;
+      dashboardTrafficMapMarkersRef.current = null;
+      dashboardTrafficCityMarkersRef.current = null;
+      dashboardTrafficCityMarkerIndexRef.current.clear();
+      dashboardTrafficFocusedCountryRef.current = '';
+      setDashboardTrafficMapReady(false);
+      setDashboardTrafficCityPinStatus(null);
+    };
+  }, [activeTab]);
+
+  useEffect(() => {
+    const L = loadedLeaflet;
+    const map = dashboardTrafficMapRef.current;
+    const markerLayer = dashboardTrafficMapMarkersRef.current;
+    if (activeTab !== 'dashboard' || !dashboardTrafficMapReady || !L || !map || !markerLayer) return;
+
+    markerLayer.clearLayers();
+    const mappedCountries = dashboardStats.visitMapCountries
+      .map((item) => ({ ...item, coordinates: getTrafficCountryCentroid(item.country) }))
+      .filter((item) => item.coordinates);
+    const maxCountryVisits = Math.max(1, ...mappedCountries.map((item) => item.visits));
+    const orangeScale = ['#ffedd5', '#fed7aa', '#fdba74', '#fb923c', '#f97316', '#c2410c'];
+
+    mappedCountries.forEach((item) => {
+      const relative = Math.log1p(item.visits) / Math.log1p(maxCountryVisits);
+      const colorIndex = Math.min(orangeScale.length - 1, Math.floor(relative * orangeScale.length));
+      const radius = 6 + Math.round(10 * Math.sqrt(item.visits / maxCountryVisits));
+      const cityMarkup = item.cities.length
+        ? item.cities.map((city) => `<div style="display:flex;justify-content:space-between;gap:16px"><span>${escapeHtml(city.city)}</span><strong>${city.visits.toLocaleString()}</strong></div>`).join('')
+        : '<div>No city detail recorded</div>';
+      const marker = L.circleMarker(item.coordinates, {
+        radius,
+        color: '#fff7ed',
+        weight: 1.5,
+        fillColor: orangeScale[colorIndex],
+        fillOpacity: 0.9
+      });
+      marker.bindPopup(
+        `<div style="min-width:170px"><strong>${escapeHtml(item.country)}</strong><div style="margin:3px 0 8px;color:#c2410c;font-weight:800">${item.visits.toLocaleString()} visits</div><div style="font-size:12px;line-height:1.65">${cityMarkup}</div></div>`,
+        { maxWidth: 260 }
+      );
+      marker.on('click', () => {
+        map.flyTo(item.coordinates, Math.max(5.5, map.getZoom()), { duration: 0.6 });
+      });
+      markerLayer.addLayer(marker);
+    });
+  }, [activeTab, dashboardTrafficMapReady, dashboardStats.visitMapCountries]);
+
+  useEffect(() => {
+    const L = loadedLeaflet;
+    const map = dashboardTrafficMapRef.current;
+    const cityLayer = dashboardTrafficCityMarkersRef.current;
+    if (activeTab !== 'dashboard' || !dashboardTrafficMapReady || !L || !map || !cityLayer) return undefined;
+
+    let disposed = false;
+    let viewChangeTimer = null;
+    let activeCountry = '';
+    const citiesByCountry = dashboardStats.visitMapCities;
+
+    const setCityPinStatus = (update) => {
+      setDashboardTrafficCityPinStatus((current) => {
+        if (disposed) return current;
+        if (update.country && current?.country && update.country !== current.country) return current;
+        return { ...current, ...update };
+      });
+    };
+
+    const getGeocoder = async () => {
+      if (dashboardTrafficGeocoderRef.current) return dashboardTrafficGeocoderRef.current;
+      const mapsKey = import.meta.env.VITE_MAPS_KEY;
+      if (!window.google?.maps?.importLibrary) {
+        if (!mapsKey) throw new Error('Google Maps API key is not configured for city map pins.');
+        await loadGoogleMapsApi(mapsKey);
+      }
+      const { Geocoder } = await window.google.maps.importLibrary('geocoding');
+      dashboardTrafficGeocoderRef.current = new Geocoder();
+      return dashboardTrafficGeocoderRef.current;
+    };
+
+    const reverseGeocodeCountryAtCenter = async () => {
+      const center = map.getCenter();
+      const cacheKey = `${Math.round(center.lat * 100) / 100}:${Math.round(center.lng * 100) / 100}`;
+      let countryName = dashboardReverseGeocodeCacheRef.current.get(cacheKey);
+      if (countryName === undefined) {
+        const geocoder = await getGeocoder();
+        const response = await geocoder.geocode({ location: center, language: 'en', fulfillOnZeroResults: true });
+        const countryComponent = response?.results
+          ?.flatMap((result) => result.address_components || [])
+          .find((component) => component.types?.includes('country'));
+        countryName = countryComponent?.long_name || null;
+        dashboardReverseGeocodeCacheRef.current.set(cacheKey, countryName);
+      }
+      if (!countryName) return null;
+      const normalizedCountryName = normalizeTrafficCountryName(countryName);
+      return dashboardStats.visitMapCountries.find((item) => (
+        normalizeTrafficCountryName(item.country) === normalizedCountryName
+      )) || null;
+    };
+
+    const showCountryCities = async (country) => {
+      activeCountry = country.country;
+      dashboardTrafficFocusedCountryRef.current = country.country;
+      cityLayer.clearLayers();
+      dashboardTrafficCityMarkerIndexRef.current.clear();
+      const cities = citiesByCountry
+        .filter((item) => item.country === country.country)
+        .slice(0, 20);
+      if (cities.length === 0) {
+        setDashboardTrafficCityPinStatus({ country: country.country, total: 0, completed: 0, located: 0, running: false });
+        return;
+      }
+
+      setDashboardTrafficCityPinStatus({
+        country: country.country,
+        total: cities.length,
+        completed: 0,
+        located: 0,
+        running: true,
+        error: ''
+      });
+
+      try {
+        const geocoder = await getGeocoder();
+        const maxCityVisits = Math.max(1, ...cities.map((city) => city.visits));
+        const orangeScale = ['#ffedd5', '#fed7aa', '#fdba74', '#fb923c', '#f97316', '#c2410c'];
+        let completed = 0;
+        let located = 0;
+
+        for (const city of cities) {
+          if (disposed || activeCountry !== country.country) return;
+          const cacheKey = `${country.country.toLowerCase()}\u0000${city.city.toLowerCase()}`;
+          let coordinates = dashboardCityCoordinateCacheRef.current.get(cacheKey);
+          if (coordinates === undefined) {
+            const response = await geocoder.geocode({
+              address: `${city.city}, ${country.country}`,
+              componentRestrictions: { country: country.country },
+              language: 'en',
+              fulfillOnZeroResults: true
+            });
+            const result = response?.results?.[0];
+            const point = result?.geometry?.location;
+            coordinates = point
+              ? {
+                lat: typeof point.lat === 'function' ? point.lat() : Number(point.lat),
+                lng: typeof point.lng === 'function' ? point.lng() : Number(point.lng)
+              }
+              : null;
+            if (!coordinates || !Number.isFinite(coordinates.lat) || !Number.isFinite(coordinates.lng)) coordinates = null;
+            dashboardCityCoordinateCacheRef.current.set(cacheKey, coordinates);
+          }
+
+          if (coordinates && !disposed && activeCountry === country.country) {
+            const relative = Math.log1p(city.visits) / Math.log1p(maxCityVisits);
+            const colorIndex = Math.min(orangeScale.length - 1, Math.floor(relative * orangeScale.length));
+            const marker = L.circleMarker([coordinates.lat, coordinates.lng], {
+              radius: 5 + Math.round(7 * Math.sqrt(city.visits / maxCityVisits)),
+              color: '#fff7ed',
+              weight: 1.5,
+              fillColor: orangeScale[colorIndex],
+              fillOpacity: 0.95
+            });
+            marker.bindPopup(
+              `<div style="min-width:160px"><strong>${escapeHtml(city.city)}, ${escapeHtml(country.country)}</strong><div style="margin-top:4px;color:#c2410c;font-weight:800">${city.visits.toLocaleString()} visits</div></div>`
+            );
+            cityLayer.addLayer(marker);
+            dashboardTrafficCityMarkerIndexRef.current.set(`${country.country}\u0000${city.city}`, marker);
+            located += 1;
+          }
+          completed += 1;
+          setCityPinStatus({ country: country.country, completed, located, running: true });
+        }
+
+        setCityPinStatus({ country: country.country, total: cities.length, completed, located, running: false });
+      } catch (error) {
+        if (disposed || activeCountry !== country.country) return;
+        setCityPinStatus({
+          country: country.country,
+          total: cities.length,
+          running: false,
+          error: 'City pins are unavailable. Check that Geocoding is enabled for the Google Maps key.'
+        });
+        logClientError(error, {
+          errorType: 'Dashboard city geocoding',
+          source: 'dashboard-traffic-map',
+          context: { task: 'dashboard-traffic-map', action: 'geocode-cities', country: country.country, city_count: cities.length }
+        });
+      }
+    };
+
+    const handleMapViewChange = () => {
+      if (viewChangeTimer) window.clearTimeout(viewChangeTimer);
+      viewChangeTimer = window.setTimeout(async () => {
+        if (disposed) return;
+        const zoom = map.getZoom();
+        if (zoom < 5.5) {
+          activeCountry = '';
+          dashboardTrafficFocusedCountryRef.current = '';
+          cityLayer.clearLayers();
+          dashboardTrafficCityMarkerIndexRef.current.clear();
+          setDashboardTrafficCityPinStatus(null);
+          return;
+        }
+
+        const center = map.getCenter();
+        const zoomAtLookup = zoom;
+        let country = null;
+        try {
+          country = await reverseGeocodeCountryAtCenter();
+        } catch (error) {
+          if (disposed) return;
+          setDashboardTrafficCityPinStatus({
+            country: 'Map area',
+            total: 0,
+            completed: 0,
+            located: 0,
+            running: false,
+            error: 'Could not identify the country. Check that Geocoding is enabled for the Google Maps key.'
+          });
+          logClientError(error, {
+            errorType: 'Dashboard country lookup',
+            source: 'dashboard-traffic-map',
+            context: { task: 'dashboard-traffic-map', action: 'reverse-geocode-center' }
+          });
+          return;
+        }
+        // The view may have changed while reverse geocoding was in flight. Resolve
+        // against the current center before adding pins for an older map position.
+        const latestCenter = map.getCenter();
+        if (
+          map.getZoom() !== zoomAtLookup
+          || Math.abs(center.lat - latestCenter.lat) > 0.0001
+          || Math.abs(center.lng - latestCenter.lng) > 0.0001
+        ) return;
+        if (!country) {
+          activeCountry = '';
+          dashboardTrafficFocusedCountryRef.current = '';
+          cityLayer.clearLayers();
+          dashboardTrafficCityMarkerIndexRef.current.clear();
+          setDashboardTrafficCityPinStatus(null);
+          return;
+        }
+        if (activeCountry === country.country) return;
+        void showCountryCities(country);
+      }, 220);
+    };
+
+    map.on('zoomend moveend', handleMapViewChange);
+    handleMapViewChange();
+    return () => {
+      disposed = true;
+      if (viewChangeTimer) window.clearTimeout(viewChangeTimer);
+      map.off('zoomend moveend', handleMapViewChange);
+      if (dashboardTrafficFocusedCountryRef.current === activeCountry) dashboardTrafficFocusedCountryRef.current = '';
+      cityLayer.clearLayers();
+      dashboardTrafficCityMarkerIndexRef.current.clear();
+    };
+  }, [activeTab, dashboardTrafficMapReady, dashboardStats.visitMapCountries, dashboardStats.visitMapCities]);
 
   const handleClearDashboardData = async () => {
     if (window.confirm("⚠️ Are you sure you want to delete all analytics records (page_visits)? This operation cannot be undone.")) {
@@ -6698,6 +7166,8 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                   const hasArticle = Boolean(p.ai_article?.story || p.ai_article?.description);
                   const hasFactCheck = isArticleFactCheckedForPlace(p.ai_article, p);
                   const hasAiOnlyFallback = p.ai_article?.fact_check_mode === 'ai_only_fallback';
+                  const governingOrgValue = resolveGoverningOrgValue(p.governing_org);
+                  const governingOrgOption = GOVERNING_ORG_OPTIONS.find((option) => option.value === governingOrgValue);
 
                   return (
                     <div key={p.id} className="bg-white rounded-[1.5rem] border border-slate-200 shadow-sm overflow-hidden flex flex-col group relative hover:shadow-md transition-all">
@@ -6834,18 +7304,17 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                           <div className="flex items-center gap-2">
                             <Icon name="landmark" className="w-2.5 h-2.5 text-emerald-400" />
                             <select
-                              value={p.governing_org || 'Open'}
+                              value={governingOrgValue}
                               onChange={(e) => updatePlaceField(p.id, 'governing_org', e.target.value)}
+                              title={governingOrgOption?.value || p.governing_org || 'No governing body'}
                               className="flex-1 text-[8px] font-black uppercase text-emerald-600 bg-emerald-50 border-none rounded p-1.5 outline-none hover:bg-emerald-100 transition-colors"
                             >
-                              <option value="Open">No Authority</option>
-                              <option value="Department of Wildlife Conservation">DWC (Wildlife)</option>
-                              <option value="Department of Forest Conservation">Forestry Dept</option>
-                              <option value="Central Cultural Fund">CCF (Cultural)</option>
-                              <option value="Department of Archaeology">Archaeology</option>
-                              <option value="Department of National Botanic Gardens">Botanic Gardens Dept</option>
-                              <option value="National Livestock Development Board">Livestock Development Board</option>
-                              <option value="Local Authorities">Local Gov (PS)</option>
+                              {!governingOrgOption && p.governing_org && (
+                                <option value={governingOrgValue}>{p.governing_org}</option>
+                              )}
+                              {GOVERNING_ORG_OPTIONS.map((option) => (
+                                <option key={option.value} value={option.value}>{option.label}</option>
+                              ))}
                             </select>
                           </div>
                         </div>
@@ -8316,6 +8785,131 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                     </div>
                   </div>
                 </div>
+
+                {/* 2. VISIT GEOGRAPHY MAP */}
+                <section className="lg:col-span-2 overflow-hidden rounded-[2.5rem] border border-orange-100 bg-white p-5 shadow-xl sm:p-7">
+                  <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
+                    <div>
+                      <p className="mb-1 text-[10px] font-black uppercase tracking-widest text-orange-600">Visit Geography</p>
+                      <h2 className="text-2xl font-black italic tracking-tight text-slate-900">Where visitors are coming from</h2>
+                      <p className="mt-1 text-xs font-medium text-slate-500">
+                        Country markers use approximate centers; zoom in to mark the country’s top cities by visits.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-4 rounded-full bg-orange-50 px-4 py-2 text-[10px] font-black uppercase tracking-wide text-orange-900">
+                      <span>{dashboardStats.visitMapCountries.length.toLocaleString()} countries</span>
+                      <span className="h-3 w-px bg-orange-200" />
+                      <span>{dashboardStats.visitMapCities.length.toLocaleString()} cities</span>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.6fr)_minmax(340px,0.9fr)]">
+                    <div className="relative min-h-[320px] overflow-hidden rounded-3xl border border-slate-200 bg-slate-100 sm:h-[430px]">
+                      <div
+                        ref={dashboardTrafficMapContainerRef}
+                        className="absolute inset-0 z-0"
+                        aria-label="Interactive map of website visits by country"
+                      />
+                      {dashboardTrafficMapError && (
+                        <div className="absolute inset-0 z-[400] flex items-center justify-center bg-slate-100/95 p-6 text-center text-sm font-bold text-slate-600">
+                          {dashboardTrafficMapError}
+                        </div>
+                      )}
+                      {!dashboardTrafficMapReady && !dashboardTrafficMapError && (
+                        <div className="absolute inset-0 z-[400] flex items-center justify-center bg-slate-100/90 text-xs font-black uppercase tracking-wide text-slate-500">
+                          Loading traffic map…
+                        </div>
+                      )}
+                      {dashboardTrafficCityPinStatus && (
+                        <div className={`absolute right-3 top-3 z-[500] max-w-[min(92%,320px)] rounded-xl border px-3 py-2 text-[9px] font-black shadow-md ${dashboardTrafficCityPinStatus.error ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-orange-100 bg-white/95 text-slate-700'}`}>
+                          {dashboardTrafficCityPinStatus.error
+                            ? dashboardTrafficCityPinStatus.error
+                            : dashboardTrafficCityPinStatus.running
+                              ? `Locating ${dashboardTrafficCityPinStatus.country} cities · ${dashboardTrafficCityPinStatus.completed}/${dashboardTrafficCityPinStatus.total}`
+                              : dashboardTrafficCityPinStatus.total === 0
+                                ? `No city visit details for ${dashboardTrafficCityPinStatus.country}`
+                                : `Showing ${dashboardTrafficCityPinStatus.located} of ${dashboardTrafficCityPinStatus.total} top city pins · ${dashboardTrafficCityPinStatus.country}`}
+                        </div>
+                      )}
+                      <div className="pointer-events-none absolute bottom-3 left-3 z-[500] flex items-center gap-2 rounded-xl border border-white/70 bg-white/95 px-3 py-2 shadow-md">
+                        <span className="text-[8px] font-black uppercase tracking-wider text-slate-500">Visits</span>
+                        <span className="text-[8px] font-bold text-slate-400">Low</span>
+                        <span className="h-2.5 w-20 rounded-full bg-gradient-to-r from-orange-100 via-orange-400 to-orange-800" />
+                        <span className="text-[8px] font-bold text-slate-600">High</span>
+                      </div>
+                    </div>
+
+                    <div className="grid min-h-0 grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-1">
+                      <div className="flex h-[210px] min-h-0 flex-col rounded-3xl border border-slate-100 bg-slate-50 p-4 xl:h-[207px]">
+                        <div className="mb-2 flex items-center justify-between">
+                          <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-700">Countries</h3>
+                          <span className="text-[9px] font-bold text-slate-400">{dashboardStats.visitMapCountries.length} total</span>
+                        </div>
+                        <div className="min-h-0 flex-1 space-y-1 overflow-y-auto pr-1">
+                          {dashboardStats.visitMapCountries.length === 0 ? (
+                            <p className="py-8 text-center text-xs font-medium text-slate-400">No visit locations recorded yet.</p>
+                          ) : dashboardStats.visitMapCountries.map((item) => {
+                            const max = dashboardStats.visitMapCountries[0]?.visits || 1;
+                            const coordinates = getTrafficCountryCentroid(item.country);
+                            return (
+                              <button
+                                type="button"
+                                key={item.country}
+                                onClick={() => {
+                                  if (coordinates) dashboardTrafficMapRef.current?.flyTo(coordinates, Math.max(5.5, dashboardTrafficMapRef.current.getZoom()), { duration: 0.6 });
+                                }}
+                                disabled={!coordinates}
+                                title={coordinates ? `Focus map on ${item.country}` : 'This country has no configured map center'}
+                                className="group relative flex w-full items-center justify-between overflow-hidden rounded-xl px-2.5 py-2 text-left transition-colors hover:bg-orange-50 disabled:cursor-default"
+                              >
+                                <span className="absolute inset-y-0 left-0 rounded-xl transition-all" style={{ width: `${Math.max(4, (item.visits / max) * 100)}%`, backgroundColor: `rgba(249, 115, 22, ${0.08 + (item.visits / max) * 0.26})` }} />
+                                <span className="relative truncate text-[10px] font-bold text-slate-700">{item.country}</span>
+                                <span className="relative ml-2 shrink-0 rounded-full bg-orange-500 px-2 py-0.5 text-[9px] font-black text-white">{item.visits.toLocaleString()}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      <div className="flex h-[210px] min-h-0 flex-col rounded-3xl border border-slate-100 bg-slate-50 p-4 xl:h-[207px]">
+                        <div className="mb-2 flex items-center justify-between">
+                          <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-700">Cities</h3>
+                          <span className="text-[9px] font-bold text-slate-400">Visits by city and country</span>
+                        </div>
+                        <div className="min-h-0 flex-1 space-y-1 overflow-y-auto pr-1">
+                          {dashboardStats.visitMapCities.length === 0 ? (
+                            <p className="py-8 text-center text-xs font-medium text-slate-400">No city details recorded yet.</p>
+                          ) : dashboardStats.visitMapCities.map((item) => {
+                            const max = dashboardStats.visitMapCities[0]?.visits || 1;
+                            const coordinates = getTrafficCountryCentroid(item.country);
+                            return (
+                              <button
+                                type="button"
+                                key={`${item.country}:${item.city}`}
+                                onClick={() => {
+                                  const map = dashboardTrafficMapRef.current;
+                                  const cityMarker = dashboardTrafficCityMarkerIndexRef.current.get(`${item.country}\u0000${item.city}`);
+                                  if (map && cityMarker && dashboardTrafficCityMarkersRef.current?.hasLayer(cityMarker)) {
+                                    map.flyTo(cityMarker.getLatLng(), Math.max(8, map.getZoom()), { duration: 0.6 });
+                                    window.setTimeout(() => cityMarker.openPopup(), 650);
+                                  } else if (map && coordinates) {
+                                    map.flyTo(coordinates, Math.max(5.5, map.getZoom()), { duration: 0.6 });
+                                  }
+                                }}
+                                className="group relative flex w-full items-center justify-between overflow-hidden rounded-xl px-2.5 py-2 text-left transition-colors hover:bg-orange-50"
+                                title={`Focus map on ${item.city}, ${item.country}; top cities are marked when zoomed in`}
+                              >
+                                <span className="absolute inset-y-0 left-0 rounded-xl transition-all" style={{ width: `${Math.max(4, (item.visits / max) * 100)}%`, backgroundColor: `rgba(249, 115, 22, ${0.08 + (item.visits / max) * 0.26})` }} />
+                                <span className="relative min-w-0 truncate text-[10px] font-bold text-slate-700">{item.city}<span className="ml-1.5 font-medium text-slate-400">{item.country}</span></span>
+                                <span className="relative ml-2 shrink-0 rounded-full bg-orange-500 px-2 py-0.5 text-[9px] font-black text-white">{item.visits.toLocaleString()}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </section>
 
                 {/* 2. LIKES METRICS */}
                 <div className="bg-rose-500 rounded-[2.5rem] p-8 text-white shadow-xl flex flex-col h-[450px]">
