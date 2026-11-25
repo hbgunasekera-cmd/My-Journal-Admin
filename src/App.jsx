@@ -6105,7 +6105,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
 
     const countryVisitGroups = new Map();
     const cityVisitGroups = new Map();
-    parsedData.forEach((visit) => {
+    parsedData.filter((visit) => !visit.isBot).forEach((visit) => {
       const country = String(visit.country || 'Unknown').trim() || 'Unknown';
       const city = String(visit.city || '').trim();
       countryVisitGroups.set(country, (countryVisitGroups.get(country) || 0) + 1);
