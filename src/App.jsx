@@ -61,6 +61,7 @@ import { DragDropContext, Droppable, Draggable } from "@hello-pangea/dnd";
 // --- Icons (Consolidated lucide-react) ---
 import {
   Camera,
+  CalendarDays,
   CheckCircle,
   Circle,
   Cloud,
@@ -711,6 +712,7 @@ const YouTubeIcon = ({ className }) => (
 const Icon = React.memo(({ name, className = "w-4 h-4" }) => {
   const icons = {
     'camera': Camera,
+    'calendar-days': CalendarDays,
     'check-circle': CheckCircle,
     'circle': Circle,
     'cloud': Cloud,
@@ -1302,6 +1304,63 @@ const RefreshProgressCircle = React.memo(({ refreshAt, totalTime = 600 }) => {
   );
 });
 
+const getCalendarElapsedPeriod = (startValue, endValue = new Date()) => {
+  const startDate = startValue instanceof Date ? startValue : new Date(startValue);
+  if (!Number.isFinite(startDate.getTime()) || !Number.isFinite(endValue.getTime())) return null;
+
+  const start = new Date(Date.UTC(startDate.getFullYear(), startDate.getMonth(), startDate.getDate()));
+  const end = new Date(Date.UTC(endValue.getFullYear(), endValue.getMonth(), endValue.getDate()));
+  if (start > end) return { months: 0, days: 0 };
+
+  const addCalendarMonths = (date, count) => {
+    const monthStart = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + count, 1));
+    const lastDayOfMonth = new Date(Date.UTC(monthStart.getUTCFullYear(), monthStart.getUTCMonth() + 1, 0)).getUTCDate();
+    return new Date(Date.UTC(
+      monthStart.getUTCFullYear(),
+      monthStart.getUTCMonth(),
+      Math.min(date.getUTCDate(), lastDayOfMonth)
+    ));
+  };
+
+  let months = (end.getUTCFullYear() - start.getUTCFullYear()) * 12 + end.getUTCMonth() - start.getUTCMonth();
+  if (addCalendarMonths(start, months) > end) months -= 1;
+  const monthAnchor = addCalendarMonths(start, months);
+  const days = Math.floor((end.getTime() - monthAnchor.getTime()) / 86400000);
+  return { months, days };
+};
+
+const SUMMARY_DIVIDER_CLASS = 'w-px h-3.5 bg-slate-700';
+
+const VisitHistoryPeriod = React.memo(({ firstVisitAt }) => {
+  const [today, setToday] = useState(() => new Date());
+
+  useEffect(() => {
+    const current = new Date();
+    const nextMidnight = new Date(current.getFullYear(), current.getMonth(), current.getDate() + 1);
+    const timer = window.setTimeout(() => setToday(new Date()), nextMidnight.getTime() - current.getTime() + 50);
+    return () => window.clearTimeout(timer);
+  }, [today]);
+
+  const firstVisitDate = firstVisitAt ? new Date(firstVisitAt) : null;
+  const period = firstVisitDate ? getCalendarElapsedPeriod(firstVisitDate, today) : null;
+  const firstVisitLabel = firstVisitDate && Number.isFinite(firstVisitDate.getTime())
+    ? firstVisitDate.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+    : null;
+
+  return (
+    <div
+      className="flex items-center gap-1.5 cursor-help"
+      title={period ? `First visit logged ${firstVisitLabel}; elapsed through ${today.toLocaleDateString()}.` : 'No valid page visit date is available.'}
+      aria-label={period ? `Visit history spans ${period.months} months and ${period.days} days` : 'Visit history period unavailable'}
+    >
+      <Icon name="calendar-days" className="w-3.5 h-3.5 text-cyan-400" />
+      <span className="whitespace-nowrap text-[10px] font-black text-cyan-100">
+        {period ? `${period.months} mo ${period.days} d` : '—'}
+      </span>
+    </div>
+  );
+});
+
 
 // --- Main Application Component ---
 function App() {
@@ -1489,7 +1548,7 @@ function App() {
   const [activeRouteName, setActiveRouteName] = useState('');
   const [activeSavedRouteId, setActiveSavedRouteId] = useState(null);
   const [activeTripDialogOpen, setActiveTripDialogOpen] = useState(false);
-  const REFRESH_INTERVAL_SECONDS = 600;
+const REFRESH_INTERVAL_SECONDS = 600;
   const [nextAutoRefreshAt, setNextAutoRefreshAt] = useState(() => Date.now() + REFRESH_INTERVAL_SECONDS * 1000);
 
   // --- Location & Add Location Flow States ---
@@ -6057,6 +6116,10 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
       .sort((a, b) => b.visits - a.visits || a.country.localeCompare(b.country));
 
     const latestMetrics = parsedData.length > 0 ? parsedData[parsedData.length - 1] : null;
+    const firstVisitAt = safeAnalytics.reduce((earliest, visit) => {
+      const timestamp = Date.parse(visit?.created_at || '');
+      return Number.isFinite(timestamp) && (earliest === null || timestamp < earliest) ? timestamp : earliest;
+    }, null);
 
     const getSortedMetrics = (data, keyOrFn) => {
       const counts = data.reduce((acc, item) => {
@@ -6145,6 +6208,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
 
     return {
       latest: latestMetrics,
+      firstVisitAt,
       totalVisits: parsedData.length,
       visitMapCountries,
       visitMapCities,
@@ -8556,17 +8620,20 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                 {/* Quick Metric Pills */}
                 <div className="flex flex-wrap items-center justify-center sm:justify-start gap-x-4 gap-y-2 bg-slate-900 px-5 py-2.5 rounded-[1.5rem] sm:rounded-full border border-slate-800 shadow-lg text-white">
 
-                  {/* Verified Person & Progress Circle Badge */}
-                  <div className="flex items-center gap-2.5 cursor-help group" title="Verified Persons">
+                  {/* Refresh timer, visit-history period, and verified-visit share */}
+                  <div className="flex items-center gap-2.5">
                     <RefreshProgressCircle
                       refreshAt={nextAutoRefreshAt}
                       totalTime={REFRESH_INTERVAL_SECONDS}
                     />
 
-                    {/* Divider */}
-                    <div className="w-px h-3.5 bg-slate-800" />
+                    <div className={SUMMARY_DIVIDER_CLASS} />
 
-                    <div className="flex items-center gap-1.5">
+                    <VisitHistoryPeriod firstVisitAt={dashboardStats.firstVisitAt} />
+
+                    <div className={SUMMARY_DIVIDER_CLASS} />
+
+                    <div className="flex items-center gap-1.5 cursor-help group" title="Verified persons">
                       <Icon name="check-circle" className="w-4 h-4 text-emerald-400 group-hover:scale-110 transition-transform" />
                       <span className="text-emerald-400 font-black italic text-[11px]">
                         {verifiedPercentage}%
@@ -8574,7 +8641,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                     </div>
                   </div>
 
-                  <div className="hidden sm:block w-px h-3.5 bg-slate-800" />
+                  <div className={SUMMARY_DIVIDER_CLASS} />
 
                   {/* Location Likes */}
                   <div className="flex items-center gap-1.5 cursor-help group" title="Location likes">
@@ -8584,7 +8651,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                     </span>
                   </div>
 
-                  <div className="hidden sm:block w-px h-3.5 bg-slate-800" />
+                  <div className={SUMMARY_DIVIDER_CLASS} />
 
                   {/* Video Likes */}
                   <div className="flex items-center gap-1.5 cursor-help group" title="Video likes">
@@ -8594,7 +8661,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                     </span>
                   </div>
 
-                  <div className="hidden sm:block w-px h-3.5 bg-slate-800" />
+                  <div className={SUMMARY_DIVIDER_CLASS} />
 
                   {/* Location Shares */}
                   <div className="flex items-center gap-1.5 cursor-help group" title="Location shares">
@@ -8604,7 +8671,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                     </span>
                   </div>
 
-                  <div className="hidden sm:block w-px h-3.5 bg-slate-800" />
+                  <div className={SUMMARY_DIVIDER_CLASS} />
 
                   {/* Video Shares */}
                   <div className="flex items-center gap-1.5 cursor-help group" title="Video shares">
@@ -8614,7 +8681,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                     </span>
                   </div>
 
-                  <div className="hidden sm:block w-px h-3.5 bg-slate-800" />
+                  <div className={SUMMARY_DIVIDER_CLASS} />
 
                   {/* Total Subscribers */}
                   <div className="flex items-center gap-1.5 cursor-help group" title="Total Subscribers">
@@ -8624,7 +8691,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                     </span>
                   </div>
 
-                  <div className="hidden sm:block w-px h-3.5 bg-slate-800" />
+                  <div className={SUMMARY_DIVIDER_CLASS} />
 
                   {/* Pending Comments */}
                   <div className="flex items-center gap-1.5 cursor-help group" title="Pending Comments">
@@ -8642,7 +8709,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                     </span>
                   </div>
 
-                  <div className="hidden sm:block w-px h-3.5 bg-slate-800" />
+                  <div className={SUMMARY_DIVIDER_CLASS} />
 
                   {/* Pending Suggestions */}
                   <div className="flex items-center gap-1.5 cursor-help group" title="Pending Suggestions">
