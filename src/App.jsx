@@ -6103,9 +6103,10 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
       .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
       .map(v => ({ ...v, ...parseUA(v) }));
 
+    const humanVisits = parsedData.filter((visit) => !visit.isBot);
     const countryVisitGroups = new Map();
     const cityVisitGroups = new Map();
-    parsedData.filter((visit) => !visit.isBot).forEach((visit) => {
+    humanVisits.forEach((visit) => {
       const country = String(visit.country || 'Unknown').trim() || 'Unknown';
       const city = String(visit.city || '').trim();
       countryVisitGroups.set(country, (countryVisitGroups.get(country) || 0) + 1);
@@ -6225,6 +6226,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
       latest: latestMetrics,
       firstVisitAt,
       totalVisits: parsedData.length,
+      humanVisitCount: humanVisits.length,
       visitMapCountries,
       visitMapCities,
       totalSubscribers: safeSubscribers.length,
@@ -8883,6 +8885,8 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                       </p>
                     </div>
                     <div className="flex items-center gap-4 rounded-full bg-orange-50 px-4 py-2 text-[10px] font-black uppercase tracking-wide text-orange-900">
+                      <span>{dashboardStats.humanVisitCount.toLocaleString()} visits</span>
+                      <span className="h-3 w-px bg-orange-200" />
                       <span>{dashboardStats.visitMapCountries.length.toLocaleString()} countries</span>
                       <span className="h-3 w-px bg-orange-200" />
                       <span>{dashboardStats.visitMapCities.length.toLocaleString()} cities</span>
