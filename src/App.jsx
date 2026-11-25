@@ -261,10 +261,20 @@ const resolveGoverningOrgValue = (name) => {
 };
 
 const VALID_CATEGORIES = [
-  "Waterfall", "Mountain", "Trail", "Viewpoint", "Beach", "Park",
-  "Plateaus", "Reserved Forest", "Monastery", "Archaeology",
-  "Reservoir", "Pool", "Stream", "Location"
+  'Waterfall', 'Mountain', 'Trail', 'Viewpoint', 'Beach', 'Park',
+  'Plateaus', 'Reserved Forest', 'Monastery', 'Archaeology',
+  'Reservoir', 'Pool', 'Stream', 'Location'
 ];
+const LocationCategoryOptions = ({ currentValue }) => (
+  <>
+    {currentValue && !VALID_CATEGORIES.includes(currentValue) && (
+      <option value={currentValue}>Current saved value: {currentValue}</option>
+    )}
+    {VALID_CATEGORIES.map((category) => (
+      <option key={category} value={category}>{category}</option>
+    ))}
+  </>
+);
 const QR_SOCIAL_PLATFORMS = [
   { id: 'instagram', label: 'Instagram', icon: 'instagram', color: 'hover:border-fuchsia-300 hover:bg-fuchsia-50' },
   { id: 'threads', label: 'Threads', icon: 'threads', color: 'hover:border-slate-400 hover:bg-slate-100' },
@@ -1346,16 +1356,21 @@ const VisitHistoryPeriod = React.memo(({ firstVisitAt }) => {
   const firstVisitLabel = firstVisitDate && Number.isFinite(firstVisitDate.getTime())
     ? firstVisitDate.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
     : null;
+  const periodLabel = period
+    ? period.months < 12
+      ? `${period.months} mo ${period.days} d`
+      : `${Math.floor(period.months / 12)} y ${period.months % 12} mo ${period.days} d`
+    : '—';
 
   return (
     <div
       className="flex items-center gap-1.5 cursor-help"
       title={period ? `First visit logged ${firstVisitLabel}; elapsed through ${today.toLocaleDateString()}.` : 'No valid page visit date is available.'}
-      aria-label={period ? `Visit history spans ${period.months} months and ${period.days} days` : 'Visit history period unavailable'}
+      aria-label={period ? `Visit history spans ${periodLabel}` : 'Visit history period unavailable'}
     >
       <Icon name="calendar-days" className="w-3.5 h-3.5 text-cyan-400" />
       <span className="whitespace-nowrap text-[10px] font-black text-cyan-100">
-        {period ? `${period.months} mo ${period.days} d` : '—'}
+        {periodLabel}
       </span>
     </div>
   );
@@ -7054,8 +7069,8 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                   onChange={(e) => setStagedLocation({ ...stagedLocation, category: e.target.value })}
                   className="px-3 py-2 bg-indigo-50 border border-indigo-100 text-indigo-700 rounded-xl text-[10px] font-black uppercase outline-none cursor-pointer hover:bg-indigo-100 transition-colors"
                 >
-                  {VALID_CATEGORIES.map(c => (
-                    <option key={c} value={c}>{c}</option>
+                  {VALID_CATEGORIES.map((category) => (
+                    <option key={category} value={category}>{category}</option>
                   ))}
                 </select>
 
@@ -7101,7 +7116,9 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
 
               <select value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)} className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-[10px] font-bold uppercase outline-none cursor-pointer hover:bg-slate-100">
                 <option value="All">All Categories</option>
-                {VALID_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                {VALID_CATEGORIES.map((category) => (
+                  <option key={category} value={category}>{category}</option>
+                ))}
               </select>
 
               <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-[10px] font-bold uppercase outline-none cursor-pointer hover:bg-slate-100">
@@ -7346,7 +7363,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                           onChange={(e) => updatePlaceField(p.id, 'category', e.target.value)}
                           className="text-[9px] font-bold uppercase text-indigo-600 bg-indigo-50 border-none rounded-lg p-2 outline-none cursor-pointer hover:bg-indigo-100 transition-colors w-full"
                         >
-                          {VALID_CATEGORIES.map(cat => <option key={cat} value={cat}>{cat}</option>)}
+                          <LocationCategoryOptions currentValue={p.category} />
                         </select>
 
                         {/* Metadata Grid */}
@@ -7485,7 +7502,9 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
 
               <select value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)} className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-[10px] font-bold uppercase outline-none cursor-pointer hover:bg-slate-100">
                 <option value="All">All Categories</option>
-                {VALID_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                {VALID_CATEGORIES.map((category) => (
+                  <option key={category} value={category}>{category}</option>
+                ))}
               </select>
 
               <div className="h-6 w-[1px] bg-slate-200 mx-1"></div>
