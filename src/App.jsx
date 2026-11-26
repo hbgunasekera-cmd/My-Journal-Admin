@@ -1376,6 +1376,94 @@ const VisitHistoryPeriod = React.memo(({ firstVisitAt }) => {
   );
 });
 
+const TrafficComparisonChart = React.memo(({ title, subtitle, data }) => {
+  const width = 900;
+  const height = 300;
+  const padding = { top: 20, right: 16, bottom: 38, left: 48 };
+  const plotWidth = width - padding.left - padding.right;
+  const plotHeight = height - padding.top - padding.bottom;
+  const maxValue = Math.max(1, ...data.map((item) => item.human + item.nonHuman));
+  const tickStep = Math.max(1, Math.ceil(maxValue / 4));
+  const axisMax = tickStep * 4;
+  const slotWidth = plotWidth / Math.max(data.length, 1);
+  const barWidth = Math.max(2, Math.min(18, slotWidth * 0.28));
+  const yFor = (value) => padding.top + plotHeight - (value / axisMax) * plotHeight;
+  const humanTotal = data.reduce((total, item) => total + item.human, 0);
+  const nonHumanTotal = data.reduce((total, item) => total + item.nonHuman, 0);
+  const labelInterval = data.length > 24 ? 5 : data.length > 14 ? 3 : data.length > 8 ? 2 : 1;
+  const totalPoints = data.map((item, index) => {
+    const x = padding.left + (index + 0.5) * slotWidth;
+    return `${x},${yFor(item.human + item.nonHuman)}`;
+  }).join(' ');
+
+  return (
+    <div className="min-w-0 rounded-3xl border border-slate-200 bg-slate-50 p-4 sm:p-5">
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 className="text-base font-black tracking-tight text-slate-900">{title}</h3>
+          <p className="mt-1 text-[11px] font-medium text-slate-500">{subtitle}</p>
+        </div>
+        <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] font-bold text-slate-600">
+          <span className="inline-flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-sm bg-blue-400" />Human {humanTotal.toLocaleString()}</span>
+          <span className="inline-flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-sm bg-purple-400" />Non-human {nonHumanTotal.toLocaleString()}</span>
+          <span className="inline-flex items-center gap-1.5"><i className="h-0.5 w-3 rounded-full bg-green-400" />Total {(humanTotal + nonHumanTotal).toLocaleString()}</span>
+        </div>
+      </div>
+
+      <div className="relative">
+        <svg className="h-56 w-full overflow-visible sm:h-64" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${title}: human and non-human website visits`}>
+          {[0, 1, 2, 3, 4].map((tick) => {
+            const value = tickStep * tick;
+            const y = yFor(value);
+            return (
+              <g key={tick}>
+                <line x1={padding.left} x2={width - padding.right} y1={y} y2={y} stroke="#e2e8f0" strokeDasharray={tick === 0 ? undefined : '4 5'} />
+                <text x={padding.left - 9} y={y + 3} textAnchor="end" fill="#64748b" fontSize="10">{value.toLocaleString()}</text>
+              </g>
+            );
+          })}
+
+          {data.map((item, index) => {
+            const center = padding.left + (index + 0.5) * slotWidth;
+            const humanX = center - barWidth - 1;
+            const nonHumanX = center + 1;
+            const humanY = yFor(item.human);
+            const nonHumanY = yFor(item.nonHuman);
+            const showLabel = index % labelInterval === 0 || index === data.length - 1;
+            return (
+              <g key={`${item.key || item.label}-${index}`}>
+                <rect x={humanX} y={humanY} width={barWidth} height={Math.max(0, padding.top + plotHeight - humanY)} rx="3" fill="#60a5fa">
+                  <title>{`${item.tooltipLabel || item.label} · Human: ${item.human} · Non-human: ${item.nonHuman} · Total: ${item.human + item.nonHuman}`}</title>
+                </rect>
+                <rect x={nonHumanX} y={nonHumanY} width={barWidth} height={Math.max(0, padding.top + plotHeight - nonHumanY)} rx="3" fill="#c084fc">
+                  <title>{`${item.tooltipLabel || item.label} · Human: ${item.human} · Non-human: ${item.nonHuman} · Total: ${item.human + item.nonHuman}`}</title>
+                </rect>
+                {showLabel && (
+                  <text x={center} y={height - 13} textAnchor="middle" fill="#64748b" fontSize="10">{item.label}</text>
+                )}
+              </g>
+            );
+          })}
+
+          {data.length > 1 && <polyline points={totalPoints} fill="none" stroke="#4ade80" strokeWidth="3.5" strokeLinejoin="round" strokeLinecap="round" />}
+          {data.map((item, index) => {
+            const x = padding.left + (index + 0.5) * slotWidth;
+            const y = yFor(item.human + item.nonHuman);
+            return (
+              <circle key={`total-${item.key || item.label}-${index}`} cx={x} cy={y} r="3.5" fill="#4ade80" stroke="white" strokeWidth="1.5">
+                <title>{`${item.tooltipLabel || item.label} · Total visits: ${item.human + item.nonHuman}`}</title>
+              </circle>
+            );
+          })}
+        </svg>
+        {humanTotal + nonHumanTotal === 0 && (
+          <p className="pointer-events-none absolute inset-x-0 top-1/2 -translate-y-1/2 text-center text-xs font-bold text-slate-400">No visits recorded for this period</p>
+        )}
+      </div>
+    </div>
+  );
+});
+
 
 // --- Main Application Component ---
 function App() {
@@ -1421,6 +1509,8 @@ function App() {
 
   // --- UI, Search & Filter States ---
   const [activeTab, setActiveTab] = useState('places');
+  const [trafficChartYear, setTrafficChartYear] = useState('');
+  const [trafficChartMonth, setTrafficChartMonth] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [referenceArticleSearch, setReferenceArticleSearch] = useState('');
   const [referenceArticlesLoading, setReferenceArticlesLoading] = useState(false);
@@ -6103,6 +6193,32 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
       .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
       .map(v => ({ ...v, ...parseUA(v) }));
 
+    const dailyTrafficByDate = new Map();
+    const monthlyTrafficByMonth = new Map();
+    const trafficYears = new Set([new Date().getFullYear()]);
+    let latestTrafficDate = null;
+    parsedData.forEach((visit) => {
+      const timestamp = Date.parse(visit?.created_at || '');
+      if (!Number.isFinite(timestamp)) return;
+      const date = new Date(timestamp);
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      const monthKey = `${year}-${month}`;
+      const dateKey = `${monthKey}-${day}`;
+      trafficYears.add(year);
+      if (latestTrafficDate === null || timestamp > latestTrafficDate) latestTrafficDate = timestamp;
+
+      const daily = dailyTrafficByDate.get(dateKey) || { human: 0, nonHuman: 0 };
+      const monthly = monthlyTrafficByMonth.get(monthKey) || { human: 0, nonHuman: 0 };
+      const series = visit.isBot ? 'nonHuman' : 'human';
+      daily[series] += 1;
+      monthly[series] += 1;
+      dailyTrafficByDate.set(dateKey, daily);
+      monthlyTrafficByMonth.set(monthKey, monthly);
+    });
+    const defaultTrafficDate = latestTrafficDate === null ? new Date() : new Date(latestTrafficDate);
+
     const humanVisits = parsedData.filter((visit) => !visit.isBot);
     const countryVisitGroups = new Map();
     const cityVisitGroups = new Map();
@@ -6227,6 +6343,11 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
       firstVisitAt,
       totalVisits: parsedData.length,
       humanVisitCount: humanVisits.length,
+      trafficYearOptions: [...trafficYears].sort((a, b) => b - a),
+      defaultTrafficYear: defaultTrafficDate.getFullYear(),
+      defaultTrafficMonth: defaultTrafficDate.getMonth() + 1,
+      dailyTrafficByDate: Object.fromEntries(dailyTrafficByDate),
+      monthlyTrafficByMonth: Object.fromEntries(monthlyTrafficByMonth),
       visitMapCountries,
       visitMapCities,
       totalSubscribers: safeSubscribers.length,
@@ -6252,6 +6373,42 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
       videoSharesSummary: aggregateVideoData(safeVideoShares)
     };
   }, [analyticsData, likesData, videoLikesData, videoSharesData, subscribersData, sharesData]);
+
+  const selectedTrafficYear = dashboardStats.trafficYearOptions.includes(Number(trafficChartYear))
+    ? Number(trafficChartYear)
+    : dashboardStats.defaultTrafficYear;
+  const selectedTrafficMonth = Number.isInteger(Number(trafficChartMonth))
+    && Number(trafficChartMonth) >= 1
+    && Number(trafficChartMonth) <= 12
+    ? Number(trafficChartMonth)
+    : dashboardStats.defaultTrafficMonth;
+  const selectedTrafficMonthDate = new Date(selectedTrafficYear, selectedTrafficMonth - 1, 1);
+  const selectedTrafficMonthKey = `${selectedTrafficYear}-${String(selectedTrafficMonth).padStart(2, '0')}`;
+  const selectedTrafficMonthLabel = selectedTrafficMonthDate.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+  const selectedTrafficDays = new Date(selectedTrafficYear, selectedTrafficMonth, 0).getDate();
+  const dailyTrafficChartData = Array.from({ length: selectedTrafficDays }, (_, index) => {
+    const day = index + 1;
+    const key = `${selectedTrafficMonthKey}-${String(day).padStart(2, '0')}`;
+    const traffic = dashboardStats.dailyTrafficByDate[key] || { human: 0, nonHuman: 0 };
+    return {
+      key,
+      label: String(day),
+      tooltipLabel: new Date(selectedTrafficYear, selectedTrafficMonth - 1, day)
+        .toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }),
+      ...traffic
+    };
+  });
+  const monthlyTrafficChartData = Array.from({ length: 12 }, (_, index) => {
+    const monthDate = new Date(selectedTrafficYear, index, 1);
+    const key = `${selectedTrafficYear}-${String(index + 1).padStart(2, '0')}`;
+    const traffic = dashboardStats.monthlyTrafficByMonth[key] || { human: 0, nonHuman: 0 };
+    return {
+      key,
+      label: monthDate.toLocaleDateString(undefined, { month: 'short' }),
+      tooltipLabel: monthDate.toLocaleDateString(undefined, { month: 'long', year: 'numeric' }),
+      ...traffic
+    };
+  });
 
   useEffect(() => {
     if (activeTab !== 'dashboard' || !dashboardTrafficMapContainerRef.current) return undefined;
@@ -8998,6 +9155,56 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                         </div>
                       </div>
                     </div>
+                  </div>
+                </section>
+
+                {/* 3. WEBSITE TRAFFIC CHARTS */}
+                <section className="lg:col-span-2 overflow-hidden rounded-[2.5rem] border border-green-100 bg-white p-5 shadow-xl sm:p-7">
+                  <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
+                    <div>
+                      <p className="mb-1 text-[10px] font-black uppercase tracking-widest text-green-700">Website Traffic</p>
+                      <h2 className="text-2xl font-black italic tracking-tight text-slate-900">Visits over time</h2>
+                      <p className="mt-1 text-xs font-medium text-slate-500">Compare human and non-human traffic by day or month.</p>
+                    </div>
+                    <div className="flex flex-wrap items-end gap-2">
+                      <label className="grid gap-1 text-[9px] font-black uppercase tracking-wider text-slate-500">
+                        Year
+                        <select
+                          value={selectedTrafficYear}
+                          onChange={(event) => setTrafficChartYear(event.target.value)}
+                          className="min-w-24 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold normal-case tracking-normal text-slate-800 outline-none transition focus:border-green-400 focus:ring-2 focus:ring-green-100"
+                        >
+                          {dashboardStats.trafficYearOptions.map((year) => <option key={year} value={year}>{year}</option>)}
+                        </select>
+                      </label>
+                      <label className="grid gap-1 text-[9px] font-black uppercase tracking-wider text-slate-500">
+                        Daily chart month
+                        <select
+                          value={selectedTrafficMonth}
+                          onChange={(event) => setTrafficChartMonth(event.target.value)}
+                          className="min-w-36 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold normal-case tracking-normal text-slate-800 outline-none transition focus:border-green-400 focus:ring-2 focus:ring-green-100"
+                        >
+                          {Array.from({ length: 12 }, (_, index) => (
+                            <option key={index + 1} value={index + 1}>
+                              {new Date(2000, index, 1).toLocaleDateString(undefined, { month: 'long' })}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+                    <TrafficComparisonChart
+                      title={`Visits by date · ${selectedTrafficMonthLabel}`}
+                      subtitle="Each bar pair is one calendar day. Hover over a bar or total marker for exact counts."
+                      data={dailyTrafficChartData}
+                    />
+                    <TrafficComparisonChart
+                      title={`Visits by month · ${selectedTrafficYear}`}
+                      subtitle="Monthly totals for the selected year, including months with no recorded visits."
+                      data={monthlyTrafficChartData}
+                    />
                   </div>
                 </section>
 
