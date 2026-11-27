@@ -1408,7 +1408,7 @@ const TrafficComparisonChart = React.memo(({ title, subtitle, data }) => {
           <p className="mt-1 text-[11px] font-medium text-slate-500">{subtitle}</p>
         </div>
         <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] font-bold text-slate-600">
-          <span className="inline-flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-sm bg-blue-400" />Likely human {humanTotal.toLocaleString()}</span>
+          <span className="inline-flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-sm bg-blue-400" />Human {humanTotal.toLocaleString()}</span>
           <span className="inline-flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-sm bg-purple-400" />Automated {nonHumanTotal.toLocaleString()}</span>
           <span className="inline-flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-sm bg-slate-400" />Unclassified {unknownTotal.toLocaleString()}</span>
           <span className="inline-flex items-center gap-1.5"><i className="h-0.5 w-3 rounded-full bg-green-400" />Total {(humanTotal + nonHumanTotal + unknownTotal).toLocaleString()}</span>
@@ -1442,13 +1442,13 @@ const TrafficComparisonChart = React.memo(({ title, subtitle, data }) => {
             return (
               <g key={`${item.key || item.label}-${index}`}>
                 <rect x={humanX} y={humanY} width={barWidth} height={Math.max(0, padding.top + plotHeight - humanY)} rx="3" fill="#60a5fa">
-                  <title>{`${item.tooltipLabel || item.label} · Likely human: ${item.human} · Automated: ${item.nonHuman} · Unclassified: ${item.unknown} · Total: ${item.human + item.nonHuman + item.unknown}`}</title>
+                  <title>{`${item.tooltipLabel || item.label} · Human: ${item.human} · Automated: ${item.nonHuman} · Unclassified: ${item.unknown} · Total: ${item.human + item.nonHuman + item.unknown}`}</title>
                 </rect>
                 <rect x={nonHumanX} y={nonHumanY} width={barWidth} height={Math.max(0, padding.top + plotHeight - nonHumanY)} rx="3" fill="#c084fc">
-                  <title>{`${item.tooltipLabel || item.label} · Likely human: ${item.human} · Automated: ${item.nonHuman} · Unclassified: ${item.unknown} · Total: ${item.human + item.nonHuman + item.unknown}`}</title>
+                  <title>{`${item.tooltipLabel || item.label} · Human: ${item.human} · Automated: ${item.nonHuman} · Unclassified: ${item.unknown} · Total: ${item.human + item.nonHuman + item.unknown}`}</title>
                 </rect>
                 <rect x={unknownX} y={unknownY} width={barWidth} height={Math.max(0, padding.top + plotHeight - unknownY)} rx="3" fill="#94a3b8">
-                  <title>{`${item.tooltipLabel || item.label} · Likely human: ${item.human} · Automated: ${item.nonHuman} · Unclassified: ${item.unknown} · Total: ${item.human + item.nonHuman + item.unknown}`}</title>
+                  <title>{`${item.tooltipLabel || item.label} · Human: ${item.human} · Automated: ${item.nonHuman} · Unclassified: ${item.unknown} · Total: ${item.human + item.nonHuman + item.unknown}`}</title>
                 </rect>
                 {showLabel && (
                   <text x={center} y={height - 13} textAnchor="middle" fill="#64748b" fontSize="10">{item.label}</text>
@@ -6198,7 +6198,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
       let type = 'Desktop';
       if (lowerUA.includes('tablet') || lowerUA.includes('ipad')) type = 'Tablet';
       else if (lowerUA.includes('mobile') || lowerUA.includes('android') || lowerUA.includes('iphone')) type = 'Mobile';
-      if (isBot) type = 'Bot/Server';
+      if (isBot) type = 'Server';
 
       let os = 'Other';
       if (rawUA.includes('Windows')) os = 'Windows';
@@ -6407,7 +6407,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
       pageHistory: getSortedMetrics(parsedData, 'normalizedPagePath')
         .filter(([path, count]) => count > 0 && path && path !== 'unknown'),
       os: getSortedMetrics(parsedData, 'os'),
-      trafficType: getSortedMetrics(parsedData, v => v.isBot ? 'Automated / Non-human' : v.isHuman ? 'Likely Human' : 'Unclassified'),
+      trafficType: getSortedMetrics(parsedData, v => v.isBot ? 'Automated' : v.isHuman ? 'Human' : 'Unclassified'),
       likesSummary: aggregateLocationData(safeLikes),
       sharesSummary: aggregateLocationData(safeShares, true),
       videoLikesSummary: aggregateVideoData(safeVideoLikes),
@@ -8818,7 +8818,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
         {activeTab === 'dashboard' && (() => {
           // Centralized Traffic calculations for sharing across Summary Bar & Traffic Block
           const trafficEntries = dashboardStats.trafficType || [];
-          const realCount = trafficEntries.find(([type]) => type === 'Likely Human')?.[1] || 0;
+          const realCount = trafficEntries.find(([type]) => type === 'Human')?.[1] || 0;
           const calculatedTotal = trafficEntries.reduce((acc, [, count]) => acc + count, 0);
           const verifiedPercentage = calculatedTotal > 0
             ? Math.min(Math.round((realCount / calculatedTotal) * 100), 100)
@@ -9022,7 +9022,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                       highlightValue={dashboardStats.latest?.os}
                     />
                     <MetricColumn
-                      title="App / Source"
+                      title="Source"
                       data={dashboardStats.sources}
                       highlightValue={dashboardStats.latest?.source}
                     />
@@ -9046,8 +9046,8 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                         {(dashboardStats.trafficType || []).map(([type, count]) => {
                           const isLatestTraffic =
                             dashboardStats.latest &&
-                            ((dashboardStats.latest.isBot && type === 'Automated / Non-human') ||
-                              (dashboardStats.latest.isHuman && type === 'Likely Human') ||
+                            ((dashboardStats.latest.isBot && type === 'Automated') ||
+                              (dashboardStats.latest.isHuman && type === 'Human') ||
                               (!dashboardStats.latest.isBot && !dashboardStats.latest.isHuman && type === 'Unclassified'));
 
                           return (
@@ -9057,7 +9057,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                             >
                               <span
                                 className={
-                                  type === 'Likely Human' ? 'text-emerald-400' : type === 'Unclassified' ? 'text-slate-300' : 'text-rose-400'
+                                  type === 'Human' ? 'text-emerald-400' : type === 'Unclassified' ? 'text-slate-300' : 'text-rose-400'
                                 }
                               >
                                 {type}
@@ -9090,7 +9090,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                       </p>
                     </div>
                     <div className="flex items-center gap-4 rounded-full bg-orange-50 px-4 py-2 text-[10px] font-black uppercase tracking-wide text-orange-900">
-                      <span>{dashboardStats.humanVisitCount.toLocaleString()} likely human visits</span>
+                      <span>{dashboardStats.humanVisitCount.toLocaleString()} total visits</span>
                       <span className="h-3 w-px bg-orange-200" />
                       <span>{dashboardStats.visitMapCountries.length.toLocaleString()} countries</span>
                       <span className="h-3 w-px bg-orange-200" />
