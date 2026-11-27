@@ -291,12 +291,15 @@ const TRAFFIC_BOT_RULES = [
   { source: 'Meta Scraper', patterns: ['facebookexternalhit', 'facebookbot', 'facebot', 'meta-externalagent', 'meta-externalfetcher', 'meta-webindexer', 'meta-externalads'] },
   { source: 'Twitter Bot', patterns: ['twitterbot'] },
   { source: 'Bing Bot', patterns: ['bingbot', 'msnbot'] },
-  { source: 'AI Crawler', patterns: ['gptbot', 'chatgpt', 'claudebot', 'anthropic', 'perplexitybot', 'bytespider', 'cohere-ai'] },
-  { source: 'SEO & Audit Tool', patterns: ['ahrefsbot', 'semrushbot', 'screaming frog', 'gtmetrix', 'lighthouse', 'clarity', 'inspect', 'preview'] },
+  { source: 'AI Crawler', patterns: ['gptbot', 'oai-searchbot', 'chatgpt-user', 'claudebot', 'claude-user', 'anthropic-ai', 'perplexitybot', 'perplexity-user', 'bytespider', 'cohere-ai'] },
+  { source: 'SEO & Audit Tool', patterns: ['ahrefsbot', 'semrushbot', 'screaming frog', 'gtmetrix', 'lighthouse', 'pagespeed', 'siteaudit', 'sitechecker', 'google-inspectiontool'] },
+  { source: 'Automated Browser', patterns: ['headlesschrome', 'headlessfirefox', 'phantomjs', 'selenium', 'webdriver', 'puppeteer', 'playwright'] },
+  { source: 'Automated Client', patterns: ['python-requests', 'python-urllib', 'go-http-client', 'scrapy', 'curl/', 'wget/'] },
   { source: 'Pinterest Bot', patterns: ['pinterestbot'] },
   { source: 'Other Search Engine', patterns: ['baiduspider', 'yandexbot', 'duckduckbot', 'slurp', 'sogou'] },
-  { source: 'Generic Bot', patterns: ['bot', 'spider', 'crawl', 'headless', 'ia_archiver'] }
+  { source: 'Generic Bot', patterns: ['bot', 'spider', 'crawl', 'ia_archiver'] }
 ];
+const TRAFFIC_BROWSER_UA_PATTERN = /(mozilla\/5\.0|applewebkit\/|chrome\/|crios\/|safari\/|firefox\/|fxios\/|edg(e|a|ios)?\/|opr\/|opera|samsungbrowser\/|ucbrowser\/|miuibrowser\/)/i;
 
 const parseUATrafficSource = (v = {}) => {
   const rawUA = v.user_agent || '';
@@ -306,29 +309,21 @@ const parseUATrafficSource = (v = {}) => {
   const utmSource = (v.utm_source || v.source || '').toLowerCase();
   const utmMedium = (v.utm_medium || v.medium || '').toLowerCase();
   const subscriberToken = v.subscriber_email || v.sub_id || '';
-  const ip = String(v.ip_address || '');
-  const isDataCenterNetwork =
-    ip.startsWith('66.220.') || ip.startsWith('173.252.') ||
-    ip.startsWith('31.13.') || ip.startsWith('66.249.') ||
-    ip.startsWith('74.125.') || ip.startsWith('69.171.') ||
-    ip.startsWith('34.') || ip.startsWith('35.') ||
-    ip.startsWith('104.') || ip.startsWith('20.') ||
-    ip.startsWith('3.') || ip.startsWith('52.') || ip.startsWith('54.');
-
   const detectedBotSource = TRAFFIC_BOT_RULES.find((rule) =>
     rule.patterns.some((pattern) => lowerUA.includes(pattern))
   )?.source || null;
+  const webdriverSignal = v.is_webdriver === true
+    || v.is_webdriver === 1
+    || String(v.is_webdriver || '').toLowerCase() === 'true';
   const isBot = Boolean(detectedBotSource)
-    || lowerUA.includes('headlesschrome')
-    || v.is_webdriver === true
-    || isDataCenterNetwork;
+    || webdriverSignal;
+  const isHuman = !isBot && TRAFFIC_BROWSER_UA_PATTERN.test(rawUA);
 
   let source;
   if (isBot) {
-    if (detectedBotSource) source = detectedBotSource;
-    else if (ip.startsWith('31.13.') || ip.startsWith('66.220.')) source = 'Meta Scraper';
-    else if (ip.startsWith('66.249.') || ip.startsWith('74.125.')) source = 'Google Bot';
-    else source = 'Automated Crawler';
+    source = detectedBotSource || 'Automated Browser';
+  } else if (!isHuman) {
+    source = 'Unclassified';
   } else if (
     utmSource.includes('newsletter') ||
     utmSource.includes('email') ||
@@ -365,7 +360,7 @@ const parseUATrafficSource = (v = {}) => {
     source = 'Direct';
   }
 
-  return { source, isBot };
+  return { source, isBot, isHuman };
 };
 
 const normalizeTrafficPagePath = (path = '') => String(path).toLowerCase().split('?')[0];
@@ -639,11 +634,19 @@ const getErrorLogTrafficSource = (log = {}, analyticsVisits = []) => {
     };
   }
 
-  const source = traffic.source === 'Direct' ? 'Real Person' : `Real Person · ${traffic.source}`;
+  if (!traffic.isHuman) {
+    return {
+      label: 'Unclassified Source',
+      className: 'bg-slate-100 text-slate-700',
+      detail: 'Traffic source cannot be confidently classified because it has no recognized browser or automation signal.'
+    };
+  }
+
+  const source = traffic.source === 'Direct' ? 'Likely Human' : `Likely Human · ${traffic.source}`;
   return {
     label: source,
     className: 'bg-emerald-100 text-emerald-800',
-    detail: `Traffic Intelligence parseUA classifies this as a real-person visit${traffic.source === 'Direct' ? '' : ` from ${traffic.source}`}.`
+    detail: `Traffic Intelligence parseUA classifies this as a likely human browser visit${traffic.source === 'Direct' ? '' : ` from ${traffic.source}`}.`
   };
 };
 
@@ -1382,18 +1385,19 @@ const TrafficComparisonChart = React.memo(({ title, subtitle, data }) => {
   const padding = { top: 20, right: 16, bottom: 38, left: 48 };
   const plotWidth = width - padding.left - padding.right;
   const plotHeight = height - padding.top - padding.bottom;
-  const maxValue = Math.max(1, ...data.map((item) => item.human + item.nonHuman));
+  const maxValue = Math.max(1, ...data.map((item) => item.human + item.nonHuman + item.unknown));
   const tickStep = Math.max(1, Math.ceil(maxValue / 4));
   const axisMax = tickStep * 4;
   const slotWidth = plotWidth / Math.max(data.length, 1);
-  const barWidth = Math.max(2, Math.min(18, slotWidth * 0.28));
+  const barWidth = Math.max(2, Math.min(14, slotWidth * 0.2));
   const yFor = (value) => padding.top + plotHeight - (value / axisMax) * plotHeight;
   const humanTotal = data.reduce((total, item) => total + item.human, 0);
   const nonHumanTotal = data.reduce((total, item) => total + item.nonHuman, 0);
+  const unknownTotal = data.reduce((total, item) => total + item.unknown, 0);
   const labelInterval = data.length > 24 ? 5 : data.length > 14 ? 3 : data.length > 8 ? 2 : 1;
   const totalPoints = data.map((item, index) => {
     const x = padding.left + (index + 0.5) * slotWidth;
-    return `${x},${yFor(item.human + item.nonHuman)}`;
+    return `${x},${yFor(item.human + item.nonHuman + item.unknown)}`;
   }).join(' ');
 
   return (
@@ -1404,14 +1408,15 @@ const TrafficComparisonChart = React.memo(({ title, subtitle, data }) => {
           <p className="mt-1 text-[11px] font-medium text-slate-500">{subtitle}</p>
         </div>
         <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] font-bold text-slate-600">
-          <span className="inline-flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-sm bg-blue-400" />Human {humanTotal.toLocaleString()}</span>
-          <span className="inline-flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-sm bg-purple-400" />Non-human {nonHumanTotal.toLocaleString()}</span>
-          <span className="inline-flex items-center gap-1.5"><i className="h-0.5 w-3 rounded-full bg-green-400" />Total {(humanTotal + nonHumanTotal).toLocaleString()}</span>
+          <span className="inline-flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-sm bg-blue-400" />Likely human {humanTotal.toLocaleString()}</span>
+          <span className="inline-flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-sm bg-purple-400" />Automated {nonHumanTotal.toLocaleString()}</span>
+          <span className="inline-flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-sm bg-slate-400" />Unclassified {unknownTotal.toLocaleString()}</span>
+          <span className="inline-flex items-center gap-1.5"><i className="h-0.5 w-3 rounded-full bg-green-400" />Total {(humanTotal + nonHumanTotal + unknownTotal).toLocaleString()}</span>
         </div>
       </div>
 
       <div className="relative">
-        <svg className="h-56 w-full overflow-visible sm:h-64" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${title}: human and non-human website visits`}>
+        <svg className="h-56 w-full overflow-visible sm:h-64" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${title}: likely human, automated, and unclassified website visits`}>
           {[0, 1, 2, 3, 4].map((tick) => {
             const value = tickStep * tick;
             const y = yFor(value);
@@ -1425,18 +1430,25 @@ const TrafficComparisonChart = React.memo(({ title, subtitle, data }) => {
 
           {data.map((item, index) => {
             const center = padding.left + (index + 0.5) * slotWidth;
-            const humanX = center - barWidth - 1;
-            const nonHumanX = center + 1;
+            const groupWidth = barWidth * 3 + 4;
+            const firstX = center - groupWidth / 2;
+            const humanX = firstX;
+            const nonHumanX = firstX + barWidth + 2;
+            const unknownX = firstX + (barWidth + 2) * 2;
             const humanY = yFor(item.human);
             const nonHumanY = yFor(item.nonHuman);
+            const unknownY = yFor(item.unknown);
             const showLabel = index % labelInterval === 0 || index === data.length - 1;
             return (
               <g key={`${item.key || item.label}-${index}`}>
                 <rect x={humanX} y={humanY} width={barWidth} height={Math.max(0, padding.top + plotHeight - humanY)} rx="3" fill="#60a5fa">
-                  <title>{`${item.tooltipLabel || item.label} · Human: ${item.human} · Non-human: ${item.nonHuman} · Total: ${item.human + item.nonHuman}`}</title>
+                  <title>{`${item.tooltipLabel || item.label} · Likely human: ${item.human} · Automated: ${item.nonHuman} · Unclassified: ${item.unknown} · Total: ${item.human + item.nonHuman + item.unknown}`}</title>
                 </rect>
                 <rect x={nonHumanX} y={nonHumanY} width={barWidth} height={Math.max(0, padding.top + plotHeight - nonHumanY)} rx="3" fill="#c084fc">
-                  <title>{`${item.tooltipLabel || item.label} · Human: ${item.human} · Non-human: ${item.nonHuman} · Total: ${item.human + item.nonHuman}`}</title>
+                  <title>{`${item.tooltipLabel || item.label} · Likely human: ${item.human} · Automated: ${item.nonHuman} · Unclassified: ${item.unknown} · Total: ${item.human + item.nonHuman + item.unknown}`}</title>
+                </rect>
+                <rect x={unknownX} y={unknownY} width={barWidth} height={Math.max(0, padding.top + plotHeight - unknownY)} rx="3" fill="#94a3b8">
+                  <title>{`${item.tooltipLabel || item.label} · Likely human: ${item.human} · Automated: ${item.nonHuman} · Unclassified: ${item.unknown} · Total: ${item.human + item.nonHuman + item.unknown}`}</title>
                 </rect>
                 {showLabel && (
                   <text x={center} y={height - 13} textAnchor="middle" fill="#64748b" fontSize="10">{item.label}</text>
@@ -1448,15 +1460,15 @@ const TrafficComparisonChart = React.memo(({ title, subtitle, data }) => {
           {data.length > 1 && <polyline points={totalPoints} fill="none" stroke="#4ade80" strokeWidth="3.5" strokeLinejoin="round" strokeLinecap="round" />}
           {data.map((item, index) => {
             const x = padding.left + (index + 0.5) * slotWidth;
-            const y = yFor(item.human + item.nonHuman);
+            const y = yFor(item.human + item.nonHuman + item.unknown);
             return (
               <circle key={`total-${item.key || item.label}-${index}`} cx={x} cy={y} r="3.5" fill="#4ade80" stroke="white" strokeWidth="1.5">
-                <title>{`${item.tooltipLabel || item.label} · Total visits: ${item.human + item.nonHuman}`}</title>
+                <title>{`${item.tooltipLabel || item.label} · Total visits: ${item.human + item.nonHuman + item.unknown}`}</title>
               </circle>
             );
           })}
         </svg>
-        {humanTotal + nonHumanTotal === 0 && (
+        {humanTotal + nonHumanTotal + unknownTotal === 0 && (
           <p className="pointer-events-none absolute inset-x-0 top-1/2 -translate-y-1/2 text-center text-xs font-bold text-slate-400">No visits recorded for this period</p>
         )}
       </div>
@@ -1493,6 +1505,7 @@ function App() {
   const [savedRoutes, setSavedRoutes] = useState([]);
   const [pendingApprovals, setPendingApprovals] = useState([]);
   const [analyticsData, setAnalyticsData] = useState([]);
+  const [dashboardTrafficFetchError, setDashboardTrafficFetchError] = useState('');
   const [allComments, setAllComments] = useState([]);
   const [likesData, setLikesData] = useState([]);
   const [sharesData, setSharesData] = useState([]);
@@ -3629,7 +3642,7 @@ const REFRESH_INTERVAL_SECONDS = 600;
 
   /**
  * Helper function to bypass Supabase's default 1000-row limit.
- * Fetches all records from a specified table in chunks.
+ * Fetches all records from a specified table in stable cursor-based chunks.
  *
  * @param {string} tableName - The name of the Supabase table.
  * @param {string} orderByColumn - The column to sort by (default: 'created_at').
@@ -3639,23 +3652,34 @@ const REFRESH_INTERVAL_SECONDS = 600;
  */
   const fetchAllRecords = React.useCallback(async (tableName, orderByColumn = 'created_at', ascending = false, selectColumns = '*') => {
     let allData = [];
-    let from = 0;
+    let cursor = null;
     const step = 1000;
     let hasMore = true;
 
     while (hasMore) {
-      const { data, error } = await supabaseClient
+      let query = supabaseClient
         .from(tableName)
         .select(selectColumns)
         .order(orderByColumn, { ascending })
-        .range(from, from + step - 1);
+        .order('id', { ascending })
+        .limit(step);
+
+      if (cursor) {
+        const comparison = ascending ? 'gt' : 'lt';
+        const cursorValue = cursor[orderByColumn];
+        query = query.or(
+          `${orderByColumn}.${comparison}.${cursorValue},and(${orderByColumn}.eq.${cursorValue},id.${comparison}.${cursor.id})`
+        );
+      }
+
+      const { data, error } = await query;
 
       // Throw error to be caught by the try-catch block in refreshAllData
       if (error) throw error;
 
       if (data && data.length > 0) {
         allData.push(...data);
-        from += step;
+        cursor = data[data.length - 1];
       }
 
       // Stop fetching if the returned data is less than the chunk size (meaning we hit the end)
@@ -3666,6 +3690,22 @@ const REFRESH_INTERVAL_SECONDS = 600;
 
     return allData;
   }, []);
+
+  const fetchDashboardPageVisits = React.useCallback(async () => {
+    try {
+      const visits = await fetchAllRecords('page_visits', 'created_at', false, '*');
+      setDashboardTrafficFetchError('');
+      return visits;
+    } catch (error) {
+      setDashboardTrafficFetchError(error?.message || 'Could not fetch visit history from Supabase.');
+      logClientError(error, {
+        errorType: 'Dashboard traffic fetch',
+        source: 'page_visits',
+        context: { task: 'dashboard-traffic', action: 'fetch-visits', page_size: 1000 }
+      });
+      return null;
+    }
+  }, [fetchAllRecords]);
 
   /**
    * Synchronizes all application data from Supabase.
@@ -3699,7 +3739,7 @@ const REFRESH_INTERVAL_SECONDS = 600;
       // Load dashboard history after the core places/routes are visible so a large
       // analytics table cannot hold the rest of the app behind one long request.
       const [pageVisits, a, c, l, sub, sh, videoLikes, videoShares] = await Promise.all([
-        fetchInteractionRecords('page_visits', '*'),
+        fetchDashboardPageVisits(),
         supabaseClient.from('pending_approvals').select('*').order('created_at', { ascending: false }),
         supabaseClient.from('location_comments').select('*, travel_bucket_list(place_name)').order('created_at', { ascending: false }),
         fetchInteractionRecords('location_likes', '*, travel_bucket_list(place_name, category)'),
@@ -3711,7 +3751,7 @@ const REFRESH_INTERVAL_SECONDS = 600;
 
       if (sub.error) console.error("Subscribers fetch error:", sub.error);
 
-      setAnalyticsData(pageVisits || []);
+      if (pageVisits !== null) setAnalyticsData(pageVisits);
       setPendingApprovals(a.data || []);
       setAllComments(c.data || []);
       setLikesData(l || []);
@@ -3726,7 +3766,7 @@ const REFRESH_INTERVAL_SECONDS = 600;
     } finally {
       refreshAllDataInProgressRef.current = false;
     }
-  }, [fetchAllRecords, triggerToast]);
+  }, [fetchAllRecords, fetchDashboardPageVisits, triggerToast]);
 
   const loadSavedReferenceArticles = React.useCallback(async () => {
     setReferenceArticlesLoading(true);
@@ -3880,7 +3920,7 @@ const REFRESH_INTERVAL_SECONDS = 600;
 
     try {
       const [pageVisits, approvals, comments, likes, subscribers, shares, videoLikes, videoShares] = await Promise.all([
-        fetchInteractionRecords('page_visits', '*'),
+        fetchDashboardPageVisits(),
         supabaseClient.from('pending_approvals').select('*').order('created_at', { ascending: false }),
         supabaseClient.from('location_comments').select('*, travel_bucket_list(place_name)').order('created_at', { ascending: false }),
         fetchInteractionRecords('location_likes', '*, travel_bucket_list(place_name, category)'),
@@ -3894,7 +3934,7 @@ const REFRESH_INTERVAL_SECONDS = 600;
       if (comments.error) console.error('Location comments fetch error:', comments.error);
       if (subscribers.error) console.error('Subscribers fetch error:', subscribers.error);
 
-      setAnalyticsData(pageVisits);
+      if (pageVisits !== null) setAnalyticsData(pageVisits);
       setPendingApprovals(approvals.data || []);
       setAllComments(comments.data || []);
       setLikesData(likes);
@@ -3908,7 +3948,7 @@ const REFRESH_INTERVAL_SECONDS = 600;
     } finally {
       refreshDashboardDataInProgressRef.current = false;
     }
-  }, [fetchAllRecords, triggerToast]);
+  }, [fetchAllRecords, fetchDashboardPageVisits, triggerToast]);
 
   const bulkGenerateSlugs = async () => {
     // Target places that are 'done' but missing a slug in the database
@@ -6152,7 +6192,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
         loyaltyStatus = "Unique Visit";
       }
 
-      const { source: finalSource, isBot } = parseUATrafficSource(v);
+      const { source: finalSource, isBot, isHuman } = parseUATrafficSource(v);
 
       // 5. Device and OS Resolution
       let type = 'Desktop';
@@ -6179,6 +6219,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
         source: finalSource || 'Direct',
         os,
         isBot,
+        isHuman,
         loyaltyStatus,
         country,
         region: v.region || "",
@@ -6209,9 +6250,9 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
       trafficYears.add(year);
       if (latestTrafficDate === null || timestamp > latestTrafficDate) latestTrafficDate = timestamp;
 
-      const daily = dailyTrafficByDate.get(dateKey) || { human: 0, nonHuman: 0 };
-      const monthly = monthlyTrafficByMonth.get(monthKey) || { human: 0, nonHuman: 0 };
-      const series = visit.isBot ? 'nonHuman' : 'human';
+      const daily = dailyTrafficByDate.get(dateKey) || { human: 0, nonHuman: 0, unknown: 0 };
+      const monthly = monthlyTrafficByMonth.get(monthKey) || { human: 0, nonHuman: 0, unknown: 0 };
+      const series = visit.isBot ? 'nonHuman' : visit.isHuman ? 'human' : 'unknown';
       daily[series] += 1;
       monthly[series] += 1;
       dailyTrafficByDate.set(dateKey, daily);
@@ -6219,7 +6260,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
     });
     const defaultTrafficDate = latestTrafficDate === null ? new Date() : new Date(latestTrafficDate);
 
-    const humanVisits = parsedData.filter((visit) => !visit.isBot);
+    const humanVisits = parsedData.filter((visit) => visit.isHuman);
     const countryVisitGroups = new Map();
     const cityVisitGroups = new Map();
     humanVisits.forEach((visit) => {
@@ -6366,7 +6407,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
       pageHistory: getSortedMetrics(parsedData, 'normalizedPagePath')
         .filter(([path, count]) => count > 0 && path && path !== 'unknown'),
       os: getSortedMetrics(parsedData, 'os'),
-      trafficType: getSortedMetrics(parsedData, v => v.isBot ? 'Bot/Crawler' : 'Real Person'),
+      trafficType: getSortedMetrics(parsedData, v => v.isBot ? 'Automated / Non-human' : v.isHuman ? 'Likely Human' : 'Unclassified'),
       likesSummary: aggregateLocationData(safeLikes),
       sharesSummary: aggregateLocationData(safeShares, true),
       videoLikesSummary: aggregateVideoData(safeVideoLikes),
@@ -6389,7 +6430,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
   const dailyTrafficChartData = Array.from({ length: selectedTrafficDays }, (_, index) => {
     const day = index + 1;
     const key = `${selectedTrafficMonthKey}-${String(day).padStart(2, '0')}`;
-    const traffic = dashboardStats.dailyTrafficByDate[key] || { human: 0, nonHuman: 0 };
+    const traffic = dashboardStats.dailyTrafficByDate[key] || { human: 0, nonHuman: 0, unknown: 0 };
     return {
       key,
       label: String(day),
@@ -6401,7 +6442,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
   const monthlyTrafficChartData = Array.from({ length: 12 }, (_, index) => {
     const monthDate = new Date(selectedTrafficYear, index, 1);
     const key = `${selectedTrafficYear}-${String(index + 1).padStart(2, '0')}`;
-    const traffic = dashboardStats.monthlyTrafficByMonth[key] || { human: 0, nonHuman: 0 };
+    const traffic = dashboardStats.monthlyTrafficByMonth[key] || { human: 0, nonHuman: 0, unknown: 0 };
     return {
       key,
       label: monthDate.toLocaleDateString(undefined, { month: 'short' }),
@@ -8777,7 +8818,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
         {activeTab === 'dashboard' && (() => {
           // Centralized Traffic calculations for sharing across Summary Bar & Traffic Block
           const trafficEntries = dashboardStats.trafficType || [];
-          const realCount = trafficEntries.find(([type]) => type === 'Real Person')?.[1] || 0;
+          const realCount = trafficEntries.find(([type]) => type === 'Likely Human')?.[1] || 0;
           const calculatedTotal = trafficEntries.reduce((acc, [, count]) => acc + count, 0);
           const verifiedPercentage = calculatedTotal > 0
             ? Math.min(Math.round((realCount / calculatedTotal) * 100), 100)
@@ -8914,6 +8955,12 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                 <div className="bg-slate-900 rounded-[2.5rem] p-8 text-white shadow-xl relative overflow-hidden lg:col-span-2">
                   <div className="absolute -top-20 -right-20 w-64 h-64 bg-indigo-500 rounded-full blur-3xl opacity-20" />
 
+                  {dashboardTrafficFetchError && (
+                    <div role="alert" className="relative z-10 mb-5 rounded-2xl border border-rose-400/30 bg-rose-500/10 px-4 py-3 text-xs font-semibold text-rose-100">
+                      Visit data could not be refreshed. Showing the last successfully loaded {analyticsData.length.toLocaleString()} records. {dashboardTrafficFetchError}
+                    </div>
+                  )}
+
                   <div className="flex justify-between items-start mb-10 relative z-10">
                     <div>
                       <p className="text-[10px] font-black uppercase text-indigo-400 mb-1 tracking-widest">
@@ -8999,8 +9046,9 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                         {(dashboardStats.trafficType || []).map(([type, count]) => {
                           const isLatestTraffic =
                             dashboardStats.latest &&
-                            ((dashboardStats.latest.isBot && type !== 'Real Person') ||
-                              (!dashboardStats.latest.isBot && type === 'Real Person'));
+                            ((dashboardStats.latest.isBot && type === 'Automated / Non-human') ||
+                              (dashboardStats.latest.isHuman && type === 'Likely Human') ||
+                              (!dashboardStats.latest.isBot && !dashboardStats.latest.isHuman && type === 'Unclassified'));
 
                           return (
                             <div
@@ -9009,7 +9057,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                             >
                               <span
                                 className={
-                                  type === 'Real Person' ? 'text-emerald-400' : 'text-rose-400'
+                                  type === 'Likely Human' ? 'text-emerald-400' : type === 'Unclassified' ? 'text-slate-300' : 'text-rose-400'
                                 }
                               >
                                 {type}
@@ -9038,11 +9086,11 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                       <p className="mb-1 text-[10px] font-black uppercase tracking-widest text-orange-600">Visit Geography</p>
                       <h2 className="text-2xl font-black italic tracking-tight text-slate-900">Where visitors are coming from</h2>
                       <p className="mt-1 text-xs font-medium text-slate-500">
-                        Country markers use approximate centers; zoom in to mark the country’s top cities by visits.
+                        Shows likely human browser visits only. Country markers use approximate centers; zoom in to mark the country’s top cities.
                       </p>
                     </div>
                     <div className="flex items-center gap-4 rounded-full bg-orange-50 px-4 py-2 text-[10px] font-black uppercase tracking-wide text-orange-900">
-                      <span>{dashboardStats.humanVisitCount.toLocaleString()} visits</span>
+                      <span>{dashboardStats.humanVisitCount.toLocaleString()} likely human visits</span>
                       <span className="h-3 w-px bg-orange-200" />
                       <span>{dashboardStats.visitMapCountries.length.toLocaleString()} countries</span>
                       <span className="h-3 w-px bg-orange-200" />
@@ -9164,7 +9212,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                     <div>
                       <p className="mb-1 text-[10px] font-black uppercase tracking-widest text-green-700">Website Traffic</p>
                       <h2 className="text-2xl font-black italic tracking-tight text-slate-900">Visits over time</h2>
-                      <p className="mt-1 text-xs font-medium text-slate-500">Compare human and non-human traffic by day or month.</p>
+                      <p className="mt-1 text-xs font-medium text-slate-500">Counts are logged page openings, not unique visitors. Browser signatures count as likely human, known automation signals as non-human, and unclear records are shown separately. The client logger may exclude recognized crawlers before logging.</p>
                     </div>
                     <div className="flex flex-wrap items-end gap-2">
                       <label className="grid gap-1 text-[9px] font-black uppercase tracking-wider text-slate-500">
@@ -9197,12 +9245,12 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                   <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
                     <TrafficComparisonChart
                       title={`Visits by date · ${selectedTrafficMonthLabel}`}
-                      subtitle="Each bar pair is one calendar day. Hover over a bar or total marker for exact counts."
+                      subtitle="Three bars show each date’s classification. Hover over a bar or total marker for exact counts."
                       data={dailyTrafficChartData}
                     />
                     <TrafficComparisonChart
                       title={`Visits by month · ${selectedTrafficYear}`}
-                      subtitle="Monthly totals for the selected year, including months with no recorded visits."
+                      subtitle="Monthly classified totals for the selected year, including months with no recorded visits."
                       data={monthlyTrafficChartData}
                     />
                   </div>
