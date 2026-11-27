@@ -9090,7 +9090,7 @@ Return JSON only: {"value_m": positive number, "basis": "AI estimate"}.`;
                       </p>
                     </div>
                     <div className="flex items-center gap-4 rounded-full bg-orange-50 px-4 py-2 text-[10px] font-black uppercase tracking-wide text-orange-900">
-                      <span>{dashboardStats.humanVisitCount.toLocaleString()} total visits</span>
+                      <span>{dashboardStats.humanVisitCount.toLocaleString()} visits</span>
                       <span className="h-3 w-px bg-orange-200" />
                       <span>{dashboardStats.visitMapCountries.length.toLocaleString()} countries</span>
                       <span className="h-3 w-px bg-orange-200" />
